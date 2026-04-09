@@ -99,7 +99,7 @@ export default function App() {
     setIsScanning(true);
     setDiscoveredDevices([]); 
     try {
-        let prefixes = ['192.168.1.', '192.168.0.', '192.168.100.', '10.0.0.'];
+        let prefixes = ['192.168.1.', '192.168.0.', '192.168.100.'];
         const ipInfo = await Network.getIpAddressAsync();
         if (ipInfo && ipInfo !== '0.0.0.0' && ipInfo.includes('.')) {
             const currentPrefix = ipInfo.split('.').slice(0, 3).join('.') + '.';
@@ -109,13 +109,22 @@ export default function App() {
         const pingIp = (targetIp) => {
             return new Promise((resolve) => {
                 let finished = false;
-                const timer = setTimeout(() => { if (!finished) resolve(null); }, 1800);
+                const controller = new AbortController();
+                const timer = setTimeout(() => { 
+                    if (!finished) {
+                        try { controller.abort(); } catch(e){}
+                        finished = true; 
+                        resolve(null); 
+                    }
+                }, 450); // LAN pings take < 50ms. 450ms cleanly drops dead IPs without queue lag.
                 
-                fetch(`http://${targetIp}:8000/`)
+                fetch(`http://${targetIp}:8000/`, { signal: controller.signal })
                     .then(res => res.json())
                     .then(data => {
+                        if (finished) return;
+                        clearTimeout(timer);
                         finished = true;
-                        if (data.status === 'ok') {
+                        if (data && data.status === 'ok') {
                             setDiscoveredDevices(prev => {
                                if (!prev.find(d => d.ip === targetIp)) return [...prev, { ip: targetIp, hostname: data.hostname }];
                                return prev;
@@ -123,16 +132,21 @@ export default function App() {
                         }
                         resolve(null);
                     })
-                    .catch(() => { finished = true; resolve(null); });
+                    .catch(() => { 
+                        if (finished) return;
+                        clearTimeout(timer);
+                        finished = true; 
+                        resolve(null); 
+                    });
             });
         };
 
-        const ipsToScan = [];
+        const ipsToScan = ['10.0.2.2']; // Bypass routing for Android Emulators automatically
         for (const prefix of prefixes) {
             for (let i = 1; i <= 254; i++) ipsToScan.push(`${prefix}${i}`);
         }
 
-        const batchSize = 50; 
+        const batchSize = 65; // Massive parallel lane since we rely on ultra-fast explicit native aborts
         for (let i = 0; i < ipsToScan.length; i += batchSize) {
            await Promise.all(ipsToScan.slice(i, i + batchSize).map(pingIp));
         }
