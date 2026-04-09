@@ -1,0 +1,8 @@
+fastapi
+uvicorn
+pycaw
+comtypes
+pyautogui
+psutil
+pystray
+Pillow
