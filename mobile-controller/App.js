@@ -42,6 +42,7 @@ export default function App() {
   // Network Discovery
   const [discoveredDevices, setDiscoveredDevices] = useState([]);
   const [isScanning, setIsScanning] = useState(false);
+  const [showManualInput, setShowManualInput] = useState(false);
   
   // Pairing logic
   const [pairingModalOpen, setPairingModalOpen] = useState(false);
@@ -102,25 +103,28 @@ export default function App() {
         const ipInfo = await Network.getIpAddressAsync();
         if (ipInfo && ipInfo !== '0.0.0.0' && ipInfo.includes('.')) {
             const currentPrefix = ipInfo.split('.').slice(0, 3).join('.') + '.';
-            if (!prefixes.includes(currentPrefix)) prefixes.unshift(currentPrefix); // Prioritize actual device subnet
+            if (!prefixes.includes(currentPrefix)) prefixes.unshift(currentPrefix);
         }
-        
-        const pingIp = async (targetIp) => {
-            const controller = new AbortController();
-            const id = setTimeout(() => controller.abort(), 2000); 
-            try {
-                const res = await fetch(`http://${targetIp}:8000/`, { signal: controller.signal });
-                const data = await res.json();
-                if (data.status === 'ok') {
-                     setDiscoveredDevices(prev => {
-                         if (!prev.find(d => d.ip === targetIp)) return [...prev, { ip: targetIp, hostname: data.hostname }];
-                         return prev;
-                     });
-                }
-            } catch (e) {
-            } finally {
-                clearTimeout(id);
-            }
+
+        const pingIp = (targetIp) => {
+            return new Promise((resolve) => {
+                let finished = false;
+                const timer = setTimeout(() => { if (!finished) resolve(null); }, 1800);
+                
+                fetch(`http://${targetIp}:8000/`)
+                    .then(res => res.json())
+                    .then(data => {
+                        finished = true;
+                        if (data.status === 'ok') {
+                            setDiscoveredDevices(prev => {
+                               if (!prev.find(d => d.ip === targetIp)) return [...prev, { ip: targetIp, hostname: data.hostname }];
+                               return prev;
+                            });
+                        }
+                        resolve(null);
+                    })
+                    .catch(() => { finished = true; resolve(null); });
+            });
         };
 
         const ipsToScan = [];
@@ -128,7 +132,7 @@ export default function App() {
             for (let i = 1; i <= 254; i++) ipsToScan.push(`${prefix}${i}`);
         }
 
-        const batchSize = 40; 
+        const batchSize = 50; 
         for (let i = 0; i < ipsToScan.length; i += batchSize) {
            await Promise.all(ipsToScan.slice(i, i + batchSize).map(pingIp));
         }
@@ -366,6 +370,37 @@ export default function App() {
                  ))}
              </View>
           )}
+
+          {/* Fallback Manual Connection Option */}
+          <View style={{ alignItems: 'center', marginTop: SPACING.lg }}>
+             {!showManualInput ? (
+                <TouchableOpacity onPress={() => setShowManualInput(true)}>
+                   <Text style={{ color: COLORS.textSecondary, fontSize: 13, textDecorationLine: 'underline' }}>
+                      Can't find your PC? Enter IP Manually
+                   </Text>
+                </TouchableOpacity>
+             ) : (
+                <View style={[styles.sectionBlock, { width: '100%', marginTop: SPACING.md }]}>
+                   <Text style={styles.sectionLabel}>DIRECT IP CONNECTION</Text>
+                   <View style={styles.inputWrapper}>
+                      <Ionicons name="link" size={20} color={COLORS.textSecondary} />
+                      <TextInput
+                         style={styles.inputField}
+                         placeholder="e.g. 192.168.100.236"
+                         placeholderTextColor={COLORS.textSecondary}
+                         value={ipAddress}
+                         onChangeText={setIpAddress}
+                         keyboardType="default"
+                         autoCapitalize="none"
+                      />
+                   </View>
+                   <TouchableOpacity style={styles.btnConnect} onPress={() => initiateConnect(null, "Direct PC", null)}>
+                      <Text style={styles.btnConnectText}>CONNECT NOW</Text>
+                   </TouchableOpacity>
+                </View>
+             )}
+          </View>
+
         </ScrollView>
 
         {/* Pairing Code Modal */}
@@ -587,6 +622,12 @@ const styles = StyleSheet.create({
   scrollContentUnconnected: { padding: SPACING.lg, paddingBottom: SPACING.xl },
   scrollContent: { padding: SPACING.md, paddingBottom: SPACING.xl * 2, gap: SPACING.lg },
   
+  // Inputs
+  inputWrapper: { flexDirection: 'row', alignItems: 'center', backgroundColor: COLORS.cardElevated, borderRadius: RADIUS.md, borderWidth: 1, borderColor: COLORS.border, paddingHorizontal: SPACING.md, marginBottom: SPACING.md },
+  inputField: { flex: 1, color: COLORS.text, fontSize: 16, paddingVertical: Platform.OS === 'ios' ? 14 : 10, paddingLeft: SPACING.sm, fontWeight: '500' },
+  btnConnect: { backgroundColor: COLORS.primary, paddingVertical: 14, borderRadius: RADIUS.md, alignItems: 'center' },
+  btnConnectText: { color: COLORS.text, fontSize: 15, fontWeight: '800', letterSpacing: 1 },
+
   // Unconnected Header
   loginHeader: { alignItems: 'center', marginVertical: SPACING.xl },
   loginIcon: { marginBottom: SPACING.md },

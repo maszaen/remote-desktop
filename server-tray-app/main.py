@@ -223,10 +223,33 @@ def setup_tray_icon():
     
     icon.run()
 
+def udp_broadcaster():
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    s.bind(('', 0))
+    s.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+    while True:
+        try:
+            # Get current active LAN ip
+            temp_s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            temp_s.connect(("10.255.255.255", 1))
+            current_ip = temp_s.getsockname()[0]
+            temp_s.close()
+            
+            message = f"NEXUS_SERVER:{socket.gethostname()}:{current_ip}:8000".encode('utf-8')
+            s.sendto(message, ('<broadcast>', 8001))
+            s.sendto(message, ('255.255.255.255', 8001))
+        except Exception:
+            pass
+        import time
+        time.sleep(2)
+
 def start_server():
     uvicorn.run(app, host="0.0.0.0", port=8000, log_level="error")
 
 if __name__ == "__main__":
+    # Start UDP Broadcaster
+    threading.Thread(target=udp_broadcaster, daemon=True).start()
+    
     server_thread = threading.Thread(target=start_server, daemon=True)
     server_thread.start()
     setup_tray_icon()
