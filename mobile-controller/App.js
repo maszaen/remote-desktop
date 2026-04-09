@@ -99,24 +99,25 @@ export default function App() {
     setIsScanning(true);
     setDiscoveredDevices([]); 
     try {
-        let prefixes = ['192.168.100.', '192.168.1.', '192.168.0.', '10.0.0.']; 
+        let basePrefix = '192.168.1.';
+        let hostEnding = 50; 
         const ipInfo = await Network.getIpAddressAsync();
         if (ipInfo && ipInfo !== '0.0.0.0' && ipInfo.includes('.')) {
-            const currentPrefix = ipInfo.split('.').slice(0, 3).join('.') + '.';
-            if (!prefixes.includes(currentPrefix)) prefixes.unshift(currentPrefix);
+            const parts = ipInfo.split('.');
+            basePrefix = parts.slice(0, 3).join('.') + '.';
+            hostEnding = parseInt(parts[3], 10);
         }
 
-        const pingIp = (targetIp, timeoutMs = 1500) => {
+        const pingIp = (targetIp) => {
             return new Promise((resolve) => {
                 let finished = false;
                 const controller = new AbortController();
                 const timer = setTimeout(() => { 
                     if (!finished) {
                         try { controller.abort(); } catch(e){}
-                        finished = true; 
-                        resolve(null); 
+                        finished = true; resolve(null); 
                     }
-                }, timeoutMs); 
+                }, 1000); 
                 
                 fetch(`http://${targetIp}:8000/`, { signal: controller.signal })
                     .then(res => res.json())
@@ -135,28 +136,30 @@ export default function App() {
                     .catch(() => { 
                         if (finished) return;
                         clearTimeout(timer);
-                        finished = true; 
-                        resolve(null); 
+                        finished = true; resolve(null); 
                     });
             });
         };
 
         const ipsToScan = ['NexusPC.local', '10.0.2.2'];
-        for (const prefix of prefixes.slice(0, 2)) {
-            for (let i = 1; i <= 254; i++) ipsToScan.push(`${prefix}${i}`);
+        
+        // Proximity Sort: Search closest IPs to phone first (avoids searching 255 IPs sequentially)
+        for (let rad = 0; rad <= 254; rad++) {
+             if (rad === 0) { ipsToScan.push(`${basePrefix}${hostEnding}`); continue; }
+             if (hostEnding + rad <= 254) ipsToScan.push(`${basePrefix}${hostEnding + rad}`);
+             if (hostEnding - rad >= 1) ipsToScan.push(`${basePrefix}${hostEnding - rad}`);
         }
 
-        // Extremely safe chunking function to circumvent OS networking queue drops
-        const chunkArray = (arr, size) => arr.length > 0 ? [arr.slice(0, size), ...chunkArray(arr.slice(size), size)] : [];
-        const batches = chunkArray(ipsToScan, 30);
-        
-        for (const batch of batches) {
-           await Promise.all(batch.map(ip => pingIp(ip)));
-           // Explicitly yield to clear native connection pools and prevent silent dropping
-           await new Promise(r => setTimeout(r, 200));
+        // Extremely safe STAGGERED dispatch to bypass Android Port-Scan blocks & Bridge flooding
+        for (let i = 0; i < ipsToScan.length; i++) {
+           pingIp(ipsToScan[i]); // Fire without blocking loop!
+           await new Promise(r => setTimeout(r, 15)); // 15ms stagger -> 254 IPs takes only ~3.8s to fully dispatch!
         }
+        
     } catch(e) {}
-    setIsScanning(false);
+    
+    // Allow lingering requests to complete gracefully
+    setTimeout(() => setIsScanning(false), 2000);
   };
 
   // ─── Connection & Pairing ───────────────────────────────────────────
