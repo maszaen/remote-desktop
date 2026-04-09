@@ -19,6 +19,7 @@ import {
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Network from 'expo-network';
+import { CameraView, useCameraPermissions } from 'expo-camera';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -43,6 +44,10 @@ export default function App() {
   const [discoveredDevices, setDiscoveredDevices] = useState([]);
   const [isScanning, setIsScanning] = useState(false);
   const [showManualInput, setShowManualInput] = useState(false);
+  
+  // QR Code
+  const [isScanningQR, setIsScanningQR] = useState(false);
+  const [permission, requestPermission] = useCameraPermissions();
   
   // Pairing logic
   const [pairingModalOpen, setPairingModalOpen] = useState(false);
@@ -391,11 +396,25 @@ export default function App() {
           )}
 
           {/* Fallback Manual Connection Option */}
-          <View style={{ alignItems: 'center', marginTop: SPACING.lg }}>
+          <View style={{ alignItems: 'center', marginTop: SPACING.xl }}>
+             
+             {/* QR Scanner Button */}
+             <TouchableOpacity style={[styles.btnConnect, { backgroundColor: COLORS.cardElevated, width: '100%', marginBottom: SPACING.lg, flexDirection: 'row', justifyContent: 'center' }]} 
+                 onPress={async () => {
+                     if (!permission || !permission.granted) {
+                         const { status } = await requestPermission();
+                         if (status !== 'granted') { Alert.alert("Permission Error", "Camera access is required for QR scanning."); return; }
+                     }
+                     setIsScanningQR(true);
+                 }}>
+                <MaterialCommunityIcons name="qrcode-scan" size={20} color={COLORS.primary} style={{ marginRight: SPACING.sm }} />
+                <Text style={[styles.btnConnectText, { color: COLORS.primary }]}>SCAN QR CODE ON PC</Text>
+             </TouchableOpacity>
+
              {!showManualInput ? (
                 <TouchableOpacity onPress={() => setShowManualInput(true)}>
                    <Text style={{ color: COLORS.textSecondary, fontSize: 13, textDecorationLine: 'underline' }}>
-                      Can't find your PC? Enter IP Manually
+                      Can't find your PC or QR? Enter IP Manually
                    </Text>
                 </TouchableOpacity>
              ) : (
@@ -421,6 +440,30 @@ export default function App() {
           </View>
 
         </ScrollView>
+
+        {/* QR Code Camera Modal */}
+        <Modal visible={isScanningQR} animationType="slide" transparent={false}>
+             <View style={{ flex: 1, backgroundColor: 'black' }}>
+                <CameraView
+                  style={{ flex: 1 }}
+                  facing="back"
+                  onBarcodeScanned={({ data }) => {
+                       setIsScanningQR(false);
+                       try {
+                           const payload = JSON.parse(data);
+                           if (payload.ip && payload.pin) initiateConnect(payload.ip, payload.hostname || "Nexus PC", payload.pin);
+                           else Alert.alert("Error", "Invalid QR code format.");
+                       } catch(e) { Alert.alert("Error", "Could not parse QR code."); }
+                  }}
+                />
+                <View style={{ position: 'absolute', top: 50, left: 0, right: 0, alignItems: 'center' }}>
+                   <Text style={{ color: 'white', backgroundColor: 'rgba(0,0,0,0.5)', padding: 10, borderRadius: 10 }}>Point camera at Nexus PC's QR Code</Text>
+                </View>
+                <TouchableOpacity style={{ position: 'absolute', bottom: 50, alignSelf: 'center', backgroundColor: COLORS.cardElevated, padding: 20, borderRadius: RADIUS.round }} onPress={() => setIsScanningQR(false)}>
+                   <Ionicons name="close" size={30} color="white" />
+                </TouchableOpacity>
+             </View>
+        </Modal>
 
         {/* Pairing Code Modal */}
         <Modal visible={pairingModalOpen} transparent animationType="fade">

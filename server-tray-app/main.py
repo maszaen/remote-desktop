@@ -199,9 +199,39 @@ def setup_tray_icon():
         def run_msg():
             ctypes.windll.user32.MessageBoxW(0, f"Your Nexus Pairing PIN is:\n\n{ACCESS_PIN}\n\nEnter this PIN in your Mobile App to pair.", "Nexus Pairing Code", 0x40)
         threading.Thread(target=run_msg, daemon=True).start()
+
+    def show_qr_code(icon, item):
+        print("Opening QR code...")
+        def run_qr():
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            try:
+                s.connect(("10.255.255.255", 1))
+                IP = s.getsockname()[0]
+            except Exception:
+                IP = "127.0.0.1"
+            finally:
+                s.close()
+            try:
+                import qrcode
+                import json
+                payload = json.dumps({
+                    "ip": IP,
+                    "pin": ACCESS_PIN,
+                    "hostname": socket.gethostname()
+                })
+                qr = qrcode.QRCode(version=1, box_size=10, border=4)
+                qr.add_data(payload)
+                qr.make(fit=True)
+                img = qr.make_image(fill_color="black", back_color="white")
+                img.show(title="Nexus PC Connect QR")
+            except Exception as e:
+                print(f"Error showing QR: {e}")
+                pass
+        threading.Thread(target=run_qr, daemon=True).start()
         
     menu = Menu(
         MenuItem('Show Pairing PIN', show_pin_code),
+        MenuItem('Scan QR to Connect', show_qr_code),
         MenuItem('Quit Backend', on_quit)
     )
     icon = Icon("PCRemote", image, "Nexus PC Controller Server", menu)
