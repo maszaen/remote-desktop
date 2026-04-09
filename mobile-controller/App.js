@@ -99,14 +99,14 @@ export default function App() {
     setIsScanning(true);
     setDiscoveredDevices([]); 
     try {
-        let prefixes = ['192.168.1.', '192.168.0.', '192.168.100.'];
+        let prefixes = ['192.168.100.']; // Commonly used by Android Emulators bridged to Host
         const ipInfo = await Network.getIpAddressAsync();
         if (ipInfo && ipInfo !== '0.0.0.0' && ipInfo.includes('.')) {
             const currentPrefix = ipInfo.split('.').slice(0, 3).join('.') + '.';
             if (!prefixes.includes(currentPrefix)) prefixes.unshift(currentPrefix);
         }
 
-        const pingIp = (targetIp, timeoutMs = 450) => {
+        const pingIp = (targetIp, timeoutMs = 1500) => {
             return new Promise((resolve) => {
                 let finished = false;
                 const controller = new AbortController();
@@ -141,17 +141,14 @@ export default function App() {
             });
         };
 
-        // First, explicitly check for mDNS ZeroConf Broadcaster (Magic Hostname)
-        await pingIp('NexusPC.local', 1200);
-
-        const ipsToScan = ['10.0.2.2']; // Bypass routing for Android Emulators automatically
+        const ipsToScan = ['10.0.2.2']; // Android Emulators host network alias
         for (const prefix of prefixes) {
             for (let i = 1; i <= 254; i++) ipsToScan.push(`${prefix}${i}`);
         }
 
-        const batchSize = 65; // Massive parallel lane since we rely on ultra-fast explicit native aborts
+        const batchSize = 20; // Lower batch size to prevent OkHttp Pool rejection (which forces fake timeout)
         for (let i = 0; i < ipsToScan.length; i += batchSize) {
-           await Promise.all(ipsToScan.slice(i, i + batchSize).map(ip => pingIp(ip, 450)));
+           await Promise.all(ipsToScan.slice(i, i + batchSize).map(ip => pingIp(ip, 1500)));
         }
     } catch(e) {}
     setIsScanning(false);
