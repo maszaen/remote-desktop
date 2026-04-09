@@ -10,66 +10,71 @@ import {
   Alert,
   StatusBar,
   RefreshControl,
-  Modal,
-  FlatList,
   Dimensions,
+  SafeAreaView,
+  Modal,
 } from 'react-native';
+import Slider from '@react-native-community/slider';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
+
+// --- THEME ---
+const COLORS = {
+  background: '#0a0a0c', // Deep black 
+  card: '#161618',       // Slightly lighter for cards
+  cardHighlight: '#1f1f22',
+  accent: '#0A84FF',     // Vivid Blue
+  danger: '#FF453A',     // Red
+  success: '#32D74B',    // Green
+  warning: '#FF9F0A',    // Orange
+  text: '#FFFFFF',
+  textDim: '#8E8E93',
+  border: '#2C2C2E',
+};
 
 export default function App() {
   const [ipAddress, setIpAddress] = useState('');
   const [isConnected, setIsConnected] = useState(false);
   const [serverUrl, setServerUrl] = useState('');
 
-  // Volume state
+  // Volume
   const [currentVolume, setCurrentVolume] = useState(0);
   const [isMuted, setIsMuted] = useState(false);
-  const [customVolume, setCustomVolume] = useState('');
 
-  // Stats state
+  // Stats
   const [stats, setStats] = useState(null);
   const [showAllProcesses, setShowAllProcesses] = useState(false);
 
-  // Screenshot state
+  // Screenshots
   const [screenshot, setScreenshot] = useState(null);
+  const [isScreenModalOpen, setIsScreenModalOpen] = useState(false);
 
-  // Loading states
   const [refreshing, setRefreshing] = useState(false);
   const [loadingAction, setLoadingAction] = useState('');
 
   // ─── Connection ───────────────────────────────────────────
-
   const connect = async () => {
-    if (!ipAddress.trim()) return Alert.alert('Error', 'Masukkin IP address dulu bro');
-    // Clean input: strip http://, https://, trailing port, slashes
+    if (!ipAddress.trim()) return Alert.alert('Whoops!', 'Enter your PC IP address first.');
     let cleanIp = ipAddress.trim();
-    cleanIp = cleanIp.replace(/^https?:\/\//, '');
-    cleanIp = cleanIp.replace(/:\d+$/, '');
-    cleanIp = cleanIp.replace(/\/+$/, '');
+    cleanIp = cleanIp.replace(/^https?:\/\//, '').replace(/:\d+$/, '').replace(/\/+$/, '');
     const url = `http://${cleanIp}:8000`;
+    
     setLoadingAction('connecting');
     try {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 5000);
+      const timeoutId = setTimeout(() => controller.abort(), 4000);
       const res = await fetch(`${url}/`, { signal: controller.signal });
       clearTimeout(timeoutId);
+
       if (res.ok) {
         setServerUrl(url);
         setIsConnected(true);
-        // Fetch current volume right after connect
-        try {
-          const volRes = await fetch(`${url}/volume`);
-          const volData = await volRes.json();
-          if (!volData.error) {
-            setCurrentVolume(volData.volume);
-            setIsMuted(volData.muted);
-          }
-        } catch (_) {}
-        Alert.alert('✅ Connected', `Terhubung ke ${cleanIp}`);
+        fetchVolume(url);
+        getStats(url);
       }
     } catch (e) {
-      Alert.alert('❌ Gagal Connect', `URL: ${url}\nError: ${e.message}\n\nPastikan:\n1. Server jalan di PC\n2. HP & PC WiFi sama\n3. Firewall ga block port 8000`);
+      Alert.alert('Connection Failed', `Could not connect to ${cleanIp}.\nMake sure you're on the same WiFi and the server is running.`);
     } finally {
       setLoadingAction('');
     }
@@ -80,130 +85,77 @@ export default function App() {
     setServerUrl('');
     setStats(null);
     setScreenshot(null);
-    setCurrentVolume(0);
-    setIsMuted(false);
   };
 
-  // ─── Generic Action Sender ────────────────────────────────
-
-  const sendAction = async (endpoint, method = 'POST', body = null) => {
-    if (!isConnected) return null;
+  const sendAction = async (endpoint, method = 'POST', body = null, urlOverride = null) => {
+    const targetUrl = urlOverride || serverUrl;
+    if (!targetUrl) return null;
     try {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 10000);
+      const timeoutId = setTimeout(() => controller.abort(), 8000);
       const options = {
         method,
         headers: { 'Content-Type': 'application/json' },
         signal: controller.signal,
       };
       if (body) options.body = JSON.stringify(body);
-      const res = await fetch(`${serverUrl}${endpoint}`, options);
+      const res = await fetch(`${targetUrl}${endpoint}`, options);
+      clearTimeout(timeoutId);
       return await res.json();
     } catch (e) {
-      Alert.alert('⚠️ Error', 'Koneksi gagal. Cek WiFi lo.');
-      return null;
+      return { error: 'Network request failed' };
     }
   };
 
-  // ─── Volume Controls ──────────────────────────────────────
-
-  const fetchVolume = async () => {
-    const data = await sendAction('/volume', 'GET');
+  // ─── Control Handlers ─────────────────────────────────────
+  const fetchVolume = async (urlOverride = null) => {
+    const data = await sendAction('/volume', 'GET', null, urlOverride);
     if (data && !data.error) {
       setCurrentVolume(data.volume);
       setIsMuted(data.muted);
-    } else if (data?.error) {
-      Alert.alert('Volume Error', data.error);
     }
   };
 
   const handleSetVolume = async (val) => {
-    const result = await sendAction('/volume', 'POST', { volume: val });
-    if (result && !result.error) {
-      setCurrentVolume(val);
-      setIsMuted(false);
-    } else if (result?.error) {
-      Alert.alert('Volume Error', result.error);
-    }
-  };
-
-  const handleVolumeUp = async () => {
-    const result = await sendAction('/volume/up');
-    if (result && !result.error) {
-      setCurrentVolume(result.volume);
-      setIsMuted(false);
-    } else if (result?.error) {
-      Alert.alert('Volume Error', result.error);
-    }
-  };
-
-  const handleVolumeDown = async () => {
-    const result = await sendAction('/volume/down');
-    if (result && !result.error) {
-      setCurrentVolume(result.volume);
-    } else if (result?.error) {
-      Alert.alert('Volume Error', result.error);
-    }
+    const rounded = Math.round(val);
+    setCurrentVolume(rounded); // Optimistic UI update
+    const result = await sendAction('/volume', 'POST', { volume: rounded });
+    if (result && !result.error) setIsMuted(false);
   };
 
   const handleToggleMute = async () => {
     const result = await sendAction('/volume/mute');
-    if (result && !result.error) {
-      setIsMuted(result.muted);
-    } else if (result?.error) {
-      Alert.alert('Volume Error', result.error);
-    }
+    if (result && !result.error) setIsMuted(result.muted);
   };
-
-  const handleCustomVolume = () => {
-    const val = parseInt(customVolume, 10);
-    if (isNaN(val) || val < 0 || val > 100) {
-      Alert.alert('Error', 'Volume harus antara 0-100');
-      return;
-    }
-    handleSetVolume(val);
-    setCustomVolume('');
-  };
-
-  // ─── Media Controls ───────────────────────────────────────
 
   const mediaControl = (action) => sendAction(`/media/${action}`);
-
-  // ─── Screenshot ───────────────────────────────────────────
 
   const captureScreen = () => {
     if (!isConnected) return;
     setScreenshot(`${serverUrl}/screen?t=${Date.now()}`);
+    setIsScreenModalOpen(true);
   };
 
-  // ─── System Stats ─────────────────────────────────────────
-
-  const getStats = async () => {
-    if (!isConnected) return;
+  const getStats = async (urlOverride = null) => {
     setLoadingAction('stats');
-    const data = await sendAction('/stats', 'GET');
-    if (data && !data.error) {
-      setStats(data);
-    }
+    const data = await sendAction('/stats', 'GET', null, urlOverride);
+    if (data && !data.error) setStats(data);
     setLoadingAction('');
   };
 
-  // ─── Power Controls (with confirmation) ───────────────────
-
   const handlePower = (action) => {
-    const actionLabel = action === 'shutdown' ? 'Shutdown' : 'Restart';
     Alert.alert(
-      `⚠️ ${actionLabel} PC?`,
-      `Yakin mau ${actionLabel.toLowerCase()} PC lo? Akan mulai dalam 5 detik setelah confirm.`,
+      `⚠️ ${action.toUpperCase()}`,
+      `Are you sure you want to ${action} your PC?\nDevice will ${action} in 5 seconds.`,
       [
-        { text: 'Batal', style: 'cancel' },
+        { text: 'Cancel', style: 'cancel' },
         {
-          text: `Ya, ${actionLabel}`,
+          text: `Yes, ${action}`,
           style: 'destructive',
           onPress: async () => {
             const result = await sendAction(`/power/${action}`);
             if (result && result.message) {
-              Alert.alert('✅ OK', result.message + '\n\nMau batalin? Pencet Cancel Shutdown.');
+              setStats(null); // Clear stats for visual feedback
             }
           },
         },
@@ -212,644 +164,585 @@ export default function App() {
   };
 
   const cancelShutdown = async () => {
-    const result = await sendAction('/power/cancel');
-    if (result && result.message) {
-      Alert.alert('✅ Cancelled', result.message);
-    }
+    await sendAction('/power/cancel');
+    Alert.alert('Cancelled', 'Power action aborted.');
   };
-
-  // ─── Refresh ──────────────────────────────────────────────
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     await fetchVolume();
+    await getStats();
     setRefreshing(false);
-  }, [isConnected, serverUrl]);
+  }, [serverUrl]);
 
-  // ─── Render ───────────────────────────────────────────────
-
+  // ─── Components ───────────────────────────────────────────
   if (!isConnected) {
     return (
-      <View style={styles.container}>
-        <StatusBar barStyle="dark-content" backgroundColor="#f0f2f5" />
+      <SafeAreaView style={styles.container}>
+        <StatusBar barStyle="light-content" backgroundColor={COLORS.background} />
         <View style={styles.connectContainer}>
-          <Text style={styles.appTitle}>🎮 PC Remote</Text>
-          <Text style={styles.appSubtitle}>Control your PC from your phone</Text>
+          <View style={styles.heroGlow} />
+          <Ionicons name="desktop-outline" size={72} color={COLORS.accent} style={styles.logoIcon}/>
+          <Text style={styles.appTitle}>Nexus Control</Text>
+          <Text style={styles.appSubtitle}>Your PC, perfectly synchronized.</Text>
 
-          <View style={styles.card}>
-            <Text style={styles.label}>IP Address PC</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="contoh: 192.168.1.15"
-              placeholderTextColor="#999"
-              value={ipAddress}
-              onChangeText={setIpAddress}
-              keyboardType="default"
-              autoCorrect={false}
-            />
+          <View style={styles.inputCard}>
+            <Text style={styles.label}>Connect to Server IP</Text>
+            <View style={styles.inputWrapper}>
+              <Ionicons name="wifi" size={20} color={COLORS.textDim} style={styles.inputIcon} />
+              <TextInput
+                style={styles.input}
+                placeholder="192.168.1.x"
+                placeholderTextColor={COLORS.textDim}
+                value={ipAddress}
+                onChangeText={setIpAddress}
+                keyboardType="default"
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+            </View>
             <TouchableOpacity
-              style={[styles.btnPrimary, loadingAction === 'connecting' && styles.btnDisabled]}
+              style={[styles.btnPrimary, loadingAction === 'connecting' && { opacity: 0.7 }]}
               onPress={connect}
               disabled={loadingAction === 'connecting'}
             >
-              <Text style={styles.btnText}>
-                {loadingAction === 'connecting' ? '⏳ Connecting...' : '🔗 Connect'}
+              <Text style={styles.btnPrimaryText}>
+                {loadingAction === 'connecting' ? 'SYNCING...' : 'CONNECT'}
               </Text>
             </TouchableOpacity>
           </View>
-
-          <Text style={styles.hint}>
-            Pastikan PC dan HP lo di WiFi yang sama.{'\n'}
-            Jalanin server di PC dulu sebelum connect.
-          </Text>
         </View>
-      </View>
+      </SafeAreaView>
     );
   }
 
   return (
-    <ScrollView
-      style={styles.container}
-      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
-    >
-      <StatusBar barStyle="dark-content" backgroundColor="#f0f2f5" />
-
-      {/* Header */}
-      <View style={styles.headerRow}>
-        <View>
-          <Text style={styles.header}>🎮 PC Remote</Text>
-          <Text style={styles.connectedBadge}>● Connected to {ipAddress}</Text>
+    <SafeAreaView style={styles.container}>
+      <StatusBar barStyle="light-content" backgroundColor={COLORS.background} />
+      
+      {/* HEADER */}
+      <View style={styles.header}>
+        <View style={styles.headerLeft}>
+          <View style={styles.statusDot} />
+          <View>
+            <Text style={styles.headerTitle}>Connected</Text>
+            <Text style={styles.headerIp}>{serverUrl.replace('http://', '')}</Text>
+          </View>
         </View>
-        <TouchableOpacity style={styles.btnDisconnect} onPress={disconnect}>
-          <Text style={styles.btnText}>✕</Text>
+        <TouchableOpacity style={styles.iconBtn} onPress={disconnect}>
+          <Ionicons name="power" size={20} color={COLORS.danger} />
         </TouchableOpacity>
       </View>
 
-      {/* ── Volume & Media ── */}
-      <View style={styles.card}>
-        <Text style={styles.sectionTitle}>🔊 Volume & Media</Text>
-
-        {/* Current Volume Display */}
-        <View style={styles.volumeDisplay}>
-          <Text style={styles.volumeNumber}>{isMuted ? '🔇' : '🔊'} {currentVolume}%</Text>
-          {isMuted && <Text style={styles.mutedLabel}>MUTED</Text>}
-        </View>
-
-        {/* Volume Bar Visual */}
-        <View style={styles.volumeBarContainer}>
-          <View style={[styles.volumeBarFill, { width: `${currentVolume}%` }]} />
-        </View>
-
-        {/* Volume Up/Down/Mute */}
-        <View style={styles.row}>
-          <TouchableOpacity style={styles.btnAction} onPress={handleVolumeDown}>
-            <Text style={styles.btnText}>🔉 -5</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.btnAction, isMuted ? styles.btnMuted : styles.btnMuteActive]}
-            onPress={handleToggleMute}
-          >
-            <Text style={styles.btnText}>{isMuted ? '🔇 Unmute' : '🔇 Mute'}</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.btnAction} onPress={handleVolumeUp}>
-            <Text style={styles.btnText}>🔊 +5</Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* Volume Presets */}
-        <View style={styles.row}>
-          {[0, 25, 50, 75, 100].map((v) => (
-            <TouchableOpacity
-              key={v}
-              style={[styles.btnPreset, currentVolume === v && styles.btnPresetActive]}
-              onPress={() => handleSetVolume(v)}
-            >
-              <Text style={[styles.btnPresetText, currentVolume === v && styles.btnPresetTextActive]}>
-                {v}%
-              </Text>
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={styles.scrollContent}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.accent} />}
+      >
+        {/* ── SECT 1: MEDIA & AUDIO ── */}
+        <View style={styles.card}>
+          <Text style={styles.sectionTitle}>Media & Audio</Text>
+          
+          <View style={styles.mediaRow}>
+            <TouchableOpacity style={styles.mediaBtn} onPress={() => mediaControl('prev')}>
+              <Ionicons name="play-skip-back" size={28} color={COLORS.text} />
             </TouchableOpacity>
-          ))}
+            <TouchableOpacity style={styles.mediaBtnPlay} onPress={() => mediaControl('playpause')}>
+              <Ionicons name="play-pause" size={36} color={COLORS.text} />
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.mediaBtn} onPress={() => mediaControl('next')}>
+              <Ionicons name="play-skip-forward" size={28} color={COLORS.text} />
+            </TouchableOpacity>
+          </View>
+
+          <View style={styles.volumeRow}>
+            <TouchableOpacity onPress={handleToggleMute} style={{ width: 40, alignItems: 'center' }}>
+              <Ionicons name={isMuted || currentVolume === 0 ? "volume-mute" : "volume-high"} size={26} color={isMuted ? COLORS.danger : COLORS.textDim} />
+            </TouchableOpacity>
+            <Slider
+              style={styles.slider}
+              minimumValue={0}
+              maximumValue={100}
+              value={currentVolume}
+              onSlidingComplete={handleSetVolume}
+              minimumTrackTintColor={COLORS.accent}
+              maximumTrackTintColor={COLORS.cardHighlight}
+              thumbTintColor={COLORS.text}
+            />
+            <Text style={styles.volumeText}>{currentVolume}%</Text>
+          </View>
         </View>
 
-        {/* Custom Volume */}
-        <View style={styles.customVolumeRow}>
-          <TextInput
-            style={styles.volumeInput}
-            placeholder="0-100"
-            placeholderTextColor="#999"
-            value={customVolume}
-            onChangeText={setCustomVolume}
-            keyboardType="numeric"
-            maxLength={3}
-          />
-          <TouchableOpacity style={styles.btnSetVol} onPress={handleCustomVolume}>
-            <Text style={styles.btnText}>Set</Text>
-          </TouchableOpacity>
+        {/* ── SECT 2: UTILITIES ── */}
+        <View style={styles.cardRow}>
+           <TouchableOpacity style={[styles.card, styles.flexCard]} onPress={captureScreen}>
+              <MaterialCommunityIcons name="monitor-screenshot" size={32} color={COLORS.accent} />
+              <Text style={styles.cardTitle}>Capture Screen</Text>
+              <Text style={styles.cardSubtitle}>View desktop</Text>
+           </TouchableOpacity>
+           
+           <TouchableOpacity style={[styles.card, styles.flexCard]} onPress={getStats}>
+              <Ionicons name="hardware-chip" size={32} color={COLORS.warning} />
+              <Text style={styles.cardTitle}>Refresh Stats</Text>
+              <Text style={styles.cardSubtitle}>Update usage</Text>
+           </TouchableOpacity>
         </View>
 
-        {/* Media Controls */}
-        <View style={styles.divider} />
-        <Text style={styles.subTitle}>Media Player</Text>
-        <View style={styles.row}>
-          <TouchableOpacity style={styles.btnMedia} onPress={() => mediaControl('prev')}>
-            <Text style={styles.mediaIcon}>⏮</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={[styles.btnMedia, styles.btnPlayPause]} onPress={() => mediaControl('playpause')}>
-            <Text style={styles.mediaIconBig}>⏯</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.btnMedia} onPress={() => mediaControl('next')}>
-            <Text style={styles.mediaIcon}>⏭</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-
-      {/* ── Screen Capture ── */}
-      <View style={styles.card}>
-        <Text style={styles.sectionTitle}>📸 Screen Capture</Text>
-        <Text style={styles.sectionDesc}>Lihat layar PC lo buat cek progress download dll.</Text>
-        <TouchableOpacity style={styles.btnPrimary} onPress={captureScreen}>
-          <Text style={styles.btnText}>📷 Capture Sekarang</Text>
-        </TouchableOpacity>
-        {screenshot && (
-          <TouchableOpacity onPress={captureScreen} activeOpacity={0.8}>
-            <Image source={{ uri: screenshot }} style={styles.screenshot} resizeMode="contain" />
-            <Text style={styles.screenshotHint}>Tap gambar untuk refresh</Text>
-          </TouchableOpacity>
-        )}
-      </View>
-
-      {/* ── System Stats ── */}
-      <View style={styles.card}>
-        <Text style={styles.sectionTitle}>📊 System Stats</Text>
-        <TouchableOpacity
-          style={[styles.btnPrimary, loadingAction === 'stats' && styles.btnDisabled]}
-          onPress={getStats}
-          disabled={loadingAction === 'stats'}
-        >
-          <Text style={styles.btnText}>
-            {loadingAction === 'stats' ? '⏳ Loading...' : '🔍 Cek Usage'}
-          </Text>
-        </TouchableOpacity>
-
+        {/* ── SECT 3: PERFORMANCE DETAILS ── */}
         {stats && (
-          <View style={styles.statsContainer}>
-            {/* CPU & RAM Overview */}
-            <View style={styles.statsRow}>
-              <View style={styles.statBox}>
-                <Text style={styles.statLabel}>CPU</Text>
-                <Text style={styles.statValue}>{stats.cpu_percent}%</Text>
-                <View style={styles.statBar}>
-                  <View
-                    style={[
-                      styles.statBarFill,
-                      { width: `${stats.cpu_percent}%` },
-                      stats.cpu_percent > 80 && styles.statBarDanger,
-                    ]}
-                  />
+          <View style={styles.card}>
+            <Text style={styles.sectionTitle}>Performance</Text>
+            
+            <View style={styles.hardwareGrid}>
+              <View style={styles.hardwareBox}>
+                <Text style={styles.hwLabel}>CPU</Text>
+                <Text style={styles.hwValue}>{stats.cpu_percent}%</Text>
+                <View style={styles.barBg}>
+                   <View style={[styles.barFill, { width: `${Math.min(100, stats.cpu_percent)}%`, backgroundColor: stats.cpu_percent > 80 ? COLORS.danger : COLORS.success }]} />
                 </View>
               </View>
-              <View style={styles.statBox}>
-                <Text style={styles.statLabel}>RAM</Text>
-                <Text style={styles.statValue}>{stats.ram_percent}%</Text>
-                <View style={styles.statBar}>
-                  <View
-                    style={[
-                      styles.statBarFill,
-                      { width: `${stats.ram_percent}%` },
-                      stats.ram_percent > 80 && styles.statBarDanger,
-                    ]}
-                  />
+              <View style={styles.hardwareBox}>
+                <Text style={styles.hwLabel}>RAM</Text>
+                <Text style={styles.hwValue}>{stats.ram_percent}%</Text>
+                <View style={styles.barBg}>
+                   <View style={[styles.barFill, { width: `${Math.min(100, stats.ram_percent)}%`, backgroundColor: stats.ram_percent > 80 ? COLORS.danger : COLORS.accent }]} />
                 </View>
-                <Text style={styles.statDetail}>
-                  {stats.ram_used_gb} / {stats.ram_total_gb} GB
-                </Text>
+                <Text style={styles.hwDetail}>{stats.ram_used_gb} / {stats.ram_total_gb} GB</Text>
               </View>
             </View>
 
-            {/* Top Processes */}
             <View style={styles.processHeader}>
-              <Text style={styles.processTitle}>Top Processes (by RAM)</Text>
+              <Text style={styles.subTitle}>Top Processes</Text>
               <TouchableOpacity onPress={() => setShowAllProcesses(!showAllProcesses)}>
-                <Text style={styles.toggleText}>
-                  {showAllProcesses ? 'Show Less ▲' : `Show All (${stats.top_processes.length}) ▼`}
-                </Text>
+                <Text style={styles.linkText}>{showAllProcesses ? 'Show Less' : 'Show All'}</Text>
               </TouchableOpacity>
             </View>
 
-            {/* Process List Header */}
-            <View style={styles.processListHeader}>
-              <Text style={[styles.processCol, { flex: 0.4 }]}>#</Text>
-              <Text style={[styles.processCol, { flex: 2 }]}>Name</Text>
-              <Text style={[styles.processCol, { flex: 0.8 }]}>MB</Text>
-              <Text style={[styles.processCol, { flex: 0.7 }]}>RAM%</Text>
-              <Text style={[styles.processCol, { flex: 0.7 }]}>CPU%</Text>
+            <View style={styles.processTableHead}>
+               <Text style={[styles.tCol, {flex: 2}]}>Task</Text>
+               <Text style={[styles.tCol, {flex: 1, textAlign:'right'}]}>RAM</Text>
+               <Text style={[styles.tCol, {flex: 1, textAlign:'right'}]}>CPU</Text>
             </View>
 
-            {(showAllProcesses ? stats.top_processes : stats.top_processes.slice(0, 10)).map((p, i) => (
-              <View key={i} style={[styles.processRow, i % 2 === 0 && styles.processRowAlt]}>
-                <Text style={[styles.processText, { flex: 0.4 }]}>{i + 1}</Text>
-                <Text style={[styles.processText, { flex: 2 }]} numberOfLines={1}>
-                  {p.name || 'Unknown'}
-                </Text>
-                <Text style={[styles.processText, { flex: 0.8 }]}>
-                  {p.memory_mb || 0}
-                </Text>
-                <Text style={[styles.processText, { flex: 0.7 }]}>
-                  {p.memory_percent?.toFixed(1) || '0.0'}%
-                </Text>
-                <Text style={[styles.processText, { flex: 0.7 }]}>
-                  {p.cpu_percent?.toFixed(1) || '0.0'}%
-                </Text>
+            {(showAllProcesses ? stats.top_processes : stats.top_processes.slice(0, 7)).map((p, i) => (
+              <View key={i} style={styles.processRow}>
+                <Text style={[styles.tRowText, {flex: 2, color: COLORS.text}]} numberOfLines={1}>{p.name}</Text>
+                <Text style={[styles.tRowText, {flex: 1, textAlign:'right', color: COLORS.textDim}]}>{p.memory_mb} MB</Text>
+                <Text style={[styles.tRowText, {flex: 1, textAlign:'right', color: COLORS.textDim}]}>{p.cpu_percent?.toFixed(1)}%</Text>
               </View>
             ))}
           </View>
         )}
-      </View>
 
-      {/* ── Power Controls ── */}
-      <View style={styles.card}>
-        <Text style={styles.sectionTitle}>⚡ Power Options</Text>
-        <Text style={styles.sectionDesc}>Hati-hati! Pastikan semua kerjaan udah ke-save.</Text>
-        <View style={styles.row}>
-          <TouchableOpacity style={styles.btnWarning} onPress={() => handlePower('restart')}>
-            <Text style={styles.btnText}>🔄 Restart</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.btnDanger} onPress={() => handlePower('shutdown')}>
-            <Text style={styles.btnText}>⏻ Shutdown</Text>
+        {/* ── SECT 4: POWER ── */}
+        <View style={[styles.card, { borderColor: '#401515', borderWidth: 1 }]}>
+          <Text style={[styles.sectionTitle, { color: COLORS.danger }]}>Power Control</Text>
+          <View style={styles.powerRow}>
+            <TouchableOpacity style={styles.btnRestart} onPress={() => handlePower('restart')}>
+               <Ionicons name="refresh" size={20} color={COLORS.text} style={{marginRight: 6}} />
+               <Text style={styles.btnTextBold}>Restart</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.btnShutdown} onPress={() => handlePower('shutdown')}>
+               <Ionicons name="power" size={20} color={COLORS.text} style={{marginRight: 6}}/>
+               <Text style={styles.btnTextBold}>Shutdown</Text>
+            </TouchableOpacity>
+          </View>
+          <TouchableOpacity style={styles.btnCancel} onPress={cancelShutdown}>
+              <Text style={styles.btnTextDim}>Abort Power Action</Text>
           </TouchableOpacity>
         </View>
-        <TouchableOpacity style={styles.btnCancel} onPress={cancelShutdown}>
-          <Text style={styles.btnCancelText}>❌ Cancel Shutdown/Restart</Text>
-        </TouchableOpacity>
-      </View>
 
-      <View style={{ height: 50 }} />
-    </ScrollView>
+      </ScrollView>
+
+      {/* Screen Modal */}
+      <Modal visible={isScreenModalOpen} transparent={true} animationType="fade">
+         <View style={styles.modalBg}>
+            <View style={styles.modalHeader}>
+               <Text style={styles.modalTitle}>Desktop Capture</Text>
+               <TouchableOpacity onPress={() => setIsScreenModalOpen(false)}>
+                  <Ionicons name="close" size={28} color={COLORS.text} />
+               </TouchableOpacity>
+            </View>
+            {screenshot && <Image source={{ uri: screenshot }} style={styles.modalImg} resizeMode="contain" />}
+            <TouchableOpacity style={[styles.btnPrimary, {margin: 20}]} onPress={captureScreen}>
+               <Text style={styles.btnPrimaryText}>Refresh Capture</Text>
+            </TouchableOpacity>
+         </View>
+      </Modal>
+
+    </SafeAreaView>
   );
 }
 
+// --- STYLES ---
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f0f2f5',
+    backgroundColor: COLORS.background,
+  },
+  scrollContent: {
+    padding: 16,
+    paddingBottom: 40,
   },
 
-  // ── Connect Screen ──
+  // LOGIN SCREEN
   connectContainer: {
     flex: 1,
     justifyContent: 'center',
     padding: 24,
   },
+  heroGlow: {
+    position: 'absolute',
+    top: '30%',
+    left: '50%',
+    width: 200,
+    height: 200,
+    marginLeft: -100,
+    backgroundColor: COLORS.accent,
+    opacity: 0.15,
+    borderRadius: 100,
+    transform: [{ scaleX: 2 }],
+  },
+  logoIcon: {
+    alignSelf: 'center',
+    marginBottom: 16,
+  },
   appTitle: {
-    fontSize: 32,
-    fontWeight: 'bold',
+    fontSize: 34,
+    fontWeight: '900',
+    color: COLORS.text,
     textAlign: 'center',
-    color: '#1a1a1a',
-    marginBottom: 4,
+    letterSpacing: 0.5,
   },
   appSubtitle: {
-    fontSize: 14,
+    fontSize: 15,
+    color: COLORS.textDim,
     textAlign: 'center',
-    color: '#888',
-    marginBottom: 30,
+    marginTop: 6,
+    marginBottom: 40,
   },
-  hint: {
-    marginTop: 20,
-    fontSize: 12,
-    color: '#999',
-    textAlign: 'center',
-    lineHeight: 18,
+  inputCard: {
+    backgroundColor: COLORS.card,
+    borderRadius: 24,
+    padding: 24,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  label: {
+    fontSize: 13,
+    color: COLORS.textDim,
+    textTransform: 'uppercase',
+    fontWeight: '700',
+    letterSpacing: 1,
+    marginBottom: 12,
+  },
+  inputWrapper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: COLORS.cardHighlight,
+    borderRadius: 16,
+    paddingHorizontal: 16,
+    marginBottom: 20,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  inputIcon: {
+    marginRight: 10,
+  },
+  input: {
+    flex: 1,
+    color: COLORS.text,
+    fontSize: 18,
+    paddingVertical: 16,
+  },
+  btnPrimary: {
+    backgroundColor: COLORS.accent,
+    borderRadius: 16,
+    paddingVertical: 18,
+    alignItems: 'center',
+    shadowColor: COLORS.accent,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  btnPrimaryText: {
+    color: COLORS.text,
+    fontSize: 15,
+    fontWeight: 'bold',
+    letterSpacing: 1,
   },
 
-  // ── Header ──
-  headerRow: {
+  // HEADER
+  header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    padding: 20,
-    paddingTop: 55,
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border,
   },
-  header: {
-    fontSize: 22,
-    fontWeight: 'bold',
-    color: '#1a1a1a',
+  headerLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
   },
-  connectedBadge: {
+  statusDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: COLORS.success,
+    marginRight: 10,
+    shadowColor: COLORS.success,
+    shadowOffset: {width: 0, height: 0},
+    shadowOpacity: 0.8,
+    shadowRadius: 4,
+  },
+  headerTitle: {
+    color: COLORS.textDim,
     fontSize: 12,
-    color: '#34C759',
     fontWeight: '600',
+    textTransform: 'uppercase',
+  },
+  headerIp: {
+    color: COLORS.text,
+    fontSize: 16,
+    fontWeight: 'bold',
     marginTop: 2,
   },
-  btnDisconnect: {
-    backgroundColor: '#FF3B30',
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-
-  // ── Cards ──
-  card: {
-    backgroundColor: 'white',
-    borderRadius: 14,
-    padding: 18,
-    marginHorizontal: 16,
-    marginBottom: 14,
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.12,
-    shadowRadius: 3,
-  },
-
-  // ── Typography ──
-  label: { fontSize: 16, marginBottom: 10, color: '#333', fontWeight: '600' },
-  sectionTitle: { fontSize: 18, fontWeight: 'bold', marginBottom: 6, color: '#1a1a1a' },
-  sectionDesc: { fontSize: 12, color: '#888', marginBottom: 14 },
-  subTitle: { fontSize: 14, fontWeight: '600', color: '#555', marginBottom: 10 },
-
-  // ── Inputs ──
-  input: {
-    borderWidth: 1,
-    borderColor: '#e0e0e0',
-    borderRadius: 10,
-    padding: 13,
-    fontSize: 16,
-    marginBottom: 15,
-    backgroundColor: '#fafafa',
-    color: '#333',
-  },
-
-  // ── Buttons ──
-  btnPrimary: {
-    backgroundColor: '#007AFF',
-    padding: 13,
-    borderRadius: 10,
-    alignItems: 'center',
-  },
-  btnAction: {
-    backgroundColor: '#4a4a4a',
-    padding: 12,
-    borderRadius: 10,
-    alignItems: 'center',
-    flex: 1,
-    marginHorizontal: 4,
-  },
-  btnDanger: {
-    backgroundColor: '#FF3B30',
-    padding: 13,
-    borderRadius: 10,
-    alignItems: 'center',
-    flex: 1,
-    marginHorizontal: 4,
-  },
-  btnWarning: {
-    backgroundColor: '#FF9500',
-    padding: 13,
-    borderRadius: 10,
-    alignItems: 'center',
-    flex: 1,
-    marginHorizontal: 4,
-  },
-  btnCancel: {
-    marginTop: 10,
+  iconBtn: {
+    backgroundColor: COLORS.cardHighlight,
     padding: 10,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#ddd',
-    alignItems: 'center',
-  },
-  btnCancelText: {
-    color: '#666',
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  btnMuted: {
-    backgroundColor: '#FF9500',
-  },
-  btnMuteActive: {
-    backgroundColor: '#555',
-  },
-  btnDisabled: {
-    opacity: 0.6,
-  },
-  btnText: {
-    color: 'white',
-    fontWeight: 'bold',
-    fontSize: 14,
-  },
-  btnSetVol: {
-    backgroundColor: '#007AFF',
-    paddingHorizontal: 20,
-    paddingVertical: 12,
-    borderRadius: 10,
-    marginLeft: 8,
+    borderRadius: 12,
   },
 
-  // ── Volume ──
-  volumeDisplay: {
+  // CARDS
+  card: {
+    backgroundColor: COLORS.card,
+    borderRadius: 24,
+    padding: 20,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  cardRow: {
+    flexDirection: 'row',
+    gap: 16,
+  },
+  flexCard: {
+    flex: 1,
+  },
+  sectionTitle: {
+    fontSize: 18,
+    color: COLORS.text,
+    fontWeight: '800',
+    marginBottom: 16,
+    letterSpacing: 0.3,
+  },
+  subTitle: {
+    fontSize: 14,
+    color: COLORS.text,
+    fontWeight: '700',
+  },
+  cardTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: COLORS.text,
+    marginTop: 12,
+  },
+  cardSubtitle: {
+    fontSize: 13,
+    color: COLORS.textDim,
+    marginTop: 4,
+  },
+
+  // MEDIA
+  mediaRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
     alignItems: 'center',
+    gap: 24,
+    marginBottom: 30,
+    marginTop: 10,
+  },
+  mediaBtn: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: COLORS.cardHighlight,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  mediaBtnPlay: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: COLORS.accent,
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: COLORS.accent,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.3,
+    shadowRadius: 10,
+  },
+  volumeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: COLORS.cardHighlight,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    borderRadius: 16,
+  },
+  slider: {
+    flex: 1,
+    height: 40,
+    marginHorizontal: 8,
+  },
+  volumeText: {
+    width: 45,
+    textAlign: 'center',
+    color: COLORS.text,
+    fontWeight: 'bold',
+    fontSize: 15,
+  },
+
+  // STATS
+  hardwareGrid: {
+    flexDirection: 'row',
+    gap: 16,
+    marginBottom: 24,
+  },
+  hardwareBox: {
+    flex: 1,
+    backgroundColor: COLORS.cardHighlight,
+    padding: 16,
+    borderRadius: 16,
+  },
+  hwLabel: {
+    fontSize: 13,
+    color: COLORS.textDim,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+  },
+  hwValue: {
+    fontSize: 26,
+    fontWeight: '900',
+    color: COLORS.text,
     marginVertical: 10,
   },
-  volumeNumber: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    color: '#1a1a1a',
-  },
-  mutedLabel: {
-    fontSize: 12,
-    fontWeight: 'bold',
-    color: '#FF3B30',
-    marginTop: 2,
-  },
-  volumeBarContainer: {
+  barBg: {
     height: 6,
-    backgroundColor: '#e8e8e8',
-    borderRadius: 3,
-    marginBottom: 14,
-    overflow: 'hidden',
-  },
-  volumeBarFill: {
-    height: '100%',
-    backgroundColor: '#007AFF',
-    borderRadius: 3,
-  },
-  customVolumeRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 6,
-  },
-  volumeInput: {
-    flex: 1,
-    borderWidth: 1,
-    borderColor: '#e0e0e0',
-    borderRadius: 10,
-    padding: 10,
-    fontSize: 16,
-    backgroundColor: '#fafafa',
-    color: '#333',
-  },
-
-  // ── Volume Presets ──
-  btnPreset: {
-    flex: 1,
-    marginHorizontal: 3,
-    padding: 8,
-    borderRadius: 8,
-    alignItems: 'center',
-    backgroundColor: '#f0f0f0',
-    borderWidth: 1,
-    borderColor: '#e0e0e0',
-  },
-  btnPresetActive: {
-    backgroundColor: '#007AFF',
-    borderColor: '#007AFF',
-  },
-  btnPresetText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#555',
-  },
-  btnPresetTextActive: {
-    color: 'white',
-  },
-
-  // ── Media ──
-  btnMedia: {
-    backgroundColor: '#4a4a4a',
-    padding: 14,
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-    flex: 1,
-    marginHorizontal: 5,
-  },
-  btnPlayPause: {
-    backgroundColor: '#007AFF',
-    flex: 1.3,
-  },
-  mediaIcon: {
-    fontSize: 22,
-  },
-  mediaIconBig: {
-    fontSize: 28,
-  },
-  divider: {
-    height: 1,
-    backgroundColor: '#eee',
-    marginVertical: 16,
-  },
-
-  // ── Layout ──
-  row: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 10,
-  },
-
-  // ── Screenshot ──
-  screenshot: {
-    width: '100%',
-    height: 200,
-    marginTop: 14,
-    borderRadius: 10,
-    backgroundColor: '#111',
-  },
-  screenshotHint: {
-    textAlign: 'center',
-    fontSize: 11,
-    color: '#aaa',
-    marginTop: 4,
-  },
-
-  // ── Stats ──
-  statsContainer: {
-    marginTop: 14,
-  },
-  statsRow: {
-    flexDirection: 'row',
-    gap: 10,
-    marginBottom: 14,
-  },
-  statBox: {
-    flex: 1,
-    backgroundColor: '#f8f9fa',
-    padding: 12,
-    borderRadius: 10,
-  },
-  statLabel: {
-    fontSize: 12,
-    color: '#888',
-    fontWeight: '600',
-  },
-  statValue: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#1a1a1a',
-    marginVertical: 4,
-  },
-  statBar: {
-    height: 5,
-    backgroundColor: '#e0e0e0',
+    backgroundColor: COLORS.background,
     borderRadius: 3,
     overflow: 'hidden',
   },
-  statBarFill: {
+  barFill: {
     height: '100%',
-    backgroundColor: '#34C759',
     borderRadius: 3,
   },
-  statBarDanger: {
-    backgroundColor: '#FF3B30',
-  },
-  statDetail: {
+  hwDetail: {
     fontSize: 11,
-    color: '#888',
-    marginTop: 4,
+    color: COLORS.textDim,
+    marginTop: 8,
+    fontWeight: '600',
   },
-
-  // ── Processes ──
   processHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 8,
+    marginBottom: 12,
   },
-  processTitle: {
-    fontSize: 14,
-    fontWeight: 'bold',
-    color: '#333',
-  },
-  toggleText: {
-    fontSize: 12,
-    color: '#007AFF',
+  linkText: {
+    color: COLORS.accent,
+    fontSize: 13,
     fontWeight: '600',
   },
-  processListHeader: {
+  processTableHead: {
     flexDirection: 'row',
-    paddingVertical: 6,
-    paddingHorizontal: 8,
-    backgroundColor: '#e8ecf0',
-    borderRadius: 6,
-    marginBottom: 4,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border,
+    paddingBottom: 8,
+    marginBottom: 8,
   },
-  processCol: {
+  tCol: {
     fontSize: 11,
-    fontWeight: 'bold',
-    color: '#555',
+    color: COLORS.textDim,
+    textTransform: 'uppercase',
+    fontWeight: '700',
   },
   processRow: {
     flexDirection: 'row',
-    paddingVertical: 5,
-    paddingHorizontal: 8,
-    borderRadius: 4,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#1e1e1e',
   },
-  processRowAlt: {
-    backgroundColor: '#f8f9fa',
+  tRowText: {
+    fontSize: 13,
+    fontWeight: '500',
   },
-  processText: {
-    fontSize: 12,
-    color: '#444',
+
+  // POWER
+  powerRow: {
+    flexDirection: 'row',
+    gap: 12,
   },
+  btnRestart: {
+    flex: 1,
+    flexDirection: 'row',
+    backgroundColor: COLORS.warning,
+    paddingVertical: 16,
+    borderRadius: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  btnShutdown: {
+    flex: 1,
+    flexDirection: 'row',
+    backgroundColor: COLORS.danger,
+    paddingVertical: 16,
+    borderRadius: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  btnTextBold: {
+    color: COLORS.text,
+    fontSize: 15,
+    fontWeight: 'bold',
+  },
+  btnCancel: {
+    marginTop: 16,
+    paddingVertical: 14,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: COLORS.textDim,
+    alignItems: 'center',
+  },
+  btnTextDim: {
+    color: COLORS.textDim,
+    fontSize: 14,
+    fontWeight: '600',
+  },
+
+  // MODAL
+  modalBg: {
+    flex: 1,
+    backgroundColor: '#000000ed',
+    justifyContent: 'center',
+  },
+  modalHeader: {
+     flexDirection: 'row',
+     justifyContent: 'space-between',
+     padding: 24,
+     alignItems: 'center',
+  },
+  modalTitle: {
+     color: COLORS.text,
+     fontSize: 18,
+     fontWeight: 'bold'
+  },
+  modalImg: {
+     width: '100%',
+     height: SCREEN_WIDTH * 0.7,
+     backgroundColor: '#000'
+  }
 });
