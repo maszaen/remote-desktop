@@ -99,7 +99,7 @@ export default function App() {
     setIsScanning(true);
     setDiscoveredDevices([]); 
     try {
-        let prefixes = ['192.168.100.']; // Commonly used by Android Emulators bridged to Host
+        let prefixes = ['192.168.100.', '192.168.1.', '192.168.0.', '10.0.0.']; 
         const ipInfo = await Network.getIpAddressAsync();
         if (ipInfo && ipInfo !== '0.0.0.0' && ipInfo.includes('.')) {
             const currentPrefix = ipInfo.split('.').slice(0, 3).join('.') + '.';
@@ -141,14 +141,19 @@ export default function App() {
             });
         };
 
-        const ipsToScan = ['10.0.2.2']; // Android Emulators host network alias
-        for (const prefix of prefixes) {
+        const ipsToScan = ['NexusPC.local', '10.0.2.2'];
+        for (const prefix of prefixes.slice(0, 2)) {
             for (let i = 1; i <= 254; i++) ipsToScan.push(`${prefix}${i}`);
         }
 
-        const batchSize = 20; // Lower batch size to prevent OkHttp Pool rejection (which forces fake timeout)
-        for (let i = 0; i < ipsToScan.length; i += batchSize) {
-           await Promise.all(ipsToScan.slice(i, i + batchSize).map(ip => pingIp(ip, 1500)));
+        // Extremely safe chunking function to circumvent OS networking queue drops
+        const chunkArray = (arr, size) => arr.length > 0 ? [arr.slice(0, size), ...chunkArray(arr.slice(size), size)] : [];
+        const batches = chunkArray(ipsToScan, 30);
+        
+        for (const batch of batches) {
+           await Promise.all(batch.map(ip => pingIp(ip)));
+           // Explicitly yield to clear native connection pools and prevent silent dropping
+           await new Promise(r => setTimeout(r, 200));
         }
     } catch(e) {}
     setIsScanning(false);
