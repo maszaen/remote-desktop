@@ -13,11 +13,12 @@ import {
   Dimensions,
   SafeAreaView,
   Modal,
+  Platform,
+  ActivityIndicator
 } from 'react-native';
-import Slider from '@react-native-community/slider';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
+const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
 // --- THEME ---
 const COLORS = {
@@ -49,9 +50,13 @@ export default function App() {
   // Screenshots
   const [screenshot, setScreenshot] = useState(null);
   const [isScreenModalOpen, setIsScreenModalOpen] = useState(false);
+  const [imgLoading, setImgLoading] = useState(false);
+  const [isCapturing, setIsCapturing] = useState(false);
 
+  // Loading & Modals
   const [refreshing, setRefreshing] = useState(false);
   const [loadingAction, setLoadingAction] = useState('');
+  const [powerMenuVisible, setPowerMenuVisible] = useState(false);
 
   // ─── Connection ───────────────────────────────────────────
   const connect = async () => {
@@ -118,7 +123,6 @@ export default function App() {
 
   const handleSetVolume = async (val) => {
     const rounded = Math.round(val);
-    setCurrentVolume(rounded); // Optimistic UI update
     const result = await sendAction('/volume', 'POST', { volume: rounded });
     if (result && !result.error) setIsMuted(false);
   };
@@ -128,25 +132,49 @@ export default function App() {
     if (result && !result.error) setIsMuted(result.muted);
   };
 
+  const handleVolumeUp = async () => {
+    const result = await sendAction('/volume/up');
+    if (result && !result.error) {
+      setCurrentVolume(result.volume);
+      setIsMuted(false);
+    }
+  };
+
+  const handleVolumeDown = async () => {
+    const result = await sendAction('/volume/down');
+    if (result && !result.error) {
+      setCurrentVolume(result.volume);
+    }
+  };
+
   const mediaControl = (action) => sendAction(`/media/${action}`);
 
   const captureScreen = () => {
     if (!isConnected) return;
+    setIsCapturing(true);
+    setImgLoading(true);
     setScreenshot(`${serverUrl}/screen?t=${Date.now()}`);
     setIsScreenModalOpen(true);
+    // Button spinner off very quickly, image spinner stays until image onLoad
+    setTimeout(() => setIsCapturing(false), 500); 
   };
 
   const getStats = async (urlOverride = null) => {
     setLoadingAction('stats');
+    const start = Date.now();
     const data = await sendAction('/stats', 'GET', null, urlOverride);
+    const elapsed = Date.now() - start;
+    if (elapsed < 1000) {
+      await new Promise(resolve => setTimeout(resolve, 1000 - elapsed));
+    }
     if (data && !data.error) setStats(data);
     setLoadingAction('');
   };
 
   const handlePower = (action) => {
     Alert.alert(
-      `⚠️ ${action.toUpperCase()}`,
-      `Are you sure you want to ${action} your PC?\nDevice will ${action} in 5 seconds.`,
+      `Confimation Required`,
+      `Are you sure you want to ${action.toUpperCase()} your PC?\nCommand will execute in 5 seconds.`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -165,7 +193,7 @@ export default function App() {
 
   const cancelShutdown = async () => {
     await sendAction('/power/cancel');
-    Alert.alert('Cancelled', 'Power action aborted.');
+    Alert.alert('Aborted', 'Shutdown/Restart cancelled!');
   };
 
   const onRefresh = useCallback(async () => {
@@ -178,7 +206,7 @@ export default function App() {
   // ─── Components ───────────────────────────────────────────
   if (!isConnected) {
     return (
-      <SafeAreaView style={styles.container}>
+      <View style={styles.container}>
         <StatusBar barStyle="light-content" backgroundColor={COLORS.background} />
         <View style={styles.connectContainer}>
           <View style={styles.heroGlow} />
@@ -212,12 +240,12 @@ export default function App() {
             </TouchableOpacity>
           </View>
         </View>
-      </SafeAreaView>
+      </View>
     );
   }
 
   return (
-    <SafeAreaView style={styles.container}>
+    <View style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor={COLORS.background} />
       
       {/* HEADER */}
@@ -245,46 +273,59 @@ export default function App() {
           
           <View style={styles.mediaRow}>
             <TouchableOpacity style={styles.mediaBtn} onPress={() => mediaControl('prev')}>
-              <Ionicons name="play-skip-back" size={28} color={COLORS.text} />
+              <MaterialCommunityIcons name="skip-previous" size={32} color={COLORS.text} />
             </TouchableOpacity>
             <TouchableOpacity style={styles.mediaBtnPlay} onPress={() => mediaControl('playpause')}>
-              <Ionicons name="play-pause" size={36} color={COLORS.text} />
+              <MaterialCommunityIcons name="play-pause" size={40} color={COLORS.text} />
             </TouchableOpacity>
             <TouchableOpacity style={styles.mediaBtn} onPress={() => mediaControl('next')}>
-              <Ionicons name="play-skip-forward" size={28} color={COLORS.text} />
+              <MaterialCommunityIcons name="skip-next" size={32} color={COLORS.text} />
             </TouchableOpacity>
           </View>
 
           <View style={styles.volumeRow}>
-            <TouchableOpacity onPress={handleToggleMute} style={{ width: 40, alignItems: 'center' }}>
+            <TouchableOpacity onPress={handleToggleMute} style={{ width: 44, alignItems: 'center' }}>
               <Ionicons name={isMuted || currentVolume === 0 ? "volume-mute" : "volume-high"} size={26} color={isMuted ? COLORS.danger : COLORS.textDim} />
             </TouchableOpacity>
-            <Slider
-              style={styles.slider}
-              minimumValue={0}
-              maximumValue={100}
-              value={currentVolume}
-              onSlidingComplete={handleSetVolume}
-              minimumTrackTintColor={COLORS.accent}
-              maximumTrackTintColor={COLORS.cardHighlight}
-              thumbTintColor={COLORS.text}
-            />
-            <Text style={styles.volumeText}>{currentVolume}%</Text>
+
+            <View style={{flexDirection: 'row', flex: 1, justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16}}>
+               <TouchableOpacity onPress={handleVolumeDown} style={{width: 44, height: 44, backgroundColor: COLORS.card, borderRadius: 22, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: COLORS.border}}>
+                  <Ionicons name="remove" size={24} color={COLORS.textDim} />
+               </TouchableOpacity>
+
+               <Text style={[styles.volumeText, {fontSize: 20, width: 60}]}>{currentVolume}%</Text>
+
+               <TouchableOpacity onPress={handleVolumeUp} style={{width: 44, height: 44, backgroundColor: COLORS.cardHighlight, borderRadius: 22, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: COLORS.border}}>
+                  <Ionicons name="add" size={24} color={COLORS.text} />
+               </TouchableOpacity>
+            </View>
           </View>
         </View>
 
         {/* ── SECT 2: UTILITIES ── */}
         <View style={styles.cardRow}>
-           <TouchableOpacity style={[styles.card, styles.flexCard]} onPress={captureScreen}>
-              <MaterialCommunityIcons name="monitor-screenshot" size={32} color={COLORS.accent} />
-              <Text style={styles.cardTitle}>Capture Screen</Text>
-              <Text style={styles.cardSubtitle}>View desktop</Text>
+           <TouchableOpacity style={[styles.card, styles.flexCard]} onPress={captureScreen} disabled={isCapturing}>
+              <View style={{ height: 40, justifyContent: 'center', alignItems: 'center', marginBottom: 10 }}>
+                {isCapturing ? (
+                    <ActivityIndicator size="large" color={COLORS.accent} />
+                ) : (
+                    <MaterialCommunityIcons name="monitor-screenshot" size={32} color={COLORS.accent} />
+                )}
+              </View>
+              <Text style={styles.cardTitle}>Screen</Text>
+              <Text style={styles.cardSubtitle}>Capture Live</Text>
            </TouchableOpacity>
            
-           <TouchableOpacity style={[styles.card, styles.flexCard]} onPress={getStats}>
-              <Ionicons name="hardware-chip" size={32} color={COLORS.warning} />
-              <Text style={styles.cardTitle}>Refresh Stats</Text>
-              <Text style={styles.cardSubtitle}>Update usage</Text>
+           <TouchableOpacity style={[styles.card, styles.flexCard]} onPress={getStats} disabled={loadingAction === 'stats'}>
+              <View style={{ height: 40, justifyContent: 'center', alignItems: 'center', marginBottom: 10 }}>
+                {loadingAction === 'stats' ? (
+                   <ActivityIndicator size="large" color={COLORS.warning} />
+                ) : (
+                   <Ionicons name="hardware-chip" size={32} color={COLORS.warning} />
+                )}
+              </View>
+              <Text style={styles.cardTitle}>Metrics</Text>
+              <Text style={styles.cardSubtitle}>Usage Stats</Text>
            </TouchableOpacity>
         </View>
 
@@ -335,42 +376,78 @@ export default function App() {
         )}
 
         {/* ── SECT 4: POWER ── */}
-        <View style={[styles.card, { borderColor: '#401515', borderWidth: 1 }]}>
-          <Text style={[styles.sectionTitle, { color: COLORS.danger }]}>Power Control</Text>
-          <View style={styles.powerRow}>
-            <TouchableOpacity style={styles.btnRestart} onPress={() => handlePower('restart')}>
-               <Ionicons name="refresh" size={20} color={COLORS.text} style={{marginRight: 6}} />
-               <Text style={styles.btnTextBold}>Restart</Text>
+        <View style={styles.powerCardWrapper}>
+            <TouchableOpacity style={styles.btnPowerMenu} onPress={() => setPowerMenuVisible(true)}>
+                <MaterialCommunityIcons name="power-settings" size={26} color={COLORS.danger} style={{marginRight: 10}}/>
+                <Text style={styles.btnPowerMenuTxt}>Power Menu</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.btnShutdown} onPress={() => handlePower('shutdown')}>
-               <Ionicons name="power" size={20} color={COLORS.text} style={{marginRight: 6}}/>
-               <Text style={styles.btnTextBold}>Shutdown</Text>
-            </TouchableOpacity>
-          </View>
-          <TouchableOpacity style={styles.btnCancel} onPress={cancelShutdown}>
-              <Text style={styles.btnTextDim}>Abort Power Action</Text>
-          </TouchableOpacity>
         </View>
 
       </ScrollView>
 
-      {/* Screen Modal */}
+      {/* Screen Capture Modal */}
       <Modal visible={isScreenModalOpen} transparent={true} animationType="fade">
          <View style={styles.modalBg}>
             <View style={styles.modalHeader}>
                <Text style={styles.modalTitle}>Desktop Capture</Text>
-               <TouchableOpacity onPress={() => setIsScreenModalOpen(false)}>
-                  <Ionicons name="close" size={28} color={COLORS.text} />
+               <TouchableOpacity style={styles.closeBtn} onPress={() => setIsScreenModalOpen(false)}>
+                  <Ionicons name="close" size={24} color={COLORS.text} />
                </TouchableOpacity>
             </View>
-            {screenshot && <Image source={{ uri: screenshot }} style={styles.modalImg} resizeMode="contain" />}
-            <TouchableOpacity style={[styles.btnPrimary, {margin: 20}]} onPress={captureScreen}>
-               <Text style={styles.btnPrimaryText}>Refresh Capture</Text>
-            </TouchableOpacity>
+            
+            <View style={styles.imgWrapper}>
+               {imgLoading && (
+                  <ActivityIndicator size="large" color={COLORS.accent} style={styles.absoluteLoader} />
+               )}
+               {screenshot && (
+                  <ScrollView minimumZoomScale={1} maximumZoomScale={5} horizontal={true} contentContainerStyle={{alignItems:'center', justifyContent: 'center'}}>
+                      <ScrollView minimumZoomScale={1} maximumZoomScale={5} contentContainerStyle={{alignItems:'center', justifyContent: 'center'}}>
+                          <Image 
+                              source={{ uri: screenshot }} 
+                              style={styles.modalImg} 
+                              resizeMode="contain" 
+                              onLoad={() => setImgLoading(false)}
+                              onError={() => setImgLoading(false)}
+                          />
+                      </ScrollView>
+                  </ScrollView>
+               )}
+            </View>
+
+            <View style={styles.modalFooter}>
+                <TouchableOpacity style={styles.btnPrimary} onPress={captureScreen} disabled={isCapturing}>
+                  <Text style={styles.btnPrimaryText}>{isCapturing ? 'Capturing...' : 'Refresh View'}</Text>
+                </TouchableOpacity>
+            </View>
          </View>
       </Modal>
 
-    </SafeAreaView>
+      {/* Power Action Bottom Sheet */}
+      <Modal visible={powerMenuVisible} transparent={true} animationType="slide">
+         <TouchableOpacity style={styles.powerModalOverlay} activeOpacity={1} onPress={() => setPowerMenuVisible(false)}>
+            <View style={styles.powerSheet}>
+               <View style={styles.sheetHandle} />
+               <Text style={styles.sheetTitle}>Power Options</Text>
+               <Text style={styles.sheetSubtitle}>Pick an action to execute on your PC.</Text>
+               
+               <TouchableOpacity style={[styles.sheetCollapseBtn, {backgroundColor: COLORS.warning, marginTop: 20}]} onPress={() => { setPowerMenuVisible(false); handlePower('restart'); }}>
+                   <Ionicons name="refresh" size={22} color={COLORS.text} style={{marginRight: 12}}/>
+                   <Text style={styles.btnTextBold}>Restart PC</Text>
+               </TouchableOpacity>
+
+               <TouchableOpacity style={[styles.sheetCollapseBtn, {backgroundColor: COLORS.danger}]} onPress={() => { setPowerMenuVisible(false); handlePower('shutdown'); }}>
+                   <Ionicons name="power" size={22} color={COLORS.text} style={{marginRight: 12}}/>
+                   <Text style={styles.btnTextBold}>Shutdown PC</Text>
+               </TouchableOpacity>
+
+               <TouchableOpacity style={styles.sheetCollapseCancel} onPress={() => { setPowerMenuVisible(false); cancelShutdown(); }}>
+                   <Text style={styles.btnTextDim}>Cancel Active Shutdown Action</Text>
+               </TouchableOpacity>
+            </View>
+         </TouchableOpacity>
+      </Modal>
+
+    </View>
   );
 }
 
@@ -379,6 +456,7 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: COLORS.background,
+    paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 0,
   },
   scrollContent: {
     padding: 16,
@@ -393,7 +471,7 @@ const styles = StyleSheet.create({
   },
   heroGlow: {
     position: 'absolute',
-    top: '30%',
+    top: '25%',
     left: '50%',
     width: 200,
     height: 200,
@@ -439,7 +517,7 @@ const styles = StyleSheet.create({
   inputWrapper: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: COLORS.cardHighlight,
+    backgroundColor: COLORS.background,
     borderRadius: 16,
     paddingHorizontal: 16,
     marginBottom: 20,
@@ -468,7 +546,7 @@ const styles = StyleSheet.create({
   },
   btnPrimaryText: {
     color: COLORS.text,
-    fontSize: 15,
+    fontSize: 16,
     fontWeight: 'bold',
     letterSpacing: 1,
   },
@@ -479,9 +557,9 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingHorizontal: 20,
-    paddingVertical: 16,
+    paddingVertical: 12,
     borderBottomWidth: 1,
-    borderBottomColor: COLORS.border,
+    borderBottomColor: COLORS.cardHighlight,
   },
   headerLeft: {
     flexDirection: 'row',
@@ -528,9 +606,13 @@ const styles = StyleSheet.create({
   cardRow: {
     flexDirection: 'row',
     gap: 16,
+    marginBottom: 16,
   },
   flexCard: {
     flex: 1,
+    marginBottom: 0,
+    alignItems: 'center',
+    paddingVertical: 24,
   },
   sectionTitle: {
     fontSize: 18,
@@ -548,7 +630,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '700',
     color: COLORS.text,
-    marginTop: 12,
   },
   cardSubtitle: {
     fontSize: 13,
@@ -556,27 +637,27 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
 
-  // MEDIA
+  // MEDIA & VOLUME
   mediaRow: {
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
-    gap: 24,
+    gap: 32,
     marginBottom: 30,
     marginTop: 10,
   },
   mediaBtn: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
+    width: 60,
+    height: 60,
+    borderRadius: 30,
     backgroundColor: COLORS.cardHighlight,
     justifyContent: 'center',
     alignItems: 'center',
   },
   mediaBtnPlay: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
+    width: 80,
+    height: 80,
+    borderRadius: 40,
     backgroundColor: COLORS.accent,
     justifyContent: 'center',
     alignItems: 'center',
@@ -588,10 +669,12 @@ const styles = StyleSheet.create({
   volumeRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: COLORS.cardHighlight,
+    backgroundColor: COLORS.background,
     paddingHorizontal: 12,
     paddingVertical: 12,
     borderRadius: 16,
+    borderWidth: 1,
+    borderColor: COLORS.border,
   },
   slider: {
     flex: 1,
@@ -614,9 +697,11 @@ const styles = StyleSheet.create({
   },
   hardwareBox: {
     flex: 1,
-    backgroundColor: COLORS.cardHighlight,
+    backgroundColor: COLORS.cartHighlight,
     padding: 16,
     borderRadius: 16,
+    borderWidth: 1,
+    borderColor: COLORS.border,
   },
   hwLabel: {
     fontSize: 13,
@@ -674,75 +759,128 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     paddingVertical: 10,
     borderBottomWidth: 1,
-    borderBottomColor: '#1e1e1e',
+    borderBottomColor: COLORS.cardHighlight,
   },
   tRowText: {
     fontSize: 13,
     fontWeight: '500',
   },
 
-  // POWER
-  powerRow: {
-    flexDirection: 'row',
-    gap: 12,
+  // POWER CONTROL MENU BUTTON
+  powerCardWrapper: {
+      marginTop: 20,
+      marginBottom: 30,
   },
-  btnRestart: {
-    flex: 1,
-    flexDirection: 'row',
-    backgroundColor: COLORS.warning,
-    paddingVertical: 16,
-    borderRadius: 16,
-    justifyContent: 'center',
-    alignItems: 'center',
+  btnPowerMenu: {
+      backgroundColor: '#261214',
+      borderWidth: 1,
+      borderColor: '#4d1217',
+      borderRadius: 20,
+      padding: 18,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
   },
-  btnShutdown: {
-    flex: 1,
-    flexDirection: 'row',
-    backgroundColor: COLORS.danger,
-    paddingVertical: 16,
-    borderRadius: 16,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  btnTextBold: {
-    color: COLORS.text,
-    fontSize: 15,
-    fontWeight: 'bold',
-  },
-  btnCancel: {
-    marginTop: 16,
-    paddingVertical: 14,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: COLORS.textDim,
-    alignItems: 'center',
-  },
-  btnTextDim: {
-    color: COLORS.textDim,
-    fontSize: 14,
-    fontWeight: '600',
+  btnPowerMenuTxt: {
+      color: COLORS.danger,
+      fontSize: 18,
+      fontWeight: 'bold',
+      letterSpacing: 0.5,
   },
 
-  // MODAL
+  // CAPTURE MODAL
   modalBg: {
     flex: 1,
-    backgroundColor: '#000000ed',
-    justifyContent: 'center',
+    backgroundColor: '#000000FA', // Solid Dark
+    justifyContent: 'space-between',
   },
   modalHeader: {
      flexDirection: 'row',
      justifyContent: 'space-between',
-     padding: 24,
+     padding: 20,
+     paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight + 20 : 50,
      alignItems: 'center',
   },
   modalTitle: {
      color: COLORS.text,
      fontSize: 18,
-     fontWeight: 'bold'
+     fontWeight: '700',
+     letterSpacing: 0.5,
+  },
+  closeBtn: {
+     backgroundColor: COLORS.cardHighlight,
+     borderRadius: 16,
+     padding: 8,
+  },
+  imgWrapper: {
+     flex: 1,
+     justifyContent: 'center',
+     alignItems: 'center',
+     overflow: 'hidden',
+  },
+  absoluteLoader: {
+     position: 'absolute',
+     zIndex: 10,
   },
   modalImg: {
-     width: '100%',
-     height: SCREEN_WIDTH * 0.7,
-     backgroundColor: '#000'
+     width: SCREEN_WIDTH,
+     height: SCREEN_HEIGHT * 0.7,
+  },
+  modalFooter: {
+      padding: 24,
+      paddingBottom: 40,
+  },
+
+  // POWER BOTTOM SHEET
+  powerModalOverlay: {
+      flex: 1,
+      backgroundColor: '#000000AA',
+      justifyContent: 'flex-end',
+  },
+  powerSheet: {
+      backgroundColor: COLORS.cardHighlight,
+      borderTopLeftRadius: 32,
+      borderTopRightRadius: 32,
+      padding: 24,
+      paddingBottom: 40,
+  },
+  sheetHandle: {
+      width: 40,
+      height: 4,
+      backgroundColor: COLORS.textDim,
+      borderRadius: 2,
+      alignSelf: 'center',
+      marginBottom: 20,
+  },
+  sheetTitle: {
+      color: COLORS.text,
+      fontSize: 24,
+      fontWeight: 'bold',
+  },
+  sheetSubtitle: {
+      color: COLORS.textDim,
+      fontSize: 14,
+      marginTop: 4,
+  },
+  sheetCollapseBtn: {
+      flexDirection: 'row',
+      paddingVertical: 18,
+      borderRadius: 16,
+      justifyContent: 'center',
+      alignItems: 'center',
+      marginBottom: 12,
+  },
+  btnTextBold: {
+      color: COLORS.text,
+      fontSize: 16,
+      fontWeight: 'bold',
+  },
+  sheetCollapseCancel: {
+      paddingVertical: 16,
+      alignItems: 'center',
+      marginTop: 10,
+      borderWidth: 1,
+      borderColor: COLORS.border,
+      borderRadius: 16,
   }
 });
