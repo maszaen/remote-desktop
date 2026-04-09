@@ -106,7 +106,7 @@ export default function App() {
             if (!prefixes.includes(currentPrefix)) prefixes.unshift(currentPrefix);
         }
 
-        const pingIp = (targetIp) => {
+        const pingIp = (targetIp, timeoutMs = 450) => {
             return new Promise((resolve) => {
                 let finished = false;
                 const controller = new AbortController();
@@ -116,7 +116,7 @@ export default function App() {
                         finished = true; 
                         resolve(null); 
                     }
-                }, 450); // LAN pings take < 50ms. 450ms cleanly drops dead IPs without queue lag.
+                }, timeoutMs); 
                 
                 fetch(`http://${targetIp}:8000/`, { signal: controller.signal })
                     .then(res => res.json())
@@ -141,6 +141,9 @@ export default function App() {
             });
         };
 
+        // First, explicitly check for mDNS ZeroConf Broadcaster (Magic Hostname)
+        await pingIp('NexusPC.local', 1200);
+
         const ipsToScan = ['10.0.2.2']; // Bypass routing for Android Emulators automatically
         for (const prefix of prefixes) {
             for (let i = 1; i <= 254; i++) ipsToScan.push(`${prefix}${i}`);
@@ -148,7 +151,7 @@ export default function App() {
 
         const batchSize = 65; // Massive parallel lane since we rely on ultra-fast explicit native aborts
         for (let i = 0; i < ipsToScan.length; i += batchSize) {
-           await Promise.all(ipsToScan.slice(i, i + batchSize).map(pingIp));
+           await Promise.all(ipsToScan.slice(i, i + batchSize).map(ip => pingIp(ip, 450)));
         }
     } catch(e) {}
     setIsScanning(false);

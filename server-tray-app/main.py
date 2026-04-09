@@ -243,6 +243,24 @@ def udp_broadcaster():
         import time
         time.sleep(2)
 
+from zeroconf import ServiceInfo, Zeroconf
+
+def setup_mdns(ip):
+    # Register mDNS Service
+    try:
+        info = ServiceInfo(
+            "_http._tcp.local.",
+            f"NexusPC._http._tcp.local.",
+            addresses=[socket.inet_aton(ip)],
+            port=8000,
+            properties={"hostname": socket.gethostname()}
+        )
+        zc = Zeroconf()
+        zc.register_service(info)
+        return zc
+    except Exception as e:
+        return None
+
 def start_server():
     uvicorn.run(app, host="0.0.0.0", port=8000, log_level="error")
 
@@ -250,6 +268,23 @@ if __name__ == "__main__":
     # Start UDP Broadcaster
     threading.Thread(target=udp_broadcaster, daemon=True).start()
     
+    # Get active LAN IP for mDNS
+    test_s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        test_s.connect(("10.255.255.255", 1))
+        local_ip = test_s.getsockname()[0]
+    except Exception:
+        local_ip = "127.0.0.1"
+    finally:
+        test_s.close()
+        
+    zc = setup_mdns(local_ip)
+    
     server_thread = threading.Thread(target=start_server, daemon=True)
     server_thread.start()
-    setup_tray_icon()
+    
+    try:
+        setup_tray_icon()
+    finally:
+        if zc:
+            zc.close()
