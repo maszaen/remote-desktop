@@ -11,54 +11,44 @@ import {
   StatusBar,
   RefreshControl,
   Dimensions,
-  SafeAreaView,
   Platform,
   ActivityIndicator,
-  Modal
+  Modal,
+  KeyboardAvoidingView
 } from 'react-native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as Network from 'expo-network';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 // --- THEME ---
-// Using strict Apple-style Dark Mode guidelines (8-pt scale)
 const COLORS = {
-  background: '#000000', // Pure black background
-  surface: '#121212',    // Slightly elevated surface
-  card: '#1C1C1E',       // Raised card surface
-  cardElevated: '#2C2C2E', // Buttons inside cards
-  primary: '#0A84FF',    // iOS Blue
-  danger: '#FF453A',     // iOS Red
-  warning: '#FF9F0A',    // iOS Orange
-  success: '#32D74B',    // iOS Green
-  text: '#FFFFFF',
-  textSecondary: '#8E8E93',
-  border: '#2C2C2E',
+  background: '#000000', surface: '#121212', card: '#1C1C1E', cardElevated: '#2C2C2E',
+  primary: '#0A84FF', danger: '#FF453A', warning: '#FF9F0A', success: '#32D74B',
+  text: '#FFFFFF', textSecondary: '#8E8E93', border: '#2C2C2E',
 };
 
-const SPACING = {
-  xs: 4,
-  sm: 8,
-  md: 16,
-  lg: 24,
-  xl: 32,
-};
-
-const RADIUS = {
-  sm: 8,
-  md: 16,
-  lg: 24,
-  round: 999,
-};
+const SPACING = { xs: 4, sm: 8, md: 16, lg: 24, xl: 32 };
+const RADIUS = { sm: 8, md: 16, lg: 24, round: 999 };
 
 export default function App() {
-  const [ipAddress, setIpAddress] = useState('');
   const [isConnected, setIsConnected] = useState(false);
   const [serverUrl, setServerUrl] = useState('');
   const [savedDevices, setSavedDevices] = useState([]);
+  const [activePin, setActivePin] = useState(null);
 
-  // States
+  // Network Discovery
+  const [discoveredDevices, setDiscoveredDevices] = useState([]);
+  const [isScanning, setIsScanning] = useState(false);
+  
+  // Pairing logic
+  const [pairingModalOpen, setPairingModalOpen] = useState(false);
+  const [pairingIp, setPairingIp] = useState(null);
+  const [pairingHostname, setPairingHostname] = useState(null);
+  const [inputPin, setInputPin] = useState('');
+
+  // App States
   const [currentVolume, setCurrentVolume] = useState(0);
   const [isMuted, setIsMuted] = useState(false);
   const [stats, setStats] = useState(null);
@@ -70,71 +60,141 @@ export default function App() {
   const [loadingAction, setLoadingAction] = useState('');
   const [powerMenuVisible, setPowerMenuVisible] = useState(false);
 
-  // ─── Startup ───────────────────────────────────────────
   useEffect(() => {
     loadSavedDevices();
+    scanLocalNetwork(); // auto-scan on startup
   }, []);
 
   const loadSavedDevices = async () => {
     try {
-      const data = await AsyncStorage.getItem('saved_nexus_devices');
+      const data = await AsyncStorage.getItem('nexus_devices_v2');
       if (data) setSavedDevices(JSON.parse(data));
     } catch (e) {}
   };
 
-  const saveDevice = async (ip, hostname) => {
+  const saveDevice = async (ip, hostname, pin) => {
     try {
-      const newDevice = { ip, hostname, lastSeen: Date.now() };
+      const newDevice = { ip, hostname, pin, lastSeen: Date.now() };
       let updated = [newDevice, ...savedDevices.filter(d => d.ip !== ip)];
       setSavedDevices(updated);
-      await AsyncStorage.setItem('saved_nexus_devices', JSON.stringify(updated));
+      await AsyncStorage.setItem('nexus_devices_v2', JSON.stringify(updated));
     } catch (e) {}
   };
 
   const removeSavedDevice = async (ip) => {
-    Alert.alert("Remove Device?", `Are you sure you want to forget IP ${ip}?`, [
+    Alert.alert("Remove Device?", `Forget paired PC ${ip}?`, [
        { text: "Cancel", style: "cancel" },
        { text: "Remove", style: "destructive", onPress: async () => {
             let updated = savedDevices.filter(d => d.ip !== ip);
             setSavedDevices(updated);
-            await AsyncStorage.setItem('saved_nexus_devices', JSON.stringify(updated));
+            await AsyncStorage.setItem('nexus_devices_v2', JSON.stringify(updated));
        }}
     ]);
   };
 
-  // ─── Network Actions ───────────────────────────────────────────
-  const connect = async (overrideIp = null) => {
-    const targetIp = overrideIp && typeof overrideIp === 'string' ? overrideIp : ipAddress;
-    if (!targetIp.trim()) return Alert.alert('Whoops!', 'Enter your PC IP address first.');
+  // ─── Network Scanning ───────────────────────────────────────────
+  const scanLocalNetwork = async () => {
+    setIsScanning(true);
+    setDiscoveredDevices([]); 
+    try {
+        const ipInfo = await Network.getIpAddressAsync();
+        if (!ipInfo || ipInfo === '0.0.0.0' || !ipInfo.includes('.')) { setIsScanning(false); return; }
+        
+        const base = ipInfo.split('.').slice(0, 3).join('.') + '.';
+        const pingIp = async (targetIp) => {
+            const controller = new AbortController();
+            const id = setTimeout(() => controller.abort(), 1500); // 1.5s timeout for fast sweep
+            try {
+                const res = await fetch(`http://${targetIp}:8000/`, { signal: controller.signal });
+                const data = await res.json();
+                if (data.status === 'ok') {
+                     setDiscoveredDevices(prev => {
+                         if (!prev.find(d => d.ip === targetIp)) return [...prev, { ip: targetIp, hostname: data.hostname }];
+                         return prev;
+                     });
+                }
+            } catch (e) {
+            } finally {
+                clearTimeout(id);
+            }
+        };
+
+        const batchSize = 30; // 30 concurrent requests mapping from 1 to 254
+        const ips = Array.from({length: 254}, (_, i) => `${base}${i + 1}`);
+        for (let i = 0; i < ips.length; i += batchSize) {
+           await Promise.all(ips.slice(i, i + batchSize).map(pingIp));
+        }
+    } catch(e) {}
+    setIsScanning(false);
+  };
+
+  // ─── Connection & Pairing ───────────────────────────────────────────
+  const initiateConnect = async (ip, hostname, savedPin = null) => {
+    const url = `http://${ip}:8000`;
+    setLoadingAction(`connecting_${ip}`);
     
-    let cleanIp = targetIp.trim();
-    cleanIp = cleanIp.replace(/^https?:\/\//, '').replace(/:\d+$/, '').replace(/\/+$/, '');
-    const url = `http://${cleanIp}:8000`;
-    
-    setLoadingAction(`connecting_${cleanIp}`);
+    // First, verify connection works and PIN is valid (if provided)
     try {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 4000);
-      const res = await fetch(`${url}/`, { signal: controller.signal });
+      
+      const res = await fetch(`${url}/volume`, { 
+          headers: savedPin ? { 'pin': savedPin } : {}, 
+          signal: controller.signal 
+      });
       clearTimeout(timeoutId);
 
-      if (res.ok) {
-        const data = await res.json().catch(() => ({}));
-        const deviceHostname = data.hostname || 'Unknown PC';
-        
-        await saveDevice(cleanIp, deviceHostname);
+      if (res.status === 401 || !savedPin) {
+          // Needs PIN or unauthorized
+          setPairingIp(ip);
+          setPairingHostname(hostname);
+          setPairingModalOpen(true);
+          setLoadingAction('');
+          return;
+      }
 
-        setServerUrl(url);
-        setIsConnected(true);
-        setIpAddress(''); // clear manual input
-        fetchVolume(url);
-        getStats(url);
+      if (res.ok) {
+          // Success
+          setActivePin(savedPin);
+          setServerUrl(url);
+          setIsConnected(true);
+          fetchVolume(url, savedPin);
+          getStats(url, savedPin);
+      } else {
+          Alert.alert('Connection Failed', 'Server rejected the connection.');
       }
     } catch (e) {
-      Alert.alert('Connection Failed', `Could not connect to ${cleanIp}.\nMake sure device and server are on the same network.`);
+      Alert.alert('Connection Error', `Target ${ip} is unreachable.`);
     } finally {
-      setLoadingAction('');
+      if (!pairingModalOpen) setLoadingAction('');
     }
+  };
+
+  const handlePairingSubmit = async () => {
+     if (inputPin.length !== 4) return Alert.alert("Invalid PIN", "Enter the 4-digit PIN.");
+     
+     const url = `http://${pairingIp}:8000`;
+     setLoadingAction(`pairing`);
+     try {
+        const res = await fetch(`${url}/volume`, { headers: { 'pin': inputPin } });
+        if (res.ok) {
+            // Pair successful
+            await saveDevice(pairingIp, pairingHostname, inputPin);
+            setActivePin(inputPin);
+            setServerUrl(url);
+            setIsConnected(true);
+            setPairingModalOpen(false);
+            setInputPin('');
+            
+            fetchVolume(url, inputPin);
+            getStats(url, inputPin);
+        } else {
+            Alert.alert("Pairing Failed", "Incorrect PIN entered.");
+        }
+     } catch (e) {
+        Alert.alert("Pairing Error", "Lost connection to the PC.");
+     }
+     setLoadingAction('');
   };
 
   const disconnect = () => {
@@ -142,15 +202,22 @@ export default function App() {
     setServerUrl('');
     setStats(null);
     setScreenshot(null);
+    setActivePin(null);
   };
 
-  const sendAction = async (endpoint, method = 'POST', body = null, urlOverride = null) => {
+  const sendAction = async (endpoint, method = 'POST', body = null, urlOverride = null, pinOverride = null) => {
     const targetUrl = urlOverride || serverUrl;
-    if (!targetUrl) return null;
+    const targetPin = pinOverride || activePin;
+    if (!targetUrl || !targetPin) return null;
+    
     try {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 8000);
-      const options = { method, headers: { 'Content-Type': 'application/json' }, signal: controller.signal };
+      const options = { 
+          method, 
+          headers: { 'Content-Type': 'application/json', 'pin': targetPin }, 
+          signal: controller.signal 
+      };
       if (body) options.body = JSON.stringify(body);
       const res = await fetch(`${targetUrl}${endpoint}`, options);
       clearTimeout(timeoutId);
@@ -159,38 +226,35 @@ export default function App() {
   };
 
   // ─── Feature Actions ─────────────────────────────────────────
-  const fetchVolume = async (urlOverride = null) => {
-    const data = await sendAction('/volume', 'GET', null, urlOverride);
-    if (data && !data.error) {
-      setCurrentVolume(data.volume);
-      setIsMuted(data.muted);
-    }
+  const fetchVolume = async (url = null, pin = null) => {
+    const data = await sendAction('/volume', 'GET', null, url, pin);
+    if (data && !data.error) { setCurrentVolume(data.volume); setIsMuted(data.muted); }
   };
   const handleToggleMute = async () => {
-    const result = await sendAction('/volume/mute');
-    if (result && !result.error) setIsMuted(result.muted);
+    const res = await sendAction('/volume/mute');
+    if (res && !res.error) setIsMuted(res.muted);
   };
   const handleVolumeUp = async () => {
-    const result = await sendAction('/volume/up');
-    if (result && !result.error) { setCurrentVolume(result.volume); setIsMuted(false); }
+    const res = await sendAction('/volume/up');
+    if (res && !res.error) { setCurrentVolume(res.volume); setIsMuted(false); }
   };
   const handleVolumeDown = async () => {
-    const result = await sendAction('/volume/down');
-    if (result && !result.error) { setCurrentVolume(result.volume); setIsMuted(false); }
+    const res = await sendAction('/volume/down');
+    if (res && !res.error) { setCurrentVolume(res.volume); setIsMuted(false); }
   };
   const mediaControl = (action) => sendAction(`/media/${action}`);
   const captureScreen = async () => {
     if (!isConnected) return;
     setIsCapturing(true);
     setImgLoading(true);
-    setScreenshot(`${serverUrl}/screen?t=${Date.now()}`);
+    setScreenshot(`${serverUrl}/screen?t=${Date.now()}`); // uses headers inside <Image/> component
     await new Promise(r => setTimeout(r, 600)); 
     setIsCapturing(false);
   };
-  const getStats = async (urlOverride = null) => {
+  const getStats = async (url = null, pin = null) => {
     setLoadingAction('stats');
     const start = Date.now();
-    const data = await sendAction('/stats', 'GET', null, urlOverride);
+    const data = await sendAction('/stats', 'GET', null, url, pin);
     const elapsed = Date.now() - start;
     if (elapsed < 1000) await new Promise(resolve => setTimeout(resolve, 1000 - elapsed));
     if (data && !data.error) setStats(data);
@@ -211,73 +275,121 @@ export default function App() {
     await fetchVolume();
     await getStats();
     setRefreshing(false);
-  }, [serverUrl]);
+  }, [serverUrl, activePin]);
 
   // ─── Unconnected View ─────────────────────────────────────────
   if (!isConnected) {
     return (
-      <ScrollView contentContainerStyle={styles.baseContainerScroll} keyboardShouldPersistTaps="handled">
+      <View style={styles.baseContainer}>
         <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
-        <View style={styles.loginContainer}>
+        
+        <ScrollView contentContainerStyle={styles.scrollContentUnconnected} showsVerticalScrollIndicator={false}>
           <View style={styles.loginHeader}>
-            <Ionicons name="desktop" size={64} color={COLORS.primary} style={styles.loginIcon} />
-            <Text style={styles.loginTitle}>NEXUS</Text>
-            <Text style={styles.loginSubtitle}>Select a device to control</Text>
+            <Ionicons name="wifi" size={56} color={COLORS.primary} style={styles.loginIcon} />
+            <Text style={styles.loginTitle}>NEXUS NETWORK</Text>
+            <Text style={styles.loginSubtitle}>Select a local PC to pair securely</Text>
           </View>
           
-          {/* Saved Devices Section */}
+          {/* Discovered Devices */}
+          <View style={styles.sectionBlock}>
+             <View style={styles.sectionHeaderFlex}>
+                <Text style={styles.sectionLabel}>DISCOVERED PCS</Text>
+                <TouchableOpacity onPress={scanLocalNetwork} disabled={isScanning}>
+                   {isScanning ? <ActivityIndicator size="small" color={COLORS.primary} /> : <Ionicons name="sync" size={18} color={COLORS.primary} />}
+                </TouchableOpacity>
+             </View>
+             
+             {discoveredDevices.length === 0 && !isScanning && (
+                 <View style={styles.emptyCard}>
+                    <Text style={styles.emptyText}>No Nexus PCs found on your WiFi.</Text>
+                 </View>
+             )}
+
+             {discoveredDevices.map((dev, i) => {
+                const isPaired = savedDevices.find(s => s.ip === dev.ip);
+                return (
+                  <TouchableOpacity 
+                     key={i} 
+                     style={styles.pcDeviceCard} 
+                     onPress={() => initiateConnect(dev.ip, dev.hostname, isPaired ? isPaired.pin : null)}
+                     disabled={loadingAction.includes('connecting')}
+                  >
+                     <View style={[styles.deviceIconBox, isPaired && {backgroundColor: COLORS.success + '22'}]}>
+                        <Ionicons name={isPaired ? "checkmark-circle" : "desktop"} size={24} color={isPaired ? COLORS.success : COLORS.primary} />
+                     </View>
+                     <View style={styles.deviceInfo}>
+                        <Text style={styles.deviceName}>{dev.hostname}</Text>
+                        <Text style={styles.deviceIp}>IP: {dev.ip} {!isPaired && ' • Requires PIN'}</Text>
+                     </View>
+                     {loadingAction === `connecting_${dev.ip}` ? (
+                         <ActivityIndicator size="small" color={COLORS.primary} />
+                     ) : (
+                         <Ionicons name="chevron-forward" size={20} color={COLORS.textSecondary} />
+                     )}
+                  </TouchableOpacity>
+                )
+             })}
+          </View>
+
+          {/* Saved Offline Devices */}
           {savedDevices.length > 0 && (
-             <View style={styles.savedDevicesSection}>
-                 <Text style={styles.savedTitle}>MY DEVICES</Text>
-                 {savedDevices.map((dev, i) => (
+             <View style={styles.sectionBlock}>
+                 <Text style={styles.sectionLabel}>PREVIOUSLY PAIRED (OFFLINE)</Text>
+                 {savedDevices.filter(s => !discoveredDevices.find(d => d.ip === s.ip)).map((dev, i) => (
                     <TouchableOpacity 
                        key={i} 
-                       style={styles.savedDeviceCard} 
-                       onPress={() => connect(dev.ip)}
+                       style={[styles.pcDeviceCard, {opacity: 0.6}]} 
+                       onPress={() => initiateConnect(dev.ip, dev.hostname, dev.pin)}
                        onLongPress={() => removeSavedDevice(dev.ip)}
-                       disabled={loadingAction.includes('connecting')}
                     >
-                       <View style={styles.savedDeviceIcon}>
-                          <Ionicons name="desktop-outline" size={24} color={COLORS.primary} />
+                       <View style={styles.deviceIconBox}>
+                          <Ionicons name="desktop-outline" size={24} color={COLORS.textSecondary} />
                        </View>
-                       <View style={styles.savedDeviceInfo}>
-                          <Text style={styles.savedDeviceName}>{dev.hostname}</Text>
-                          <Text style={styles.savedDeviceIp}>{dev.ip}</Text>
+                       <View style={styles.deviceInfo}>
+                          <Text style={styles.deviceName}>{dev.hostname}</Text>
+                          <Text style={styles.deviceIp}>{dev.ip} • Paired</Text>
                        </View>
-                       {loadingAction === `connecting_${dev.ip}` ? (
-                           <ActivityIndicator size="small" color={COLORS.primary} />
-                       ) : (
-                           <Ionicons name="chevron-forward" size={20} color={COLORS.textSecondary} />
-                       )}
                     </TouchableOpacity>
                  ))}
              </View>
           )}
+        </ScrollView>
 
-          <View style={styles.loginCard}>
-            <Text style={styles.inputLabel}>MANUAL CONNECT (IP)</Text>
-            <View style={styles.inputWrapper}>
-              <Ionicons name="link" size={20} color={COLORS.textSecondary} />
-              <TextInput
-                style={styles.inputField}
-                placeholder="192.168.1.5"
-                placeholderTextColor={COLORS.textSecondary}
-                value={ipAddress}
-                onChangeText={setIpAddress}
-                keyboardType="default"
-                autoCapitalize="none"
-              />
-            </View>
-            <TouchableOpacity style={styles.btnConnect} onPress={connect} disabled={loadingAction.includes('connecting')}>
-              {loadingAction && loadingAction.includes('connecting') ? (
-                <ActivityIndicator size="small" color={COLORS.text} />
-              ) : (
-                <Text style={styles.btnConnectText}>CONNECT NOW</Text>
-              )}
-            </TouchableOpacity>
-          </View>
-        </View>
-      </ScrollView>
+        {/* Pairing Code Modal */}
+        <Modal visible={pairingModalOpen} transparent animationType="fade">
+            <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={styles.modalOverlay}>
+               <View style={styles.pairingBox}>
+                   <View style={styles.pairingIcon}>
+                       <Ionicons name="lock-closed" size={32} color={COLORS.warning} />
+                   </View>
+                   <Text style={styles.pairingTitle}>Pairing Required</Text>
+                   <Text style={styles.pairingSub}>Enter the 4-digit PIN shown on {pairingHostname}'s Nexus Server PC Tray Icon.</Text>
+                   
+                   <TextInput
+                      style={styles.pinInput}
+                      keyboardType="number-pad"
+                      maxLength={4}
+                      value={inputPin}
+                      onChangeText={setInputPin}
+                      placeholder="• • • •"
+                      placeholderTextColor={COLORS.textSecondary}
+                      autoFocus
+                      secureTextEntry
+                   />
+                   
+                   <View style={styles.pairingBtnRow}>
+                       <TouchableOpacity style={styles.btnCancel} onPress={() => setPairingModalOpen(false)}>
+                           <Text style={styles.btnCancelText}>Cancel</Text>
+                       </TouchableOpacity>
+                       <TouchableOpacity style={styles.btnConfirm} onPress={handlePairingSubmit} disabled={inputPin.length !== 4 || loadingAction === 'pairing'}>
+                           {loadingAction === 'pairing' ? <ActivityIndicator color={COLORS.background} /> : <Text style={styles.btnConfirmText}>Verify</Text>}
+                       </TouchableOpacity>
+                   </View>
+               </View>
+            </KeyboardAvoidingView>
+        </Modal>
+
+      </View>
     );
   }
 
@@ -285,13 +397,11 @@ export default function App() {
   return (
     <View style={styles.baseContainer}>
       <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
-      
-      {/* GLOBAL HEADER */}
       <View style={styles.topNavigation}>
         <View style={styles.navLeft}>
             <View style={styles.statusIndicator} />
             <View>
-              <Text style={styles.navStatusText}>ONLINE</Text>
+              <Text style={styles.navStatusText}>SECURE CONNECTION</Text>
               <Text style={styles.navIpText}>{serverUrl.replace('http://', '')}</Text>
             </View>
         </View>
@@ -305,8 +415,7 @@ export default function App() {
         contentContainerStyle={styles.scrollContent}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.primary} />}
       >
-        
-        {/* CARD: MEDIA PLAYER */}
+        {/* Media */}
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Media Controls</Text>
           <View style={styles.mediaCluster}>
@@ -323,7 +432,7 @@ export default function App() {
           </View>
         </View>
 
-        {/* CARD: VOLUME */}
+        {/* Volume */}
         <View style={styles.card}>
           <Text style={styles.cardTitle}>System Volume</Text>
           <View style={styles.volumeCluster}>
@@ -344,7 +453,7 @@ export default function App() {
           </View>
         </View>
 
-        {/* CARD: SCREEN CAPTURE */}
+        {/* Live Capture */}
         <View style={styles.card}>
           <View style={styles.cardHeaderFlex}>
              <Text style={styles.cardTitleNoMargin}>Live Desktop</Text>
@@ -360,7 +469,13 @@ export default function App() {
              )}
              {screenshot ? (
                  <ScrollView minimumZoomScale={1} maximumZoomScale={4} contentContainerStyle={styles.screenScroll}>
-                    <Image source={{ uri: screenshot }} style={styles.screenImage} resizeMode="contain" onLoad={() => setImgLoading(false)} onError={() => setImgLoading(false)} />
+                    <Image 
+                       source={{ uri: screenshot, headers: { 'pin': activePin } }} 
+                       style={styles.screenImage} 
+                       resizeMode="contain" 
+                       onLoad={() => setImgLoading(false)} 
+                       onError={() => setImgLoading(false)} 
+                    />
                  </ScrollView>
              ) : (
                  <View style={styles.screenPlaceholder}>
@@ -371,7 +486,7 @@ export default function App() {
           </View>
         </View>
 
-        {/* CARD: PERFORMANCE */}
+        {/* Performance */}
         <View style={styles.card}>
            <View style={styles.cardHeaderFlex}>
               <Text style={styles.cardTitleNoMargin}>System Performance</Text>
@@ -379,43 +494,31 @@ export default function App() {
                  {loadingAction === 'stats' ? <ActivityIndicator size="small" color={COLORS.warning} /> : <Ionicons name="sync" size={20} color={COLORS.textSecondary} />}
               </TouchableOpacity>
            </View>
-
            {stats ? (
               <View style={styles.statsContainer}>
                  <View style={styles.hwWidgets}>
                    <View style={styles.hwWidget}>
-                     <View style={styles.hwWidgetHeader}>
-                        <Ionicons name="hardware-chip" size={16} color={COLORS.textSecondary} />
-                        <Text style={styles.hwWidgetLabel}>CPU</Text>
-                     </View>
+                     <View style={styles.hwWidgetHeader}><Ionicons name="hardware-chip" size={16} color={COLORS.textSecondary} /><Text style={styles.hwWidgetLabel}>CPU</Text></View>
                      <Text style={styles.hwWidgetValue}>{stats.cpu_percent.toFixed(0)}%</Text>
                      <View style={styles.hwTrack}><View style={[styles.hwFill, { width: `${Math.min(100, stats.cpu_percent)}%`, backgroundColor: stats.cpu_percent > 80 ? COLORS.danger : COLORS.success }]} /></View>
                    </View>
                    <View style={styles.separatorVertical} />
                    <View style={styles.hwWidget}>
-                     <View style={styles.hwWidgetHeader}>
-                        <Ionicons name="server" size={16} color={COLORS.textSecondary} />
-                        <Text style={styles.hwWidgetLabel}>RAM</Text>
-                     </View>
+                     <View style={styles.hwWidgetHeader}><Ionicons name="server" size={16} color={COLORS.textSecondary} /><Text style={styles.hwWidgetLabel}>RAM</Text></View>
                      <Text style={styles.hwWidgetValue}>{stats.ram_percent.toFixed(0)}%</Text>
                      <View style={styles.hwTrack}><View style={[styles.hwFill, { width: `${Math.min(100, stats.ram_percent)}%`, backgroundColor: stats.ram_percent > 80 ? COLORS.danger : COLORS.primary }]} /></View>
                    </View>
                  </View>
-
                  <View style={styles.processesSection}>
                    <View style={styles.processesFilterRow}>
                       <Text style={styles.processesLabel}>Processes</Text>
-                      <TouchableOpacity onPress={() => setShowAllProcesses(!showAllProcesses)}>
-                        <Text style={styles.toggleDisplayBtn}>{showAllProcesses ? 'Show Less' : 'View Full List'}</Text>
-                      </TouchableOpacity>
+                      <TouchableOpacity onPress={() => setShowAllProcesses(!showAllProcesses)}><Text style={styles.toggleDisplayBtn}>{showAllProcesses ? 'Show Less' : 'View Full List'}</Text></TouchableOpacity>
                    </View>
-                   
                    <View style={styles.tableHeader}>
                      <Text style={[styles.thCell, {flex: 3}]}>Name</Text>
                      <Text style={[styles.thCell, {flex: 1.5, textAlign: 'right'}]}>Mem</Text>
                      <Text style={[styles.thCell, {flex: 1, textAlign: 'right'}]}>CPU</Text>
                    </View>
-                   
                    <View style={styles.tableBody}>
                        {(showAllProcesses ? stats.top_processes : stats.top_processes.slice(0, 5)).map((p, i) => (
                          <View key={i} style={styles.tdRow}>
@@ -428,22 +531,17 @@ export default function App() {
                  </View>
               </View>
            ) : (
-              <View style={styles.screenPlaceholder}>
-                 <Ionicons name="pie-chart-outline" size={32} color={COLORS.textSecondary} />
-                 <Text style={styles.screenPlaceholderText}>Metrics unavailable. Tap sync.</Text>
-              </View>
+              <View style={styles.screenPlaceholder}><Ionicons name="pie-chart-outline" size={32} color={COLORS.textSecondary} /><Text style={styles.screenPlaceholderText}>Metrics unavailable. Tap sync.</Text></View>
            )}
         </View>
 
-        {/* BOTTOM TRIGGER: POWER OPTIONS */}
         <TouchableOpacity style={styles.triggerBtnDanger} onPress={() => setPowerMenuVisible(true)}>
              <Ionicons name="power" size={24} color={COLORS.danger} />
              <Text style={styles.triggerBtnTextDanger}>Power Menu</Text>
         </TouchableOpacity>
-
       </ScrollView>
 
-      {/* MODAL: POWER OPTIONS SHEETS */}
+      {/* POWER MODAL */}
       <Modal visible={powerMenuVisible} transparent={true} animationType="slide">
          <View style={styles.sheetOverlay}>
             <TouchableOpacity style={styles.sheetCloser} activeOpacity={1} onPress={() => setPowerMenuVisible(false)} />
@@ -453,11 +551,11 @@ export default function App() {
                <View style={styles.sheetActionGroup}>
                    <TouchableOpacity style={styles.sheetBtnWarning} onPress={() => { setPowerMenuVisible(false); handlePower('restart'); }}>
                        <Ionicons name="refresh" size={22} color={COLORS.background} />
-                       <Text style={styles.sheetBtnTextDark}>Restart System</Text>
+                       <Text style={styles.sheetBtnTextDark}>Restart</Text>
                    </TouchableOpacity>
                    <TouchableOpacity style={styles.sheetBtnDanger} onPress={() => { setPowerMenuVisible(false); handlePower('shutdown'); }}>
                        <Ionicons name="power" size={22} color={COLORS.text} />
-                       <Text style={styles.sheetBtnTextLight}>Shutdown System</Text>
+                       <Text style={styles.sheetBtnTextLight}>Shutdown</Text>
                    </TouchableOpacity>
                </View>
                <TouchableOpacity style={styles.sheetBtnOutline} onPress={() => { setPowerMenuVisible(false); cancelShutdown(); }}>
@@ -466,507 +564,106 @@ export default function App() {
             </View>
          </View>
       </Modal>
-
     </View>
   );
 }
 
-// ─── STYLESHEET ────────────────────────────────────────────────
 const styles = StyleSheet.create({
   // Global
-  baseContainer: {
-    flex: 1,
-    backgroundColor: COLORS.background,
-    paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 0,
-  },
-  baseContainerScroll: {
-    flexGrow: 1,
-    backgroundColor: COLORS.background,
-    paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 0,
-    justifyContent: 'center',
-  },
-  scrollContent: {
-    padding: SPACING.md,
-    paddingBottom: SPACING.xl * 2,
-    gap: SPACING.lg, // Perfect component spacing
-  },
+  baseContainer: { flex: 1, backgroundColor: COLORS.background, paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 0 },
+  scrollContentUnconnected: { padding: SPACING.lg, paddingBottom: SPACING.xl },
+  scrollContent: { padding: SPACING.md, paddingBottom: SPACING.xl * 2, gap: SPACING.lg },
+  
+  // Unconnected Header
+  loginHeader: { alignItems: 'center', marginVertical: SPACING.xl },
+  loginIcon: { marginBottom: SPACING.md },
+  loginTitle: { fontSize: 32, fontWeight: '900', color: COLORS.text, letterSpacing: 2 },
+  loginSubtitle: { fontSize: 13, color: COLORS.textSecondary, marginTop: SPACING.sm, fontWeight: '600' },
+  
+  // PC Blocks
+  sectionBlock: { marginBottom: SPACING.xl },
+  sectionHeaderFlex: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: SPACING.sm },
+  sectionLabel: { fontSize: 13, fontWeight: '800', color: COLORS.textSecondary, letterSpacing: 1 },
+  emptyCard: { backgroundColor: 'transparent', borderWidth: 1, borderColor: COLORS.border, borderRadius: RADIUS.md, padding: SPACING.lg, alignItems: 'center', borderStyle: 'dashed' },
+  emptyText: { color: COLORS.textSecondary, fontSize: 14, fontWeight: '500' },
+  
+  pcDeviceCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: COLORS.card, borderRadius: RADIUS.md, padding: SPACING.md, marginBottom: SPACING.sm, borderWidth: 1, borderColor: COLORS.border },
+  deviceIconBox: { width: 44, height: 44, borderRadius: RADIUS.sm, backgroundColor: COLORS.cardElevated, justifyContent: 'center', alignItems: 'center', marginRight: SPACING.md },
+  deviceInfo: { flex: 1 },
+  deviceName: { fontSize: 16, fontWeight: '700', color: COLORS.text, marginBottom: 4 },
+  deviceIp: { fontSize: 12, color: COLORS.textSecondary, fontWeight: '600' },
 
-  // Login Screen
-  loginContainer: {
-    padding: SPACING.lg,
-  },
-  loginHeader: {
-    alignItems: 'center',
-    marginBottom: SPACING.xl,
-    marginTop: SPACING.xl,
-  },
-  loginIcon: {
-    marginBottom: SPACING.md,
-  },
-  loginTitle: {
-    fontSize: 32,
-    fontWeight: '900',
-    color: COLORS.text,
-    letterSpacing: 2,
-  },
-  loginSubtitle: {
-    fontSize: 14,
-    color: COLORS.textSecondary,
-    marginTop: SPACING.xs,
-  },
+  // Pairing Modal
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.8)', justifyContent: 'center', padding: SPACING.lg },
+  pairingBox: { backgroundColor: COLORS.card, borderRadius: RADIUS.lg, padding: SPACING.xl, alignItems: 'center' },
+  pairingIcon: { width: 64, height: 64, borderRadius: 32, backgroundColor: COLORS.warning + '22', justifyContent: 'center', alignItems: 'center', marginBottom: SPACING.lg },
+  pairingTitle: { fontSize: 24, fontWeight: '800', color: COLORS.text, marginBottom: 8 },
+  pairingSub: { fontSize: 14, color: COLORS.textSecondary, textAlign: 'center', marginBottom: SPACING.xl, lineHeight: 20 },
+  pinInput: { width: 140, height: 60, backgroundColor: COLORS.cardElevated, borderRadius: RADIUS.md, borderWidth: 1, borderColor: COLORS.warning, color: COLORS.warning, fontSize: 32, fontWeight: '900', textAlign: 'center', letterSpacing: 8, marginBottom: SPACING.xl },
+  pairingBtnRow: { flexDirection: 'row', gap: SPACING.md, width: '100%' },
+  btnCancel: { flex: 1, paddingVertical: SPACING.md, borderRadius: RADIUS.md, backgroundColor: COLORS.cardElevated, alignItems: 'center' },
+  btnCancelText: { color: COLORS.textSecondary, fontWeight: '700', fontSize: 16 },
+  btnConfirm: { flex: 1, paddingVertical: SPACING.md, borderRadius: RADIUS.md, backgroundColor: COLORS.primary, alignItems: 'center' },
+  btnConfirmText: { color: COLORS.text, fontWeight: '800', fontSize: 16 },
 
-  // Saved Devices
-  savedDevicesSection: {
-    marginBottom: SPACING.xl,
-  },
-  savedTitle: {
-    fontSize: 12,
-    fontWeight: '800',
-    color: COLORS.textSecondary,
-    marginBottom: SPACING.sm,
-    letterSpacing: 1,
-  },
-  savedDeviceCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: COLORS.card,
-    borderRadius: RADIUS.md,
-    padding: SPACING.md,
-    marginBottom: SPACING.sm,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-  },
-  savedDeviceIcon: {
-    width: 44,
-    height: 44,
-    borderRadius: RADIUS.sm,
-    backgroundColor: COLORS.cardElevated,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: SPACING.md,
-  },
-  savedDeviceInfo: {
-    flex: 1,
-  },
-  savedDeviceName: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: COLORS.text,
-    marginBottom: 2,
-  },
-  savedDeviceIp: {
-    fontSize: 13,
-    color: COLORS.textSecondary,
-  },
-
-  // Manual Input
-  loginCard: {
-    backgroundColor: 'transparent',
-  },
-  inputLabel: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: COLORS.textSecondary,
-    marginBottom: SPACING.sm,
-    letterSpacing: 1,
-  },
-  inputWrapper: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: COLORS.card,
-    borderRadius: RADIUS.md,
-    paddingHorizontal: SPACING.md,
-    height: 54,
-    marginBottom: SPACING.lg,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-  },
-  inputField: {
-    flex: 1,
-    color: COLORS.text,
-    fontSize: 16,
-    marginLeft: SPACING.sm,
-  },
-  btnConnect: {
-    backgroundColor: COLORS.cardElevated,
-    height: 54,
-    borderRadius: RADIUS.md,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  btnConnectText: {
-    color: COLORS.primary,
-    fontSize: 15,
-    fontWeight: '700',
-    letterSpacing: 0.5,
-  },
-
-  // Navbar
-  topNavigation: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.md,
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.card,
-  },
-  navLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  statusIndicator: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: COLORS.success,
-    marginRight: SPACING.sm,
-  },
-  navStatusText: {
-    fontSize: 11,
-    fontWeight: '800',
-    color: COLORS.success,
-    letterSpacing: 0.5,
-  },
-  navIpText: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: COLORS.text,
-    marginTop: 2,
-  },
-  navBtnDisconnect: {
-    backgroundColor: COLORS.cardElevated,
-    padding: SPACING.sm,
-    borderRadius: RADIUS.sm,
-  },
-
-  // Cards Base
-  card: {
-    backgroundColor: COLORS.card,
-    borderRadius: RADIUS.lg,
-    padding: SPACING.lg,
-  },
-  cardTitle: {
-    fontSize: 18,
-    fontWeight: '800',
-    color: COLORS.text,
-    marginBottom: SPACING.lg,
-  },
-  cardTitleNoMargin: {
-    fontSize: 18,
-    fontWeight: '800',
-    color: COLORS.text,
-  },
-  cardHeaderFlex: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: SPACING.md,
-  },
-  cardHeaderBtn: {
-    backgroundColor: COLORS.cardElevated,
-    width: 36,
-    height: 36,
-    borderRadius: RADIUS.round,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-
-  // Media
-  mediaCluster: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-    gap: SPACING.xl,
-  },
-  mediaBtnSecondary: {
-    width: 54,
-    height: 54,
-    borderRadius: RADIUS.round,
-    backgroundColor: COLORS.cardElevated,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  mediaBtnPrimary: {
-    width: 72,
-    height: 72,
-    borderRadius: RADIUS.round,
-    backgroundColor: COLORS.primary,
-    justifyContent: 'center',
-    alignItems: 'center',
-    flexDirection: 'row',
-  },
-
-  // Volume
-  volumeCluster: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  muteBtn: {
-    width: 54,
-    height: 54,
-    borderRadius: RADIUS.round,
-    backgroundColor: COLORS.cardElevated,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  volumeStepper: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: COLORS.cardElevated,
-    borderRadius: RADIUS.round,
-    padding: SPACING.xs,
-  },
-  stepBtn: {
-    width: 48,
-    height: 48,
-    borderRadius: RADIUS.round,
-    backgroundColor: COLORS.border,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  volValueWrapper: {
-    width: 64,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  volValueText: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: COLORS.text,
-  },
-
-  // Screen Frame
-  screenFrame: {
-    width: '100%',
-    aspectRatio: 16 / 9,
-    backgroundColor: COLORS.background,
-    borderRadius: RADIUS.md,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    overflow: 'hidden',
-  },
-  screenLoaderOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0,0,0,0.6)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    zIndex: 10,
-  },
-  screenScroll: {
-    flexGrow: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  screenImage: {
-    width: '100%',
-    height: '100%',
-  },
-  screenPlaceholder: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginTop: SPACING.sm,
-  },
-  screenPlaceholderText: {
-    color: COLORS.textSecondary,
-    fontSize: 13,
-    marginTop: SPACING.sm,
-  },
-
-  // Stats
-  statsContainer: {
-    marginTop: SPACING.xs,
-  },
-  hwWidgets: {
-    flexDirection: 'row',
-    backgroundColor: COLORS.cardElevated,
-    borderRadius: RADIUS.md,
-    padding: SPACING.md,
-    marginBottom: SPACING.lg,
-  },
-  separatorVertical: {
-    width: 1,
-    backgroundColor: COLORS.card,
-    marginHorizontal: SPACING.md,
-  },
-  hwWidget: {
-    flex: 1,
-  },
-  hwWidgetHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: SPACING.xs,
-  },
-  hwWidgetLabel: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: COLORS.textSecondary,
-    textTransform: 'uppercase',
-  },
-  hwWidgetValue: {
-    fontSize: 28,
-    fontWeight: '800',
-    color: COLORS.text,
-    marginVertical: SPACING.sm,
-  },
-  hwTrack: {
-    height: 6,
-    backgroundColor: COLORS.card,
-    borderRadius: RADIUS.round,
-    overflow: 'hidden',
-  },
-  hwFill: {
-    height: '100%',
-    borderRadius: RADIUS.round,
-  },
-  processesSection: {
-    marginTop: SPACING.xs,
-  },
-  processesFilterRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: SPACING.md,
-  },
-  processesLabel: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: COLORS.text,
-  },
-  toggleDisplayBtn: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: COLORS.primary,
-  },
-  tableHeader: {
-    flexDirection: 'row',
-    paddingBottom: SPACING.sm,
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.border,
-    marginBottom: SPACING.sm,
-  },
-  thCell: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: COLORS.textSecondary,
-    textTransform: 'uppercase',
-  },
-  tableBody: {
-    gap: 0,
-  },
-  tdRow: {
-    flexDirection: 'row',
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.cardElevated,
-  },
-  tdCellPrimary: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: COLORS.text,
-  },
-  tdCellSecondary: {
-    fontSize: 13,
-    fontWeight: '500',
-    color: COLORS.textSecondary,
-  },
-
-  // Bottom Trigger (Power)
-  triggerBtnDanger: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#3A1110',      // Deep red background
-    borderWidth: 1,
-    borderColor: '#7A1C16',
-    borderRadius: RADIUS.lg,
-    padding: SPACING.lg,
-    gap: SPACING.sm,
-  },
-  triggerBtnTextDanger: {
-    color: COLORS.danger,
-    fontSize: 16,
-    fontWeight: '800',
-  },
-
-  // Power Sheet Modal
-  sheetOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.8)',
-    justifyContent: 'flex-end',
-  },
-  sheetCloser: {
-    flex: 1,
-  },
-  sheetBody: {
-    backgroundColor: COLORS.card,
-    borderTopLeftRadius: RADIUS.lg,
-    borderTopRightRadius: RADIUS.lg,
-    padding: SPACING.lg,
-    paddingBottom: Platform.OS === 'ios' ? 40 : SPACING.xl,
-  },
-  sheetDragHandle: {
-    width: 40,
-    height: 4,
-    backgroundColor: COLORS.textSecondary,
-    borderRadius: RADIUS.round,
-    alignSelf: 'center',
-    marginBottom: SPACING.lg,
-  },
-  sheetHeadline: {
-    fontSize: 22,
-    fontWeight: '800',
-    color: COLORS.text,
-    marginBottom: SPACING.xl,
-    textAlign: 'center',
-  },
-  sheetActionGroup: {
-    flexDirection: 'row',
-    gap: SPACING.md,
-    marginBottom: SPACING.lg,
-  },
-  sheetBtnWarning: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: COLORS.warning,
-    padding: SPACING.md,
-    borderRadius: RADIUS.md,
-    gap: SPACING.xs,
-  },
-  sheetBtnDanger: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: COLORS.danger,
-    padding: SPACING.md,
-    borderRadius: RADIUS.md,
-    gap: SPACING.xs,
-  },
-  sheetBtnTextDark: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: COLORS.background,
-  },
-  sheetBtnTextLight: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: COLORS.text,
-  },
-  sheetBtnOutline: {
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    padding: SPACING.md,
-    borderRadius: RADIUS.md,
-    alignItems: 'center',
-  },
-  sheetBtnOutlineText: {
-    color: COLORS.textSecondary,
-    fontSize: 14,
-    fontWeight: '600',
-  }
+  // Connected UI Components Same Logic as previous design...
+  topNavigation: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: SPACING.md, paddingVertical: SPACING.md, borderBottomWidth: 1, borderBottomColor: COLORS.card },
+  navLeft: { flexDirection: 'row', alignItems: 'center' },
+  statusIndicator: { width: 8, height: 8, borderRadius: 4, backgroundColor: COLORS.success, marginRight: SPACING.sm },
+  navStatusText: { fontSize: 11, fontWeight: '800', color: COLORS.success, letterSpacing: 0.5 },
+  navIpText: { fontSize: 14, fontWeight: '700', color: COLORS.text, marginTop: 2 },
+  navBtnDisconnect: { backgroundColor: COLORS.cardElevated, padding: SPACING.sm, borderRadius: RADIUS.sm },
+  card: { backgroundColor: COLORS.card, borderRadius: RADIUS.lg, padding: SPACING.lg },
+  cardTitle: { fontSize: 18, fontWeight: '800', color: COLORS.text, marginBottom: SPACING.lg },
+  cardTitleNoMargin: { fontSize: 18, fontWeight: '800', color: COLORS.text },
+  cardHeaderFlex: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: SPACING.md },
+  cardHeaderBtn: { backgroundColor: COLORS.cardElevated, width: 36, height: 36, borderRadius: RADIUS.round, justifyContent: 'center', alignItems: 'center' },
+  mediaCluster: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: SPACING.xl },
+  mediaBtnSecondary: { width: 54, height: 54, borderRadius: RADIUS.round, backgroundColor: COLORS.cardElevated, justifyContent: 'center', alignItems: 'center' },
+  mediaBtnPrimary: { width: 72, height: 72, borderRadius: RADIUS.round, backgroundColor: COLORS.primary, justifyContent: 'center', alignItems: 'center', flexDirection: 'row' },
+  volumeCluster: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  muteBtn: { width: 54, height: 54, borderRadius: RADIUS.round, backgroundColor: COLORS.cardElevated, justifyContent: 'center', alignItems: 'center' },
+  volumeStepper: { flexDirection: 'row', alignItems: 'center', backgroundColor: COLORS.cardElevated, borderRadius: RADIUS.round, padding: SPACING.xs },
+  stepBtn: { width: 48, height: 48, borderRadius: RADIUS.round, backgroundColor: COLORS.border, justifyContent: 'center', alignItems: 'center' },
+  volValueWrapper: { width: 64, justifyContent: 'center', alignItems: 'center' },
+  volValueText: { fontSize: 20, fontWeight: '700', color: COLORS.text },
+  screenFrame: { width: '100%', aspectRatio: 16/9, backgroundColor: COLORS.background, borderRadius: RADIUS.md, borderWidth: 1, borderColor: COLORS.border, overflow: 'hidden' },
+  screenLoaderOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center', zIndex: 10 },
+  screenScroll: { flexGrow: 1, justifyContent: 'center', alignItems: 'center' },
+  screenImage: { width: '100%', height: '100%' },
+  screenPlaceholder: { flex: 1, justifyContent: 'center', alignItems: 'center', marginTop: SPACING.sm },
+  screenPlaceholderText: { color: COLORS.textSecondary, fontSize: 13, marginTop: SPACING.sm },
+  statsContainer: { marginTop: SPACING.xs },
+  hwWidgets: { flexDirection: 'row', backgroundColor: COLORS.cardElevated, borderRadius: RADIUS.md, padding: SPACING.md, marginBottom: SPACING.lg },
+  separatorVertical: { width: 1, backgroundColor: COLORS.card, marginHorizontal: SPACING.md },
+  hwWidget: { flex: 1 },
+  hwWidgetHeader: { flexDirection: 'row', alignItems: 'center', gap: SPACING.xs },
+  hwWidgetLabel: { fontSize: 13, fontWeight: '700', color: COLORS.textSecondary, textTransform: 'uppercase' },
+  hwWidgetValue: { fontSize: 28, fontWeight: '800', color: COLORS.text, marginVertical: SPACING.sm },
+  hwTrack: { height: 6, backgroundColor: COLORS.card, borderRadius: RADIUS.round, overflow: 'hidden' },
+  hwFill: { height: '100%', borderRadius: RADIUS.round },
+  processesSection: { marginTop: SPACING.xs },
+  processesFilterRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: SPACING.md },
+  processesLabel: { fontSize: 15, fontWeight: '700', color: COLORS.text },
+  toggleDisplayBtn: { fontSize: 13, fontWeight: '600', color: COLORS.primary },
+  tableHeader: { flexDirection: 'row', paddingBottom: SPACING.sm, borderBottomWidth: 1, borderBottomColor: COLORS.border, marginBottom: SPACING.sm },
+  thCell: { fontSize: 12, fontWeight: '700', color: COLORS.textSecondary, textTransform: 'uppercase' },
+  tableBody: { gap: 0 },
+  tdRow: { flexDirection: 'row', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: COLORS.cardElevated },
+  tdCellPrimary: { fontSize: 14, fontWeight: '600', color: COLORS.text },
+  tdCellSecondary: { fontSize: 13, fontWeight: '500', color: COLORS.textSecondary },
+  triggerBtnDanger: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: '#3A1110', borderWidth: 1, borderColor: '#7A1C16', borderRadius: RADIUS.lg, padding: SPACING.lg, gap: SPACING.sm },
+  triggerBtnTextDanger: { color: COLORS.danger, fontSize: 16, fontWeight: '800' },
+  sheetOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.8)', justifyContent: 'flex-end' },
+  sheetCloser: { flex: 1 },
+  sheetBody: { backgroundColor: COLORS.card, borderTopLeftRadius: RADIUS.lg, borderTopRightRadius: RADIUS.lg, padding: SPACING.lg, paddingBottom: Platform.OS === 'ios' ? 40 : SPACING.xl },
+  sheetDragHandle: { width: 40, height: 4, backgroundColor: COLORS.textSecondary, borderRadius: RADIUS.round, alignSelf: 'center', marginBottom: SPACING.lg },
+  sheetHeadline: { fontSize: 22, fontWeight: '800', color: COLORS.text, marginBottom: SPACING.xl, textAlign: 'center' },
+  sheetActionGroup: { flexDirection: 'row', gap: SPACING.md, marginBottom: SPACING.lg },
+  sheetBtnWarning: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: COLORS.warning, padding: SPACING.md, borderRadius: RADIUS.md, gap: SPACING.xs },
+  sheetBtnDanger: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: COLORS.danger, padding: SPACING.md, borderRadius: RADIUS.md, gap: SPACING.xs },
+  sheetBtnTextDark: { fontSize: 15, fontWeight: '700', color: COLORS.background },
+  sheetBtnTextLight: { fontSize: 15, fontWeight: '700', color: COLORS.text },
+  sheetBtnOutline: { borderWidth: 1, borderColor: COLORS.border, padding: SPACING.md, borderRadius: RADIUS.md, alignItems: 'center' },
+  sheetBtnOutlineText: { color: COLORS.textSecondary, fontSize: 14, fontWeight: '600' }
 });

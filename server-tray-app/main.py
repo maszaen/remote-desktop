@@ -4,18 +4,22 @@ import threading
 import psutil
 import pyautogui
 import uvicorn
-from fastapi import FastAPI, Response
+import socket
+import random
+import ctypes
+from fastapi import FastAPI, Response, HTTPException, Depends
 from pydantic import BaseModel
 from pystray import Icon, Menu, MenuItem
 from PIL import Image, ImageDraw
 from pycaw.pycaw import AudioUtilities
 from comtypes import CoInitialize
 from fastapi.middleware.cors import CORSMiddleware
-import socket
 
-app = FastAPI(title="PC Remote Controller")
+# Generate random 4-digit PIN
+ACCESS_PIN = str(random.randint(1000, 9999))
 
-# Enable CORS for React Native
+app = FastAPI(title="Nexus PC Remote")
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -23,6 +27,12 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Auth Dependency
+def verify_pin(pin: str = None):
+    if str(pin) != ACCESS_PIN:
+        raise HTTPException(status_code=401, detail="Invalid Nexus Pairing PIN")
+    return pin
 
 def get_volume_interface():
     CoInitialize()
@@ -32,13 +42,14 @@ def get_volume_interface():
 class VolumeControl(BaseModel):
     volume: int
 
+# Public Endpoint for Discovery
 @app.get("/")
-def ping():
+def discover():
     return {"status": "ok", "hostname": socket.gethostname()}
 
-@app.get("/network")
+# Protected Endpoints begin
+@app.get("/network", dependencies=[Depends(verify_pin)])
 def get_network_info():
-    # Get local IP
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     try:
         s.connect(("10.255.255.255", 1))
@@ -49,7 +60,7 @@ def get_network_info():
         s.close()
     return {"local_ip": IP, "port": 8000}
 
-@app.get("/volume")
+@app.get("/volume", dependencies=[Depends(verify_pin)])
 def get_volume():
     try:
         volume_interface = get_volume_interface()
@@ -59,7 +70,7 @@ def get_volume():
     except Exception as e:
         return {"error": str(e)}
 
-@app.post("/volume")
+@app.post("/volume", dependencies=[Depends(verify_pin)])
 def set_volume(ctrl: VolumeControl):
     try:
         volume_interface = get_volume_interface()
@@ -70,7 +81,7 @@ def set_volume(ctrl: VolumeControl):
     except Exception as e:
         return {"error": str(e)}
 
-@app.post("/volume/mute")
+@app.post("/volume/mute", dependencies=[Depends(verify_pin)])
 def toggle_mute():
     try:
         volume_interface = get_volume_interface()
@@ -80,9 +91,8 @@ def toggle_mute():
     except Exception as e:
         return {"error": str(e)}
 
-@app.post("/volume/up")
+@app.post("/volume/up", dependencies=[Depends(verify_pin)])
 def volume_up():
-    """Increase volume by 5%"""
     try:
         volume_interface = get_volume_interface()
         current = volume_interface.GetMasterVolumeLevelScalar()
@@ -93,9 +103,8 @@ def volume_up():
     except Exception as e:
         return {"error": str(e)}
 
-@app.post("/volume/down")
+@app.post("/volume/down", dependencies=[Depends(verify_pin)])
 def volume_down():
-    """Decrease volume by 5%"""
     try:
         volume_interface = get_volume_interface()
         current = volume_interface.GetMasterVolumeLevelScalar()
@@ -105,7 +114,7 @@ def volume_down():
     except Exception as e:
         return {"error": str(e)}
 
-@app.post("/media/{action}")
+@app.post("/media/{action}", dependencies=[Depends(verify_pin)])
 def media_control(action: str):
     if action == "playpause":
         pyautogui.press('playpause')
@@ -117,29 +126,26 @@ def media_control(action: str):
         return {"error": "unknown action"}
     return {"status": "success", "action": action}
 
-@app.get("/screen")
+@app.get("/screen", dependencies=[Depends(verify_pin)])
 def capture_screen():
     try:
         screenshot = pyautogui.screenshot()
         img_byte_arr = io.BytesIO()
-        # Compress the image slightly to make it faster to transfer over wifi
         screenshot.save(img_byte_arr, format='JPEG', quality=60)
         img_byte_arr.seek(0)
         return Response(content=img_byte_arr.read(), media_type="image/jpeg")
     except Exception as e:
         return {"error": str(e)}
 
-@app.get("/stats")
+@app.get("/stats", dependencies=[Depends(verify_pin)])
 def get_stats():
     ram = psutil.virtual_memory()
     cpu = psutil.cpu_percent(interval=0.1)
     total_mem = ram.total
-    
     processes = []
     for proc in psutil.process_iter(['pid', 'name', 'cpu_percent']):
         try:
             info = proc.info
-            # Calculate memory_percent manually from rss for accuracy
             try:
                 mem_info = proc.memory_info()
                 rss_mb = round(mem_info.rss / (1024**2), 1)
@@ -152,10 +158,7 @@ def get_stats():
             processes.append(info)
         except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
             pass
-            
-    # Sort by memory percent to find heavy apps
     processes = sorted(processes, key=lambda p: p['memory_percent'] or 0, reverse=True)[:30]
-    
     return {
         "cpu_percent": cpu,
         "ram_percent": ram.percent,
@@ -164,7 +167,7 @@ def get_stats():
         "top_processes": processes
     }
 
-@app.post("/power/{action}")
+@app.post("/power/{action}", dependencies=[Depends(verify_pin)])
 def power_control(action: str):
     if action == "shutdown":
         os.system("shutdown /s /t 5")
@@ -180,7 +183,6 @@ def power_control(action: str):
 
 # --- Tray Icon ---
 def create_image():
-    # Generate a simple blue icon with white square
     image = Image.new('RGB', (64, 64), color=(0, 122, 204))
     dc = ImageDraw.Draw(image)
     dc.rectangle((16, 16, 48, 48), fill=(255, 255, 255))
@@ -192,11 +194,18 @@ def setup_tray_icon():
     def on_quit(icon, item):
         icon.stop()
         os._exit(0)
-        
-    menu = Menu(MenuItem('Quit Backend', on_quit))
-    icon = Icon("PCRemote", image, "PC Remote Controller Server", menu)
     
-    # Fetch IP to print local network address
+    def show_pin_code(icon, item):
+        def run_msg():
+            ctypes.windll.user32.MessageBoxW(0, f"Your Nexus Pairing PIN is:\n\n{ACCESS_PIN}\n\nEnter this PIN in your Mobile App to pair.", "Nexus Pairing Code", 0x40)
+        threading.Thread(target=run_msg, daemon=True).start()
+        
+    menu = Menu(
+        MenuItem('Show Pairing PIN', show_pin_code),
+        MenuItem('Quit Backend', on_quit)
+    )
+    icon = Icon("PCRemote", image, "Nexus PC Controller Server", menu)
+    
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     try:
         s.connect(("10.255.255.255", 1))
@@ -207,9 +216,9 @@ def setup_tray_icon():
         s.close()
     
     print(f"=====================================")
-    print(f"SERVER RUNNING ON TRAY!")
-    print(f"Connect React Native app to:")
-    print(f"http://{IP}:8000")
+    print(f"NEXUS TRAY SERVER RUNNING")
+    print(f"Server IP: {IP}")
+    print(f"Pairing PIN: {ACCESS_PIN}")
     print(f"=====================================")
     
     icon.run()
