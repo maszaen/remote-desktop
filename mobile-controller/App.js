@@ -98,13 +98,16 @@ export default function App() {
     setIsScanning(true);
     setDiscoveredDevices([]); 
     try {
+        let prefixes = ['192.168.1.', '192.168.0.', '192.168.100.', '10.0.0.'];
         const ipInfo = await Network.getIpAddressAsync();
-        if (!ipInfo || ipInfo === '0.0.0.0' || !ipInfo.includes('.')) { setIsScanning(false); return; }
+        if (ipInfo && ipInfo !== '0.0.0.0' && ipInfo.includes('.')) {
+            const currentPrefix = ipInfo.split('.').slice(0, 3).join('.') + '.';
+            if (!prefixes.includes(currentPrefix)) prefixes.unshift(currentPrefix); // Prioritize actual device subnet
+        }
         
-        const base = ipInfo.split('.').slice(0, 3).join('.') + '.';
         const pingIp = async (targetIp) => {
             const controller = new AbortController();
-            const id = setTimeout(() => controller.abort(), 2800); // Increased timeout to prevent blocking cancellation
+            const id = setTimeout(() => controller.abort(), 2000); 
             try {
                 const res = await fetch(`http://${targetIp}:8000/`, { signal: controller.signal });
                 const data = await res.json();
@@ -120,10 +123,14 @@ export default function App() {
             }
         };
 
-        const batchSize = 10; // Avoid native connection queue dropping
-        const ips = Array.from({length: 254}, (_, i) => `${base}${i + 1}`);
-        for (let i = 0; i < ips.length; i += batchSize) {
-           await Promise.all(ips.slice(i, i + batchSize).map(pingIp));
+        const ipsToScan = [];
+        for (const prefix of prefixes) {
+            for (let i = 1; i <= 254; i++) ipsToScan.push(`${prefix}${i}`);
+        }
+
+        const batchSize = 40; 
+        for (let i = 0; i < ipsToScan.length; i += batchSize) {
+           await Promise.all(ipsToScan.slice(i, i + batchSize).map(pingIp));
         }
     } catch(e) {}
     setIsScanning(false);
@@ -359,30 +366,6 @@ export default function App() {
                  ))}
              </View>
           )}
-
-          {/* Manual Input (Fallback) */}
-          <View style={styles.sectionBlock}>
-             <Text style={styles.sectionLabel}>MANUAL CONNECT</Text>
-             <View style={styles.inputWrapper}>
-                <Ionicons name="link" size={20} color={COLORS.textSecondary} />
-                <TextInput
-                   style={styles.inputField}
-                   placeholder="192.168.1.5"
-                   placeholderTextColor={COLORS.textSecondary}
-                   value={ipAddress}
-                   onChangeText={setIpAddress}
-                   keyboardType="default"
-                   autoCapitalize="none"
-                />
-             </View>
-             <TouchableOpacity style={styles.btnConnect} onPress={() => initiateConnect(null, "Manual PC", null)} disabled={loadingAction.includes('connecting')}>
-                {loadingAction.includes('connecting_') && !pairingModalOpen ? (
-                   <ActivityIndicator size="small" color={COLORS.text} />
-                ) : (
-                   <Text style={styles.btnConnectText}>CONNECT NOW</Text>
-                )}
-             </TouchableOpacity>
-          </View>
         </ScrollView>
 
         {/* Pairing Code Modal */}
