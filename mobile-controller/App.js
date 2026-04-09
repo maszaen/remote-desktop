@@ -99,15 +99,6 @@ export default function App() {
     setIsScanning(true);
     setDiscoveredDevices([]); 
     try {
-        let basePrefix = '192.168.1.';
-        let hostEnding = 50; 
-        const ipInfo = await Network.getIpAddressAsync();
-        if (ipInfo && ipInfo !== '0.0.0.0' && ipInfo.includes('.')) {
-            const parts = ipInfo.split('.');
-            basePrefix = parts.slice(0, 3).join('.') + '.';
-            hostEnding = parseInt(parts[3], 10);
-        }
-
         const pingIp = (targetIp) => {
             return new Promise((resolve) => {
                 let finished = false;
@@ -117,7 +108,7 @@ export default function App() {
                         try { controller.abort(); } catch(e){}
                         finished = true; resolve(null); 
                     }
-                }, 1000); 
+                }, 1200); 
                 
                 fetch(`http://${targetIp}:8000/`, { signal: controller.signal })
                     .then(res => res.json())
@@ -142,18 +133,24 @@ export default function App() {
         };
 
         const ipsToScan = ['NexusPC.local', '10.0.2.2'];
+        const standardPrefixes = ['192.168.100.', '192.168.1.', '192.168.0.', '192.168.8.', '10.0.0.'];
         
-        // Proximity Sort: Search closest IPs to phone first (avoids searching 255 IPs sequentially)
-        for (let rad = 0; rad <= 254; rad++) {
-             if (rad === 0) { ipsToScan.push(`${basePrefix}${hostEnding}`); continue; }
-             if (hostEnding + rad <= 254) ipsToScan.push(`${basePrefix}${hostEnding + rad}`);
-             if (hostEnding - rad >= 1) ipsToScan.push(`${basePrefix}${hostEnding - rad}`);
+        // Always derive Phone IP just in case it's on a custom subnet
+        const ipInfo = await Network.getIpAddressAsync();
+        if (ipInfo && ipInfo !== '0.0.0.0' && ipInfo.includes('.') && !ipInfo.startsWith('127.')) {
+            const currentPrefix = ipInfo.split('.').slice(0, 3).join('.') + '.';
+            if (!standardPrefixes.includes(currentPrefix)) standardPrefixes.unshift(currentPrefix);
+        }
+
+        // Generate full global sweep list
+        for (const prefix of standardPrefixes) {
+             for (let i = 1; i <= 254; i++) ipsToScan.push(`${prefix}${i}`);
         }
 
         // Extremely safe STAGGERED dispatch to bypass Android Port-Scan blocks & Bridge flooding
         for (let i = 0; i < ipsToScan.length; i++) {
            pingIp(ipsToScan[i]); // Fire without blocking loop!
-           await new Promise(r => setTimeout(r, 15)); // 15ms stagger -> 254 IPs takes only ~3.8s to fully dispatch!
+           await new Promise(r => setTimeout(r, 12)); // 12ms stagger -> 1200 IPs takes ~14 seconds to fully dispatch
         }
         
     } catch(e) {}
