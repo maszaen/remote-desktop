@@ -34,7 +34,7 @@ class VolumeControl(BaseModel):
 
 @app.get("/")
 def ping():
-    return {"status": "ok"}
+    return {"status": "ok", "hostname": socket.gethostname()}
 
 @app.get("/network")
 def get_network_info():

@@ -17,6 +17,7 @@ import {
   Modal
 } from 'react-native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -55,6 +56,7 @@ export default function App() {
   const [ipAddress, setIpAddress] = useState('');
   const [isConnected, setIsConnected] = useState(false);
   const [serverUrl, setServerUrl] = useState('');
+  const [savedDevices, setSavedDevices] = useState([]);
 
   // States
   const [currentVolume, setCurrentVolume] = useState(0);
@@ -68,14 +70,48 @@ export default function App() {
   const [loadingAction, setLoadingAction] = useState('');
   const [powerMenuVisible, setPowerMenuVisible] = useState(false);
 
+  // ─── Startup ───────────────────────────────────────────
+  useEffect(() => {
+    loadSavedDevices();
+  }, []);
+
+  const loadSavedDevices = async () => {
+    try {
+      const data = await AsyncStorage.getItem('saved_nexus_devices');
+      if (data) setSavedDevices(JSON.parse(data));
+    } catch (e) {}
+  };
+
+  const saveDevice = async (ip, hostname) => {
+    try {
+      const newDevice = { ip, hostname, lastSeen: Date.now() };
+      let updated = [newDevice, ...savedDevices.filter(d => d.ip !== ip)];
+      setSavedDevices(updated);
+      await AsyncStorage.setItem('saved_nexus_devices', JSON.stringify(updated));
+    } catch (e) {}
+  };
+
+  const removeSavedDevice = async (ip) => {
+    Alert.alert("Remove Device?", `Are you sure you want to forget IP ${ip}?`, [
+       { text: "Cancel", style: "cancel" },
+       { text: "Remove", style: "destructive", onPress: async () => {
+            let updated = savedDevices.filter(d => d.ip !== ip);
+            setSavedDevices(updated);
+            await AsyncStorage.setItem('saved_nexus_devices', JSON.stringify(updated));
+       }}
+    ]);
+  };
+
   // ─── Network Actions ───────────────────────────────────────────
-  const connect = async () => {
-    if (!ipAddress.trim()) return Alert.alert('Whoops!', 'Enter your PC IP address first.');
-    let cleanIp = ipAddress.trim();
+  const connect = async (overrideIp = null) => {
+    const targetIp = overrideIp && typeof overrideIp === 'string' ? overrideIp : ipAddress;
+    if (!targetIp.trim()) return Alert.alert('Whoops!', 'Enter your PC IP address first.');
+    
+    let cleanIp = targetIp.trim();
     cleanIp = cleanIp.replace(/^https?:\/\//, '').replace(/:\d+$/, '').replace(/\/+$/, '');
     const url = `http://${cleanIp}:8000`;
     
-    setLoadingAction('connecting');
+    setLoadingAction(`connecting_${cleanIp}`);
     try {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 4000);
@@ -83,8 +119,14 @@ export default function App() {
       clearTimeout(timeoutId);
 
       if (res.ok) {
+        const data = await res.json().catch(() => ({}));
+        const deviceHostname = data.hostname || 'Unknown PC';
+        
+        await saveDevice(cleanIp, deviceHostname);
+
         setServerUrl(url);
         setIsConnected(true);
+        setIpAddress(''); // clear manual input
         fetchVolume(url);
         getStats(url);
       }
@@ -174,16 +216,46 @@ export default function App() {
   // ─── Unconnected View ─────────────────────────────────────────
   if (!isConnected) {
     return (
-      <View style={styles.baseContainer}>
+      <ScrollView contentContainerStyle={styles.baseContainerScroll} keyboardShouldPersistTaps="handled">
         <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
         <View style={styles.loginContainer}>
           <View style={styles.loginHeader}>
             <Ionicons name="desktop" size={64} color={COLORS.primary} style={styles.loginIcon} />
             <Text style={styles.loginTitle}>NEXUS</Text>
-            <Text style={styles.loginSubtitle}>Remote Desktop Control</Text>
+            <Text style={styles.loginSubtitle}>Select a device to control</Text>
           </View>
+          
+          {/* Saved Devices Section */}
+          {savedDevices.length > 0 && (
+             <View style={styles.savedDevicesSection}>
+                 <Text style={styles.savedTitle}>MY DEVICES</Text>
+                 {savedDevices.map((dev, i) => (
+                    <TouchableOpacity 
+                       key={i} 
+                       style={styles.savedDeviceCard} 
+                       onPress={() => connect(dev.ip)}
+                       onLongPress={() => removeSavedDevice(dev.ip)}
+                       disabled={loadingAction.includes('connecting')}
+                    >
+                       <View style={styles.savedDeviceIcon}>
+                          <Ionicons name="desktop-outline" size={24} color={COLORS.primary} />
+                       </View>
+                       <View style={styles.savedDeviceInfo}>
+                          <Text style={styles.savedDeviceName}>{dev.hostname}</Text>
+                          <Text style={styles.savedDeviceIp}>{dev.ip}</Text>
+                       </View>
+                       {loadingAction === `connecting_${dev.ip}` ? (
+                           <ActivityIndicator size="small" color={COLORS.primary} />
+                       ) : (
+                           <Ionicons name="chevron-forward" size={20} color={COLORS.textSecondary} />
+                       )}
+                    </TouchableOpacity>
+                 ))}
+             </View>
+          )}
+
           <View style={styles.loginCard}>
-            <Text style={styles.inputLabel}>SERVER IP ADDRESS</Text>
+            <Text style={styles.inputLabel}>MANUAL CONNECT (IP)</Text>
             <View style={styles.inputWrapper}>
               <Ionicons name="link" size={20} color={COLORS.textSecondary} />
               <TextInput
@@ -196,8 +268,8 @@ export default function App() {
                 autoCapitalize="none"
               />
             </View>
-            <TouchableOpacity style={styles.btnConnect} onPress={connect} disabled={loadingAction === 'connecting'}>
-              {loadingAction === 'connecting' ? (
+            <TouchableOpacity style={styles.btnConnect} onPress={connect} disabled={loadingAction.includes('connecting')}>
+              {loadingAction && loadingAction.includes('connecting') ? (
                 <ActivityIndicator size="small" color={COLORS.text} />
               ) : (
                 <Text style={styles.btnConnectText}>CONNECT NOW</Text>
@@ -205,7 +277,7 @@ export default function App() {
             </TouchableOpacity>
           </View>
         </View>
-      </View>
+      </ScrollView>
     );
   }
 
@@ -407,6 +479,12 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.background,
     paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 0,
   },
+  baseContainerScroll: {
+    flexGrow: 1,
+    backgroundColor: COLORS.background,
+    paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 0,
+    justifyContent: 'center',
+  },
   scrollContent: {
     padding: SPACING.md,
     paddingBottom: SPACING.xl * 2,
@@ -415,13 +493,12 @@ const styles = StyleSheet.create({
 
   // Login Screen
   loginContainer: {
-    flex: 1,
-    justifyContent: 'center',
     padding: SPACING.lg,
   },
   loginHeader: {
     alignItems: 'center',
     marginBottom: SPACING.xl,
+    marginTop: SPACING.xl,
   },
   loginIcon: {
     marginBottom: SPACING.md,
@@ -437,12 +514,54 @@ const styles = StyleSheet.create({
     color: COLORS.textSecondary,
     marginTop: SPACING.xs,
   },
-  loginCard: {
+
+  // Saved Devices
+  savedDevicesSection: {
+    marginBottom: SPACING.xl,
+  },
+  savedTitle: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: COLORS.textSecondary,
+    marginBottom: SPACING.sm,
+    letterSpacing: 1,
+  },
+  savedDeviceCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
     backgroundColor: COLORS.card,
-    borderRadius: RADIUS.lg,
-    padding: SPACING.lg,
+    borderRadius: RADIUS.md,
+    padding: SPACING.md,
+    marginBottom: SPACING.sm,
     borderWidth: 1,
     borderColor: COLORS.border,
+  },
+  savedDeviceIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: RADIUS.sm,
+    backgroundColor: COLORS.cardElevated,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: SPACING.md,
+  },
+  savedDeviceInfo: {
+    flex: 1,
+  },
+  savedDeviceName: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: COLORS.text,
+    marginBottom: 2,
+  },
+  savedDeviceIp: {
+    fontSize: 13,
+    color: COLORS.textSecondary,
+  },
+
+  // Manual Input
+  loginCard: {
+    backgroundColor: 'transparent',
   },
   inputLabel: {
     fontSize: 12,
@@ -454,7 +573,7 @@ const styles = StyleSheet.create({
   inputWrapper: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: COLORS.background,
+    backgroundColor: COLORS.card,
     borderRadius: RADIUS.md,
     paddingHorizontal: SPACING.md,
     height: 54,
@@ -469,14 +588,14 @@ const styles = StyleSheet.create({
     marginLeft: SPACING.sm,
   },
   btnConnect: {
-    backgroundColor: COLORS.primary,
+    backgroundColor: COLORS.cardElevated,
     height: 54,
     borderRadius: RADIUS.md,
     justifyContent: 'center',
     alignItems: 'center',
   },
   btnConnectText: {
-    color: COLORS.text,
+    color: COLORS.primary,
     fontSize: 15,
     fontWeight: '700',
     letterSpacing: 0.5,
