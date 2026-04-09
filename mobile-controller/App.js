@@ -49,7 +49,6 @@ export default function App() {
 
   // Screenshots
   const [screenshot, setScreenshot] = useState(null);
-  const [isScreenModalOpen, setIsScreenModalOpen] = useState(false);
   const [imgLoading, setImgLoading] = useState(false);
   const [isCapturing, setIsCapturing] = useState(false);
 
@@ -121,12 +120,6 @@ export default function App() {
     }
   };
 
-  const handleSetVolume = async (val) => {
-    const rounded = Math.round(val);
-    const result = await sendAction('/volume', 'POST', { volume: rounded });
-    if (result && !result.error) setIsMuted(false);
-  };
-
   const handleToggleMute = async () => {
     const result = await sendAction('/volume/mute');
     if (result && !result.error) setIsMuted(result.muted);
@@ -149,14 +142,14 @@ export default function App() {
 
   const mediaControl = (action) => sendAction(`/media/${action}`);
 
-  const captureScreen = () => {
+  const captureScreen = async () => {
     if (!isConnected) return;
     setIsCapturing(true);
     setImgLoading(true);
     setScreenshot(`${serverUrl}/screen?t=${Date.now()}`);
-    setIsScreenModalOpen(true);
-    // Button spinner off very quickly, image spinner stays until image onLoad
-    setTimeout(() => setIsCapturing(false), 500); 
+    // Simulate slight delay so the loading indicator renders smoothly
+    await new Promise(r => setTimeout(r, 600)); 
+    setIsCapturing(false);
   };
 
   const getStats = async (urlOverride = null) => {
@@ -267,10 +260,9 @@ export default function App() {
         contentContainerStyle={styles.scrollContent}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.accent} />}
       >
-        {/* ── SECT 1: MEDIA & AUDIO ── */}
+        {/* ── SECT 1: MEDIA PLAYER ── */}
         <View style={styles.card}>
-          <Text style={styles.sectionTitle}>Media & Audio</Text>
-          
+          <Text style={styles.sectionTitle}>Media</Text>
           <View style={styles.mediaRow}>
             <TouchableOpacity style={styles.mediaBtn} onPress={() => mediaControl('prev')}>
               <MaterialCommunityIcons name="skip-previous" size={32} color={COLORS.text} />
@@ -282,100 +274,133 @@ export default function App() {
               <MaterialCommunityIcons name="skip-next" size={32} color={COLORS.text} />
             </TouchableOpacity>
           </View>
-
-          <View style={styles.volumeRow}>
-            <TouchableOpacity onPress={handleToggleMute} style={{ width: 44, alignItems: 'center' }}>
-              <Ionicons name={isMuted || currentVolume === 0 ? "volume-mute" : "volume-high"} size={26} color={isMuted ? COLORS.danger : COLORS.textDim} />
-            </TouchableOpacity>
-
-            <View style={{flexDirection: 'row', flex: 1, justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16}}>
-               <TouchableOpacity onPress={handleVolumeDown} style={{width: 44, height: 44, backgroundColor: COLORS.card, borderRadius: 22, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: COLORS.border}}>
-                  <Ionicons name="remove" size={24} color={COLORS.textDim} />
-               </TouchableOpacity>
-
-               <Text style={[styles.volumeText, {fontSize: 20, width: 60}]}>{currentVolume}%</Text>
-
-               <TouchableOpacity onPress={handleVolumeUp} style={{width: 44, height: 44, backgroundColor: COLORS.cardHighlight, borderRadius: 22, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: COLORS.border}}>
-                  <Ionicons name="add" size={24} color={COLORS.text} />
-               </TouchableOpacity>
-            </View>
-          </View>
         </View>
 
-        {/* ── SECT 2: UTILITIES ── */}
-        <View style={styles.cardRow}>
-           <TouchableOpacity style={[styles.card, styles.flexCard]} onPress={captureScreen} disabled={isCapturing}>
-              <View style={{ height: 40, justifyContent: 'center', alignItems: 'center', marginBottom: 10 }}>
-                {isCapturing ? (
-                    <ActivityIndicator size="large" color={COLORS.accent} />
-                ) : (
-                    <MaterialCommunityIcons name="monitor-screenshot" size={32} color={COLORS.accent} />
-                )}
-              </View>
-              <Text style={styles.cardTitle}>Screen</Text>
-              <Text style={styles.cardSubtitle}>Capture Live</Text>
-           </TouchableOpacity>
-           
-           <TouchableOpacity style={[styles.card, styles.flexCard]} onPress={getStats} disabled={loadingAction === 'stats'}>
-              <View style={{ height: 40, justifyContent: 'center', alignItems: 'center', marginBottom: 10 }}>
-                {loadingAction === 'stats' ? (
-                   <ActivityIndicator size="large" color={COLORS.warning} />
-                ) : (
-                   <Ionicons name="hardware-chip" size={32} color={COLORS.warning} />
-                )}
-              </View>
-              <Text style={styles.cardTitle}>Metrics</Text>
-              <Text style={styles.cardSubtitle}>Usage Stats</Text>
-           </TouchableOpacity>
-        </View>
-
-        {/* ── SECT 3: PERFORMANCE DETAILS ── */}
-        {stats && (
-          <View style={styles.card}>
-            <Text style={styles.sectionTitle}>Performance</Text>
-            
-            <View style={styles.hardwareGrid}>
-              <View style={styles.hardwareBox}>
-                <Text style={styles.hwLabel}>CPU</Text>
-                <Text style={styles.hwValue}>{stats.cpu_percent}%</Text>
-                <View style={styles.barBg}>
-                   <View style={[styles.barFill, { width: `${Math.min(100, stats.cpu_percent)}%`, backgroundColor: stats.cpu_percent > 80 ? COLORS.danger : COLORS.success }]} />
-                </View>
-              </View>
-              <View style={styles.hardwareBox}>
-                <Text style={styles.hwLabel}>RAM</Text>
-                <Text style={styles.hwValue}>{stats.ram_percent}%</Text>
-                <View style={styles.barBg}>
-                   <View style={[styles.barFill, { width: `${Math.min(100, stats.ram_percent)}%`, backgroundColor: stats.ram_percent > 80 ? COLORS.danger : COLORS.accent }]} />
-                </View>
-                <Text style={styles.hwDetail}>{stats.ram_used_gb} / {stats.ram_total_gb} GB</Text>
-              </View>
-            </View>
-
-            <View style={styles.processHeader}>
-              <Text style={styles.subTitle}>Top Processes</Text>
-              <TouchableOpacity onPress={() => setShowAllProcesses(!showAllProcesses)}>
-                <Text style={styles.linkText}>{showAllProcesses ? 'Show Less' : 'Show All'}</Text>
+        {/* ── SECT 2: VOLUME CONTROL ── */}
+        <View style={styles.card}>
+            <Text style={styles.sectionTitle}>System Volume</Text>
+            <View style={styles.volumeRow}>
+              <TouchableOpacity onPress={handleToggleMute} style={{ width: 44, alignItems: 'center' }}>
+                <Ionicons name={isMuted || currentVolume === 0 ? "volume-mute" : "volume-high"} size={26} color={isMuted ? COLORS.danger : COLORS.textDim} />
               </TouchableOpacity>
-            </View>
 
-            <View style={styles.processTableHead}>
-               <Text style={[styles.tCol, {flex: 2}]}>Task</Text>
-               <Text style={[styles.tCol, {flex: 1, textAlign:'right'}]}>RAM</Text>
-               <Text style={[styles.tCol, {flex: 1, textAlign:'right'}]}>CPU</Text>
-            </View>
+              <View style={{flexDirection: 'row', flex: 1, justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16}}>
+                <TouchableOpacity onPress={handleVolumeDown} style={styles.volAdjustBtn}>
+                    <Ionicons name="remove" size={24} color={COLORS.textDim} />
+                </TouchableOpacity>
 
-            {(showAllProcesses ? stats.top_processes : stats.top_processes.slice(0, 7)).map((p, i) => (
-              <View key={i} style={styles.processRow}>
-                <Text style={[styles.tRowText, {flex: 2, color: COLORS.text}]} numberOfLines={1}>{p.name}</Text>
-                <Text style={[styles.tRowText, {flex: 1, textAlign:'right', color: COLORS.textDim}]}>{p.memory_mb} MB</Text>
-                <Text style={[styles.tRowText, {flex: 1, textAlign:'right', color: COLORS.textDim}]}>{p.cpu_percent?.toFixed(1)}%</Text>
+                <Text style={[styles.volumeText, {fontSize: 20, width: 60}]}>{currentVolume}%</Text>
+
+                <TouchableOpacity onPress={handleVolumeUp} style={[styles.volAdjustBtn, {backgroundColor: COLORS.cardHighlight}]}>
+                    <Ionicons name="add" size={24} color={COLORS.text} />
+                </TouchableOpacity>
               </View>
-            ))}
-          </View>
-        )}
+            </View>
+        </View>
 
-        {/* ── SECT 4: POWER ── */}
+        {/* ── SECT 3: LIVE DESKTOP SCREEN ── */}
+        <View style={styles.card}>
+            <View style={styles.sectionHeaderRow}>
+               <Text style={styles.sectionTitle}>Live Desktop</Text>
+               <TouchableOpacity onPress={captureScreen} disabled={isCapturing} style={styles.refreshBtn}>
+                  {isCapturing ? (
+                      <ActivityIndicator size="small" color={COLORS.accent} />
+                  ) : (
+                      <Ionicons name="refresh" size={20} color={COLORS.textDim} />
+                  )}
+               </TouchableOpacity>
+            </View>
+            
+            <View style={styles.screenContainer}>
+               {imgLoading && screenshot && (
+                   <View style={styles.absoluteLoaderCenter}>
+                      <ActivityIndicator size="large" color={COLORS.accent} />
+                   </View>
+               )}
+               {screenshot ? (
+                   <ScrollView minimumZoomScale={1} maximumZoomScale={5} contentContainerStyle={styles.screenInner}>
+                      <Image 
+                         source={{ uri: screenshot }} 
+                         style={styles.screenImage} 
+                         resizeMode="contain"
+                         onLoad={() => setImgLoading(false)}
+                         onError={() => setImgLoading(false)}
+                      />
+                   </ScrollView>
+               ) : (
+                   <View style={styles.blankScreen}>
+                      <MaterialCommunityIcons name="monitor-off" size={48} color={COLORS.border} style={{marginBottom: 10}} />
+                      <Text style={styles.blankText}>No capture available</Text>
+                      <Text style={styles.blankTextSub}>Tap the refresh icon to sync.</Text>
+                   </View>
+               )}
+            </View>
+        </View>
+
+        {/* ── SECT 4: PERFORMANCE DETAILS ── */}
+        <View style={styles.card}>
+           <View style={styles.sectionHeaderRow}>
+              <Text style={styles.sectionTitle}>Performance</Text>
+              <TouchableOpacity onPress={() => getStats()} disabled={loadingAction === 'stats'} style={styles.refreshBtn}>
+                 {loadingAction === 'stats' ? (
+                     <ActivityIndicator size="small" color={COLORS.warning} />
+                 ) : (
+                     <Ionicons name="refresh" size={20} color={COLORS.textDim} />
+                 )}
+              </TouchableOpacity>
+           </View>
+
+           {stats ? (
+              <>
+                 <View style={styles.hardwareGrid}>
+                   <View style={styles.hardwareBox}>
+                     <Text style={styles.hwLabel}>CPU</Text>
+                     <Text style={styles.hwValue}>{stats.cpu_percent}%</Text>
+                     <View style={styles.barBg}>
+                        <View style={[styles.barFill, { width: `${Math.min(100, stats.cpu_percent)}%`, backgroundColor: stats.cpu_percent > 80 ? COLORS.danger : COLORS.success }]} />
+                     </View>
+                   </View>
+                   <View style={styles.hardwareBox}>
+                     <Text style={styles.hwLabel}>RAM</Text>
+                     <Text style={styles.hwValue}>{stats.ram_percent}%</Text>
+                     <View style={styles.barBg}>
+                        <View style={[styles.barFill, { width: `${Math.min(100, stats.ram_percent)}%`, backgroundColor: stats.ram_percent > 80 ? COLORS.danger : COLORS.accent }]} />
+                     </View>
+                     <Text style={styles.hwDetail}>{stats.ram_used_gb} / {stats.ram_total_gb} GB</Text>
+                   </View>
+                 </View>
+
+                 <View style={styles.processHeader}>
+                   <Text style={styles.subTitle}>Top Processes</Text>
+                   <TouchableOpacity onPress={() => setShowAllProcesses(!showAllProcesses)}>
+                     <Text style={styles.linkText}>{showAllProcesses ? 'Show Less' : 'Show All'}</Text>
+                   </TouchableOpacity>
+                 </View>
+
+                 <View style={styles.processTableHead}>
+                    <Text style={[styles.tCol, {flex: 2}]}>Task</Text>
+                    <Text style={[styles.tCol, {flex: 1, textAlign:'right'}]}>RAM</Text>
+                    <Text style={[styles.tCol, {flex: 1, textAlign:'right'}]}>CPU</Text>
+                 </View>
+
+                 {(showAllProcesses ? stats.top_processes : stats.top_processes.slice(0, 7)).map((p, i) => (
+                   <View key={i} style={styles.processRow}>
+                     <Text style={[styles.tRowText, {flex: 2, color: COLORS.text}]} numberOfLines={1}>{p.name}</Text>
+                     <Text style={[styles.tRowText, {flex: 1, textAlign:'right', color: COLORS.textDim}]}>{p.memory_mb} MB</Text>
+                     <Text style={[styles.tRowText, {flex: 1, textAlign:'right', color: COLORS.textDim}]}>{p.cpu_percent?.toFixed(1)}%</Text>
+                   </View>
+                 ))}
+              </>
+           ) : (
+              <View style={[styles.blankScreen, {paddingVertical: 30}]}>
+                 <Ionicons name="hardware-chip-outline" size={48} color={COLORS.border} style={{marginBottom: 10}} />
+                 <Text style={styles.blankText}>No metrics available</Text>
+                 <Text style={styles.blankTextSub}>Tap the refresh icon to sync stats.</Text>
+              </View>
+           )}
+        </View>
+
+        {/* ── SECT 5: POWER ── */}
         <View style={styles.powerCardWrapper}>
             <TouchableOpacity style={styles.btnPowerMenu} onPress={() => setPowerMenuVisible(true)}>
                 <MaterialCommunityIcons name="power-settings" size={26} color={COLORS.danger} style={{marginRight: 10}}/>
@@ -384,43 +409,6 @@ export default function App() {
         </View>
 
       </ScrollView>
-
-      {/* Screen Capture Modal */}
-      <Modal visible={isScreenModalOpen} transparent={true} animationType="fade">
-         <View style={styles.modalBg}>
-            <View style={styles.modalHeader}>
-               <Text style={styles.modalTitle}>Desktop Capture</Text>
-               <TouchableOpacity style={styles.closeBtn} onPress={() => setIsScreenModalOpen(false)}>
-                  <Ionicons name="close" size={24} color={COLORS.text} />
-               </TouchableOpacity>
-            </View>
-            
-            <View style={styles.imgWrapper}>
-               {imgLoading && (
-                  <ActivityIndicator size="large" color={COLORS.accent} style={styles.absoluteLoader} />
-               )}
-               {screenshot && (
-                  <ScrollView minimumZoomScale={1} maximumZoomScale={5} horizontal={true} contentContainerStyle={{alignItems:'center', justifyContent: 'center'}}>
-                      <ScrollView minimumZoomScale={1} maximumZoomScale={5} contentContainerStyle={{alignItems:'center', justifyContent: 'center'}}>
-                          <Image 
-                              source={{ uri: screenshot }} 
-                              style={styles.modalImg} 
-                              resizeMode="contain" 
-                              onLoad={() => setImgLoading(false)}
-                              onError={() => setImgLoading(false)}
-                          />
-                      </ScrollView>
-                  </ScrollView>
-               )}
-            </View>
-
-            <View style={styles.modalFooter}>
-                <TouchableOpacity style={styles.btnPrimary} onPress={captureScreen} disabled={isCapturing}>
-                  <Text style={styles.btnPrimaryText}>{isCapturing ? 'Capturing...' : 'Refresh View'}</Text>
-                </TouchableOpacity>
-            </View>
-         </View>
-      </Modal>
 
       {/* Power Action Bottom Sheet */}
       <Modal visible={powerMenuVisible} transparent={true} animationType="slide">
@@ -594,7 +582,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
   },
 
-  // CARDS
+  // CARDS (GENERAL)
   card: {
     backgroundColor: COLORS.card,
     borderRadius: 24,
@@ -603,47 +591,41 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: COLORS.border,
   },
-  cardRow: {
+  sectionHeaderRow: {
     flexDirection: 'row',
-    gap: 16,
-    marginBottom: 16,
-  },
-  flexCard: {
-    flex: 1,
-    marginBottom: 0,
+    justifyContent: 'space-between',
     alignItems: 'center',
-    paddingVertical: 24,
+    marginBottom: 16,
   },
   sectionTitle: {
     fontSize: 18,
     color: COLORS.text,
     fontWeight: '800',
-    marginBottom: 16,
     letterSpacing: 0.3,
+  },
+  refreshBtn: {
+    padding: 6,
+    backgroundColor: COLORS.cardHighlight,
+    borderRadius: 20,
+    width: 36,
+    height: 36,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: COLORS.border,
   },
   subTitle: {
     fontSize: 14,
     color: COLORS.text,
     fontWeight: '700',
   },
-  cardTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: COLORS.text,
-  },
-  cardSubtitle: {
-    fontSize: 13,
-    color: COLORS.textDim,
-    marginTop: 4,
-  },
 
-  // MEDIA & VOLUME
+  // MEDIA (Container 1)
   mediaRow: {
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
     gap: 32,
-    marginBottom: 30,
     marginTop: 10,
   },
   mediaBtn: {
@@ -666,6 +648,8 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.3,
     shadowRadius: 10,
   },
+
+  // VOLUME (Container 2)
   volumeRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -675,21 +659,74 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     borderWidth: 1,
     borderColor: COLORS.border,
+    marginTop: 10,
   },
-  slider: {
-    flex: 1,
-    height: 40,
-    marginHorizontal: 8,
+  volAdjustBtn: {
+    width: 44,
+    height: 44,
+    backgroundColor: COLORS.background,
+    borderRadius: 22,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: COLORS.border,
   },
   volumeText: {
-    width: 45,
+    width: 60,
     textAlign: 'center',
     color: COLORS.text,
     fontWeight: 'bold',
-    fontSize: 15,
+    fontSize: 20,
   },
 
-  // STATS
+  // SCREEN CAPTURE (Container 3)
+  screenContainer: {
+     width: '100%',
+     height: 220,
+     backgroundColor: COLORS.background,
+     borderRadius: 16,
+     borderWidth: 1,
+     borderColor: COLORS.border,
+     overflow: 'hidden',
+     justifyContent: 'center',
+     alignItems: 'center',
+  },
+  screenInner: {
+     flexGrow: 1, 
+     justifyContent: 'center',
+     alignItems: 'center',
+     width: '100%',
+     height: '100%'
+  },
+  screenImage: {
+     width: '100%',
+     height: '100%',
+  },
+  absoluteLoaderCenter: {
+     position: 'absolute',
+     zIndex: 10,
+     backgroundColor: '#00000088',
+     width: '100%',
+     height: '100%',
+     justifyContent: 'center',
+     alignItems: 'center'
+  },
+  blankScreen: {
+     alignItems: 'center',
+     justifyContent: 'center',
+  },
+  blankText: {
+     color: COLORS.textDim,
+     fontSize: 15,
+     fontWeight: '600'
+  },
+  blankTextSub: {
+     color: '#555',
+     fontSize: 12,
+     marginTop: 4,
+  },
+
+  // STATS (Container 4)
   hardwareGrid: {
     flexDirection: 'row',
     gap: 16,
@@ -697,7 +734,7 @@ const styles = StyleSheet.create({
   },
   hardwareBox: {
     flex: 1,
-    backgroundColor: COLORS.cartHighlight,
+    backgroundColor: COLORS.cardHighlight,
     padding: 16,
     borderRadius: 16,
     borderWidth: 1,
@@ -786,49 +823,6 @@ const styles = StyleSheet.create({
       fontSize: 18,
       fontWeight: 'bold',
       letterSpacing: 0.5,
-  },
-
-  // CAPTURE MODAL
-  modalBg: {
-    flex: 1,
-    backgroundColor: '#000000FA', // Solid Dark
-    justifyContent: 'space-between',
-  },
-  modalHeader: {
-     flexDirection: 'row',
-     justifyContent: 'space-between',
-     padding: 20,
-     paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight + 20 : 50,
-     alignItems: 'center',
-  },
-  modalTitle: {
-     color: COLORS.text,
-     fontSize: 18,
-     fontWeight: '700',
-     letterSpacing: 0.5,
-  },
-  closeBtn: {
-     backgroundColor: COLORS.cardHighlight,
-     borderRadius: 16,
-     padding: 8,
-  },
-  imgWrapper: {
-     flex: 1,
-     justifyContent: 'center',
-     alignItems: 'center',
-     overflow: 'hidden',
-  },
-  absoluteLoader: {
-     position: 'absolute',
-     zIndex: 10,
-  },
-  modalImg: {
-     width: SCREEN_WIDTH,
-     height: SCREEN_HEIGHT * 0.7,
-  },
-  modalFooter: {
-      padding: 24,
-      paddingBottom: 40,
   },
 
   // POWER BOTTOM SHEET
