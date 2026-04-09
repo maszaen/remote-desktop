@@ -35,6 +35,7 @@ const RADIUS = { sm: 8, md: 16, lg: 24, round: 999 };
 export default function App() {
   const [isConnected, setIsConnected] = useState(false);
   const [serverUrl, setServerUrl] = useState('');
+  const [ipAddress, setIpAddress] = useState('');
   const [savedDevices, setSavedDevices] = useState([]);
   const [activePin, setActivePin] = useState(null);
 
@@ -103,7 +104,7 @@ export default function App() {
         const base = ipInfo.split('.').slice(0, 3).join('.') + '.';
         const pingIp = async (targetIp) => {
             const controller = new AbortController();
-            const id = setTimeout(() => controller.abort(), 1500); // 1.5s timeout for fast sweep
+            const id = setTimeout(() => controller.abort(), 2800); // Increased timeout to prevent blocking cancellation
             try {
                 const res = await fetch(`http://${targetIp}:8000/`, { signal: controller.signal });
                 const data = await res.json();
@@ -119,7 +120,7 @@ export default function App() {
             }
         };
 
-        const batchSize = 30; // 30 concurrent requests mapping from 1 to 254
+        const batchSize = 10; // Avoid native connection queue dropping
         const ips = Array.from({length: 254}, (_, i) => `${base}${i + 1}`);
         for (let i = 0; i < ips.length; i += batchSize) {
            await Promise.all(ips.slice(i, i + batchSize).map(pingIp));
@@ -129,9 +130,13 @@ export default function App() {
   };
 
   // ─── Connection & Pairing ───────────────────────────────────────────
-  const initiateConnect = async (ip, hostname, savedPin = null) => {
-    const url = `http://${ip}:8000`;
-    setLoadingAction(`connecting_${ip}`);
+  const initiateConnect = async (ip, hostname = "PC", savedPin = null) => {
+    const targetIp = ip || ipAddress;
+    if (!targetIp.trim()) return Alert.alert('Error', 'Enter a valid IP address.');
+    let cleanIp = targetIp.trim().replace(/^https?:\/\//, '').replace(/:\d+$/, '').replace(/\/+$/, '');
+    
+    const url = `http://${cleanIp}:8000`;
+    setLoadingAction(`connecting_${cleanIp}`);
     
     // First, verify connection works and PIN is valid (if provided)
     try {
@@ -140,6 +145,7 @@ export default function App() {
       
       const res = await fetch(`${url}/volume`, { 
           headers: savedPin ? { 'pin': savedPin } : {}, 
+
           signal: controller.signal 
       });
       clearTimeout(timeoutId);
@@ -353,6 +359,30 @@ export default function App() {
                  ))}
              </View>
           )}
+
+          {/* Manual Input (Fallback) */}
+          <View style={styles.sectionBlock}>
+             <Text style={styles.sectionLabel}>MANUAL CONNECT</Text>
+             <View style={styles.inputWrapper}>
+                <Ionicons name="link" size={20} color={COLORS.textSecondary} />
+                <TextInput
+                   style={styles.inputField}
+                   placeholder="192.168.1.5"
+                   placeholderTextColor={COLORS.textSecondary}
+                   value={ipAddress}
+                   onChangeText={setIpAddress}
+                   keyboardType="default"
+                   autoCapitalize="none"
+                />
+             </View>
+             <TouchableOpacity style={styles.btnConnect} onPress={() => initiateConnect(null, "Manual PC", null)} disabled={loadingAction.includes('connecting')}>
+                {loadingAction.includes('connecting_') && !pairingModalOpen ? (
+                   <ActivityIndicator size="small" color={COLORS.text} />
+                ) : (
+                   <Text style={styles.btnConnectText}>CONNECT NOW</Text>
+                )}
+             </TouchableOpacity>
+          </View>
         </ScrollView>
 
         {/* Pairing Code Modal */}
