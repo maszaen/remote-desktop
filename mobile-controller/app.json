@@ -21,10 +21,16 @@
         "backgroundColor": "#ffffff"
       },
       "edgeToEdgeEnabled": true,
-      "package": "com.anonymous.mobilecontroller"
+      "package": "com.anonymous.mobilecontroller",
+      "usesCleartextTraffic": true
     },
     "web": {
       "favicon": "./assets/favicon.png"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "f5e20bec-9ae0-41f0-b3cb-abf118a366a8"
+      }
     }
   }
 }

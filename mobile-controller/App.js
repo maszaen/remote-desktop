@@ -178,8 +178,17 @@ export default function App() {
     try {
       const data = await sendAction('/volume', 'GET', null, url, savedPin, forceId);
 
-      if (data && data.error === 'Network request failed') {
-          if (!isAutoConnect) Alert.alert('Connection Error', `Target ${cleanIp} is unreachable.\n\nPC Server might be off.`);
+      if (data && data.error) {
+          if (!isAutoConnect) {
+              Alert.alert(
+                'Connection Failed', 
+                `Could not reach ${cleanIp}\n\n` +
+                `Technical Error: ${data.message || data.error}\n\n` +
+                `Suggestions:\n` +
+                `1. Check if PC and HP are on same WiFi\n` +
+                `2. Ensure Windows Firewall allows port 8000`
+              );
+          }
           return;
       }
 
@@ -289,7 +298,12 @@ export default function App() {
       const res = await fetch(`${targetUrl}${endpoint}`, options);
       clearTimeout(timeoutId);
       return await res.json();
-    } catch (e) { return { error: 'Network request failed' }; }
+    } catch (e) { 
+      return { 
+        error: 'Network request failed', 
+        message: e.toString() 
+      }; 
+    }
   };
 
   // ─── Feature Actions ─────────────────────────────────────────
@@ -622,7 +636,7 @@ export default function App() {
         <View style={styles.card}>
           <View style={styles.cardHeaderFlex}>
              <Text style={styles.cardTitleNoMargin}>Live Desktop</Text>
-             <TouchableOpacity style={styles.cardHeaderBtn} onPress={captureScreen} disabled={isCapturing}>
+             <TouchableOpacity style={styles.cardHeaderBtn} onPress={() => captureScreen()} disabled={isCapturing}>
                 {isCapturing ? <ActivityIndicator size="small" color={COLORS.primary} /> : <Ionicons name="sync" size={18} color={COLORS.textSecondary} />}
              </TouchableOpacity>
           </View>
