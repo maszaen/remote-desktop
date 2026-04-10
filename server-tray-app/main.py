@@ -16,8 +16,31 @@ from pycaw.pycaw import AudioUtilities
 from comtypes import CoInitialize
 from fastapi.middleware.cors import CORSMiddleware
 
-# Generate random 4-digit PIN
-ACCESS_PIN = str(random.randint(1000, 9999))
+# Persistent PIN storage logic
+def get_persistent_pin():
+    config_dir = os.path.join(os.environ.get('LOCALAPPDATA', os.path.expanduser('~')), 'NexusRemote')
+    config_file = os.path.join(config_dir, 'nexus_config.json')
+    
+    if not os.path.exists(config_dir):
+        os.makedirs(config_dir)
+        
+    import json
+    if os.path.exists(config_file):
+        try:
+            with open(config_file, 'r') as f:
+                data = json.load(f)
+                return data.get('pin', str(random.randint(1000, 9999)))
+        except:
+            pass
+            
+    # Generate new if not present or error
+    new_pin = str(random.randint(1000, 9999))
+    with open(config_file, 'w') as f:
+        json.dump({'pin': new_pin}, f)
+    return new_pin
+
+ACCESS_PIN = get_persistent_pin()
+IS_REMOTE_CONNECTED = False
 
 app = FastAPI(title="Nexus PC Remote")
 
@@ -32,8 +55,14 @@ app.add_middleware(
 
 # Auth Dependency
 def verify_pin(pin: str = Header(None)):
+    global IS_REMOTE_CONNECTED
     if str(pin) != ACCESS_PIN:
         raise HTTPException(status_code=401, detail="Invalid Nexus Pairing PIN")
+    
+    if not IS_REMOTE_CONNECTED:
+        IS_REMOTE_CONNECTED = True
+        # Notification or tray update trigger could go here if needed
+        
     return pin
 
 
@@ -373,17 +402,24 @@ def setup_tray_icon():
             winreg.SetValueEx(key, "NexusServer", 0, winreg.REG_SZ, f'"{exe_path}"')
         winreg.CloseKey(key)
 
-    menu = Menu(
-        MenuItem("Show Pairing PIN", show_pin_code),
-        MenuItem("Scan QR to Connect", show_qr_code),
-        MenuItem(
+    def get_menu():
+        items = []
+        if IS_REMOTE_CONNECTED:
+            items.append(MenuItem("Status: 🟢 Connected to Phone", lambda x: None, enabled=False))
+            items.append(Menu.SEPARATOR)
+        
+        items.append(MenuItem("Pair New Device (QR)", show_qr_code))
+        items.append(MenuItem("Show Pairing PIN", show_pin_code))
+        items.append(Menu.SEPARATOR)
+        items.append(MenuItem(
             "Run on Windows Startup",
             toggle_autostart,
             checked=lambda item: is_autostart_enabled(),
-        ),
-        MenuItem("Quit Backend", on_quit),
-    )
-    icon = Icon("PCRemote", image, "Nexus PC Controller Server", menu)
+        ))
+        items.append(MenuItem("Quit Backend", on_quit))
+        return Menu(*items)
+
+    icon = Icon("PCRemote", image, "Nexus PC Controller Server", menu=get_menu)
 
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     try:
