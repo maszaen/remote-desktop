@@ -8,7 +8,7 @@ import uvicorn
 import socket
 import random
 import ctypes
-from fastapi import FastAPI, Response, HTTPException, Depends
+from fastapi import FastAPI, Response, HTTPException, Depends, Header
 from pydantic import BaseModel
 from pystray import Icon, Menu, MenuItem
 from PIL import Image, ImageDraw
@@ -30,7 +30,7 @@ app.add_middleware(
 )
 
 # Auth Dependency
-def verify_pin(pin: str = None):
+def verify_pin(pin: str = Header(None)):
     if str(pin) != ACCESS_PIN:
         raise HTTPException(status_code=401, detail="Invalid Nexus Pairing PIN")
     return pin
