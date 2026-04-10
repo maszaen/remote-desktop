@@ -575,6 +575,10 @@ export default function App() {
         {/* Media */}
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Media Controls</Text>
+          <View style={{ marginBottom: 15, alignItems: 'center' }}>
+             <Text style={{ color: COLORS.text, fontSize: 16, fontWeight: 'bold' }}>{stats?.active_media || "Not Playing"}</Text>
+             <Text style={{ color: COLORS.textSecondary, fontSize: 13 }}>Audio Output Session</Text>
+          </View>
           <View style={styles.mediaCluster}>
             <TouchableOpacity style={styles.mediaBtnSecondary} onPress={() => mediaControl('prev')}>
               <Ionicons name="play-skip-back" size={22} color={COLORS.text} />
@@ -664,6 +668,17 @@ export default function App() {
                      <View style={styles.hwTrack}><View style={[styles.hwFill, { width: `${Math.min(100, stats.ram_percent)}%`, backgroundColor: stats.ram_percent > 80 ? COLORS.danger : COLORS.primary }]} /></View>
                    </View>
                  </View>
+                 
+                 <View style={{ marginTop: 15, paddingHorizontal: 15, paddingBottom: 10 }}>
+                   <View style={styles.hwWidgetHeader}>
+                     <Ionicons name="desktop-outline" size={14} color={COLORS.textSecondary} />
+                     <Text style={styles.hwWidgetLabel}>Active Window</Text>
+                   </View>
+                   <Text style={{ color: COLORS.primary, marginTop: 4, fontSize: 14, fontWeight: '500' }}>
+                     {stats.active_window || "Desktop"}
+                   </Text>
+                 </View>
+
                  <View style={styles.processesSection}>
                    <View style={styles.processesFilterRow}>
                       <Text style={styles.processesLabel}>Processes</Text>

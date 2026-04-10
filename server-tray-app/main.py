@@ -157,6 +157,31 @@ def capture_screen():
 @app.get("/stats", dependencies=[Depends(verify_pin)])
 def get_stats():
     try:
+        import ctypes
+        hwnd = ctypes.windll.user32.GetForegroundWindow()
+        length = ctypes.windll.user32.GetWindowTextLengthW(hwnd)
+        buff = ctypes.create_unicode_buffer(length + 1)
+        ctypes.windll.user32.GetWindowTextW(hwnd, buff, length + 1)
+        active_window = buff.value or "Desktop"
+    except:
+        active_window = "Unknown"
+
+    active_media = "Not Playing"
+    try:
+        CoInitialize()
+        sessions = AudioUtilities.GetAllSessions()
+        playing = []
+        for s in sessions:
+            if s.Process and s.State == 1: # 1 is Active (playing audio)
+                name = s.Process.name()
+                if name.lower() not in ("explorer.exe", "lightingservice.exe", "msmpeng.exe"):
+                    playing.append(name.replace(".exe", "").title())
+        if playing:
+            active_media = " • ".join(set(playing))
+    except:
+        pass
+
+    try:
         ram = psutil.virtual_memory()
         cpu = psutil.cpu_percent(interval=0.1)
         total_mem = ram.total
@@ -183,6 +208,8 @@ def get_stats():
             "ram_used_gb": round(ram.used / (1024**3), 2),
             "ram_total_gb": round(ram.total / (1024**3), 2),
             "top_processes": processes,
+            "active_window": active_window,
+            "active_media": active_media
         }
     except Exception as e:
         return {"error": str(e)}
