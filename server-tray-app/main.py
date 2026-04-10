@@ -168,18 +168,48 @@ def get_stats():
 
     active_media = "Not Playing"
     try:
+        from pycaw.pycaw import AudioUtilities
+        from comtypes import CoInitialize
+        import ctypes
+        from ctypes import wintypes
         CoInitialize()
         sessions = AudioUtilities.GetAllSessions()
-        playing = []
+        
+        playing_pids = set()
+        playing_names = set()
         for s in sessions:
-            if s.Process and s.State == 1: # 1 is Active (playing audio)
+            if s.Process and s.State == 1:
                 name = s.Process.name()
                 if name.lower() not in ("explorer.exe", "lightingservice.exe", "msmpeng.exe"):
-                    playing.append(name.replace(".exe", "").title())
-        if playing:
-            active_media = " • ".join(set(playing))
-    except:
-        pass
+                    playing_pids.add(s.Process.pid)
+                    playing_names.add(name.lower())
+
+        media_titles = []
+        if playing_pids:
+            user32 = ctypes.windll.user32
+            def enum_windows_proc(hwnd, lParam):
+                if user32.IsWindowVisible(hwnd):
+                    pid = ctypes.c_ulong()
+                    user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+                    if pid.value in playing_pids:
+                        length = user32.GetWindowTextLengthW(hwnd)
+                        if length > 0:
+                            buff = ctypes.create_unicode_buffer(length + 1)
+                            user32.GetWindowTextW(hwnd, buff, length + 1)
+                            title = buff.value.strip()
+                            if title and title.lower() not in ("spotify premium", "spotify free", "spotify"):
+                                media_titles.append(title)
+                return True
+
+            WNDENUMPROC = ctypes.WINFUNCTYPE(ctypes.c_bool, wintypes.HWND, wintypes.LPARAM)
+            user32.EnumWindows(WNDENUMPROC(enum_windows_proc), 0)
+            
+            if media_titles:
+                active_media = " • ".join(set(media_titles))
+            else:
+                active_media = " • ".join(set(n.replace(".exe", "").title() for n in playing_names))
+    except Exception as e:
+        active_media = "Unknown"
 
     try:
         ram = psutil.virtual_memory()

@@ -576,8 +576,10 @@ export default function App() {
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Media Controls</Text>
           <View style={{ marginBottom: 15, alignItems: 'center' }}>
-             <Text style={{ color: COLORS.text, fontSize: 16, fontWeight: 'bold' }}>{stats?.active_media || "Not Playing"}</Text>
-             <Text style={{ color: COLORS.textSecondary, fontSize: 13 }}>Audio Output Session</Text>
+             <Text style={{ color: COLORS.textSecondary, fontSize: 11, fontWeight: 'bold', letterSpacing: 1, marginBottom: 4 }}>NOW PLAYING</Text>
+             <Text style={{ color: COLORS.primary, fontSize: 16, fontWeight: 'bold', textAlign: 'center' }} numberOfLines={2}>
+                 {stats?.active_media || "Not Playing"}
+             </Text>
           </View>
           <View style={styles.mediaCluster}>
             <TouchableOpacity style={styles.mediaBtnSecondary} onPress={() => mediaControl('prev')}>
