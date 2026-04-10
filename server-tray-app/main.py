@@ -16,30 +16,36 @@ from pycaw.pycaw import AudioUtilities
 from comtypes import CoInitialize
 from fastapi.middleware.cors import CORSMiddleware
 
-# Persistent PIN storage logic
-def get_persistent_pin():
-    config_dir = os.path.join(os.environ.get('LOCALAPPDATA', os.path.expanduser('~')), 'NexusRemote')
-    config_file = os.path.join(config_dir, 'nexus_config.json')
+CONFIG_DIR = os.path.join(os.environ.get('LOCALAPPDATA', os.path.expanduser('~')), 'NexusRemote')
+CONFIG_FILE = os.path.join(CONFIG_DIR, 'nexus_config.json')
+
+def load_config():
+    if not os.path.exists(CONFIG_DIR):
+        os.makedirs(CONFIG_DIR)
     
-    if not os.path.exists(config_dir):
-        os.makedirs(config_dir)
-        
     import json
-    if os.path.exists(config_file):
+    if os.path.exists(CONFIG_FILE):
         try:
-            with open(config_file, 'r') as f:
-                data = json.load(f)
-                return data.get('pin', str(random.randint(1000, 9999)))
+            with open(CONFIG_FILE, 'r') as f:
+                return json.load(f)
         except:
             pass
-            
-    # Generate new if not present or error
-    new_pin = str(random.randint(1000, 9999))
-    with open(config_file, 'w') as f:
-        json.dump({'pin': new_pin}, f)
-    return new_pin
+    return {}
 
-ACCESS_PIN = get_persistent_pin()
+def save_config(pin, trusted):
+    import json
+    with open(CONFIG_FILE, 'w') as f:
+        json.dump({'pin': pin, 'trusted': list(trusted)}, f)
+
+def init_auth():
+    config = load_config()
+    pin = config.get('pin', str(random.randint(1000, 9999)))
+    trusted = set(config.get('trusted', []))
+    # Save once to ensure file exists
+    save_config(pin, trusted)
+    return pin, trusted
+
+ACCESS_PIN, TRUSTED_DEVICES = init_auth()
 IS_REMOTE_CONNECTED = False
 
 app = FastAPI(title="Nexus PC Remote")
@@ -54,16 +60,27 @@ app.add_middleware(
 
 
 # Auth Dependency
-def verify_pin(pin: str = Header(None)):
-    global IS_REMOTE_CONNECTED
-    if str(pin) != ACCESS_PIN:
-        raise HTTPException(status_code=401, detail="Invalid Nexus Pairing PIN")
+def verify_pin(pin: str = Header(None), nexus_id: str = Header(None, alias="nexus-id")):
+    global ACCESS_PIN, TRUSTED_DEVICES, IS_REMOTE_CONNECTED
     
-    if not IS_REMOTE_CONNECTED:
+    # 1. Check if device is already trusted
+    if nexus_id and nexus_id in TRUSTED_DEVICES:
         IS_REMOTE_CONNECTED = True
-        # Notification or tray update trigger could go here if needed
-        
-    return pin
+        return pin
+
+    # 2. If not trusted, check PIN
+    if str(pin) == ACCESS_PIN:
+        if nexus_id:
+            # Add to trust list
+            TRUSTED_DEVICES.add(nexus_id)
+            # ROTATE PIN for security (One-time use)
+            ACCESS_PIN = str(random.randint(1000, 9999))
+            save_config(ACCESS_PIN, TRUSTED_DEVICES)
+            
+        IS_REMOTE_CONNECTED = True
+        return pin
+    
+    raise HTTPException(status_code=401, detail="Invalid Nexus Pairing PIN")
 
 
 def get_volume_interface():

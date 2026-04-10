@@ -47,6 +47,19 @@ export default function App() {
   const [ipAddress, setIpAddress] = useState('');
   const [savedDevices, setSavedDevices] = useState([]);
   const [activePin, setActivePin] = useState(null);
+  const [deviceId, setDeviceId] = useState(null);
+
+  useEffect(() => {
+    const loadId = async () => {
+      let id = await AsyncStorage.getItem('nexus_device_id');
+      if (!id) {
+        id = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+        await AsyncStorage.setItem('nexus_device_id', id);
+      }
+      setDeviceId(id);
+    };
+    loadId();
+  }, []);
 
   // QR Code
   const [isScanningQR, setIsScanningQR] = useState(false);
@@ -280,7 +293,11 @@ export default function App() {
       const timeoutId = setTimeout(() => controller.abort(), 8000);
       const options = { 
           method, 
-          headers: { 'Content-Type': 'application/json', 'pin': targetPin }, 
+          headers: { 
+            'Content-Type': 'application/json', 
+            'pin': targetPin,
+            'nexus-id': deviceId
+          }, 
           signal: controller.signal 
       };
       if (body) options.body = JSON.stringify(body);
