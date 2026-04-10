@@ -55,22 +55,30 @@ app.add_middleware(
 def verify_pin(pin: str = Header(None), x_nexus_id: str = Header(None)):
     global PAIRING_CODE, TRUSTED_DEVICES, IS_REMOTE_CONNECTED
     
-    # 1. Check Whitelist (Persistent)
-    if x_nexus_id and x_nexus_id in TRUSTED_DEVICES:
-        IS_REMOTE_CONNECTED = True
+    # Normalize ID (handle "null" string from JS)
+    clean_id = x_nexus_id if (x_nexus_id and x_nexus_id != "null") else None
+
+    # 1. Check Whitelist (Permanent hardware link)
+    if clean_id and clean_id in TRUSTED_DEVICES:
+        if not IS_REMOTE_CONNECTED:
+            IS_REMOTE_CONNECTED = True
+            print(f"Device recognized: {clean_id}")
         return pin
 
     # 2. Check Pairing Code (Session-based OTP)
-    if str(pin) == PAIRING_CODE:
-        if x_nexus_id:
-            TRUSTED_DEVICES.add(x_nexus_id)
+    if pin and str(pin) == PAIRING_CODE:
+        if clean_id:
+            TRUSTED_DEVICES.add(clean_id)
             save_trusted_devices(TRUSTED_DEVICES)
-            # Once a device is paired, we roll the code for the next one
-            PAIRING_CODE = str(random.randint(1000, 9999))
+            print(f"New device paired: {clean_id}")
+            # Note: We do NOT rotate PAIRING_CODE here anymore to avoid 401 errors 
+            # on immediate subsequent requests from the same phone.
+            # It will rotate naturally on the next server restart.
         
         IS_REMOTE_CONNECTED = True
         return pin
     
+    print(f"Auth failed: PIN={pin}, ID={clean_id}")
     raise HTTPException(status_code=401, detail="Invalid Nexus Pairing Code")
 
 

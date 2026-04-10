@@ -49,17 +49,7 @@ export default function App() {
   const [activePin, setActivePin] = useState(null);
   const [deviceId, setDeviceId] = useState(null);
 
-  useEffect(() => {
-    const loadId = async () => {
-      let id = await AsyncStorage.getItem('nexus_device_id');
-      if (!id) {
-        id = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
-        await AsyncStorage.setItem('nexus_device_id', id);
-      }
-      setDeviceId(id);
-    };
-    loadId();
-  }, []);
+
 
   // QR Code
   const [isScanningQR, setIsScanningQR] = useState(false);
@@ -93,16 +83,26 @@ export default function App() {
   useEffect(() => {
     const init = async () => {
       try {
+        // 1. Load or Generate Device ID first
+        let id = await AsyncStorage.getItem('nexus_device_id');
+        if (!id) {
+          id = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+          await AsyncStorage.setItem('nexus_device_id', id);
+        }
+        setDeviceId(id);
+
+        // 2. Load saved devices
         const data = await AsyncStorage.getItem('nexus_devices_v2');
         if (data) {
           const parsed = JSON.parse(data);
           setSavedDevices(parsed);
-          // Auto-connect to the most recently used device (first in array)
+          
+          // 3. Auto-connect if we have devices, using the loaded ID
           if (parsed && parsed.length > 0) {
             const lastDev = parsed[0];
-            // Small delay to make sure UI is mounted
             setTimeout(() => {
-              initiateConnect(lastDev.ip, lastDev.hostname || lastDev.ip, lastDev.pin, true);
+              // Passing id directly (forceId) to bypass state delay
+              initiateConnect(lastDev.ip, lastDev.hostname || lastDev.ip, lastDev.pin, true, id);
             }, 300);
           }
         }
@@ -168,28 +168,22 @@ export default function App() {
   };
 
   // ─── Connection & Pairing ───────────────────────────────────────────
-  const initiateConnect = async (ip, hostname = "PC", savedPin = null, isAutoConnect = false) => {
+  const initiateConnect = async (ip, hostname = "PC", savedPin = null, isAutoConnect = false, forceId = null) => {
     const targetIp = ip || ipAddress;
-    if (!targetIp.trim()) {
-      if (!isAutoConnect) Alert.alert('Error', 'Enter a valid IP address.');
-      return;
-    }
+    if (!targetIp.trim()) return;
     let cleanIp = targetIp.trim().replace(/^https?:\/\//, '').replace(/:\d+$/, '').replace(/\/+$/, '');
-    
     const url = `http://${cleanIp}:8000`;
     setLoadingAction(`connecting_${cleanIp}`);
     
     try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 4000);
-      
-      const res = await fetch(`${url}/volume`, { 
-          headers: savedPin ? { 'pin': savedPin } : {}, 
-          signal: controller.signal 
-      });
-      clearTimeout(timeoutId);
+      const data = await sendAction('/volume', 'GET', null, url, savedPin, forceId);
 
-      if (res.status === 401 || !savedPin) {
+      if (data && data.error === 'Network request failed') {
+          if (!isAutoConnect) Alert.alert('Connection Error', `Target ${cleanIp} is unreachable.\n\nPC Server might be off.`);
+          return;
+      }
+
+      if (!data || data.detail === "Invalid Nexus Pairing Code" || !savedPin) {
           setPairingIp(cleanIp);
           setPairingHostname(hostname);
           setPairingModalOpen(true);
@@ -197,49 +191,39 @@ export default function App() {
           return;
       }
 
-      if (res.ok) {
-          if (savedPin) {
-              await saveDevice(cleanIp, hostname, savedPin);
-          }
-          setActivePin(savedPin);
-          setServerUrl(url);
-          setIsConnected(true);
-          fetchVolume(url, savedPin);
-          getStats(url, savedPin);
-          captureScreen(url, savedPin);
-      } else {
-          if (!isAutoConnect) Alert.alert('Connection Failed', 'Server rejected the connection.');
+      if (savedPin) {
+          await saveDevice(cleanIp, hostname, savedPin);
       }
+      setActivePin(savedPin);
+      setServerUrl(url);
+      setIsConnected(true);
+      fetchVolume(url, savedPin);
+      getStats(url, savedPin);
+      captureScreen(url, savedPin);
     } catch (e) {
-      if (!isAutoConnect) Alert.alert('Connection Error', `Target ${cleanIp} is unreachable.\n\nMake sure:\n• PC Server is running\n• Both devices are on the same WiFi\n• Windows Firewall allows the connection`);
     } finally {
-      if (!pairingModalOpen) setLoadingAction('');
+      setLoadingAction('');
     }
   };
 
   const handlePairingSubmit = async () => {
-     if (inputPin.length !== 4) return Alert.alert("Invalid PIN", "Enter the 4-digit PIN.");
-     
-     const url = `http://${pairingIp}:8000`;
+     if (inputPin.length !== 4) return Alert.alert("Invalid PIN", "Enter the 4-digit Code.");
      setLoadingAction(`pairing`);
-     try {
-        const res = await fetch(`${url}/volume`, { headers: { 'pin': inputPin } });
-        if (res.ok) {
-            await saveDevice(pairingIp, pairingHostname, inputPin);
-            setActivePin(inputPin);
-            setServerUrl(url);
-            setIsConnected(true);
-            setPairingModalOpen(false);
-            setInputPin('');
-            
-            fetchVolume(url, inputPin);
-            getStats(url, inputPin);
-            captureScreen(url, inputPin);
-        } else {
-            Alert.alert("Pairing Failed", "Incorrect PIN entered.");
-        }
-     } catch (e) {
-        Alert.alert("Pairing Error", "Lost connection to the PC.");
+     const url = `http://${pairingIp}:8000`;
+     const res = await sendAction('/volume', 'GET', null, url, inputPin);
+     
+     if (res && !res.error && res.volume !== undefined) {
+         await saveDevice(pairingIp, pairingHostname, inputPin);
+         setActivePin(inputPin);
+         setServerUrl(url);
+         setIsConnected(true);
+         setPairingModalOpen(false);
+         setInputPin('');
+         fetchVolume(url, inputPin);
+         getStats(url, inputPin);
+         captureScreen(url, inputPin);
+     } else {
+         Alert.alert("Pairing Failed", "Incorrect Code entered or Server unreachable.");
      }
      setLoadingAction('');
   };
@@ -283,9 +267,10 @@ export default function App() {
     setActivePin(null);
   };
 
-  const sendAction = async (endpoint, method = 'POST', body = null, urlOverride = null, pinOverride = null) => {
+  const sendAction = async (endpoint, method = 'POST', body = null, urlOverride = null, pinOverride = null, idOverride = null) => {
     const targetUrl = urlOverride || serverUrl;
     const targetPin = pinOverride || activePin;
+    const targetId = idOverride || deviceId;
     if (!targetUrl || !targetPin) return null;
     
     try {
@@ -296,7 +281,7 @@ export default function App() {
           headers: { 
             'Content-Type': 'application/json', 
             'pin': targetPin,
-            'x-nexus-id': deviceId
+            'x-nexus-id': targetId
           }, 
           signal: controller.signal 
       };
