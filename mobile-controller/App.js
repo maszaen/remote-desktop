@@ -193,6 +193,7 @@ export default function App() {
           setIsConnected(true);
           fetchVolume(url, savedPin);
           getStats(url, savedPin);
+          captureScreen(url, savedPin);
       } else {
           if (!isAutoConnect) Alert.alert('Connection Failed', 'Server rejected the connection.');
       }
@@ -220,6 +221,7 @@ export default function App() {
             
             fetchVolume(url, inputPin);
             getStats(url, inputPin);
+            captureScreen(url, inputPin);
         } else {
             Alert.alert("Pairing Failed", "Incorrect PIN entered.");
         }
@@ -306,13 +308,17 @@ export default function App() {
     if (res && !res.error) { setCurrentVolume(res.volume); setIsMuted(false); }
   };
   const mediaControl = (action) => sendAction(`/media/${action}`);
-  const captureScreen = async () => {
-    if (!isConnected) return;
+  const captureScreen = async (url = null, pin = null) => {
     setIsCapturing(true);
     setImgLoading(true);
-    setScreenshot(`${serverUrl}/screen?t=${Date.now()}`);
-    await new Promise(r => setTimeout(r, 600)); 
+    
+    const data = await sendAction('/screen', 'GET', null, url, pin);
+    if (data && data.image) {
+       setScreenshot(data.image);
+    }
+    
     setIsCapturing(false);
+    setImgLoading(false);
   };
   const getStats = async (url = null, pin = null) => {
     setLoadingAction('stats');
@@ -621,11 +627,9 @@ export default function App() {
              {screenshot ? (
                  <ScrollView minimumZoomScale={1} maximumZoomScale={4} contentContainerStyle={styles.screenScroll}>
                     <Image 
-                       source={{ uri: screenshot, headers: { 'pin': activePin } }} 
+                       source={{ uri: screenshot }} 
                        style={styles.screenImage} 
                        resizeMode="contain" 
-                       onLoad={() => setImgLoading(false)} 
-                       onError={() => setImgLoading(false)} 
                     />
                  </ScrollView>
              ) : (

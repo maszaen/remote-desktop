@@ -142,11 +142,12 @@ def media_control(action: str):
 @app.get("/screen", dependencies=[Depends(verify_pin)])
 def capture_screen():
     try:
+        import base64
         screenshot = pyautogui.screenshot()
         img_byte_arr = io.BytesIO()
         screenshot.save(img_byte_arr, format="JPEG", quality=60)
-        img_byte_arr.seek(0)
-        return Response(content=img_byte_arr.read(), media_type="image/jpeg")
+        img_b64 = base64.b64encode(img_byte_arr.getvalue()).decode('utf-8')
+        return {"status": "success", "image": f"data:image/jpeg;base64,{img_b64}"}
     except Exception as e:
         return {"error": str(e)}
 
