@@ -185,6 +185,9 @@ export default function App() {
       }
 
       if (res.ok) {
+          if (savedPin) {
+              await saveDevice(cleanIp, hostname, savedPin);
+          }
           setActivePin(savedPin);
           setServerUrl(url);
           setIsConnected(true);

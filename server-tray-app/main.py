@@ -29,24 +29,29 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
 # Auth Dependency
 def verify_pin(pin: str = Header(None)):
     if str(pin) != ACCESS_PIN:
         raise HTTPException(status_code=401, detail="Invalid Nexus Pairing PIN")
     return pin
 
+
 def get_volume_interface():
     CoInitialize()
     speakers = AudioUtilities.GetSpeakers()
     return speakers.EndpointVolume
 
+
 class VolumeControl(BaseModel):
     volume: int
+
 
 # Public Endpoint for Discovery
 @app.get("/")
 def discover():
     return {"status": "ok", "hostname": socket.gethostname()}
+
 
 # Protected Endpoints begin
 @app.get("/network", dependencies=[Depends(verify_pin)])
@@ -61,6 +66,7 @@ def get_network_info():
         s.close()
     return {"local_ip": IP, "port": 8000}
 
+
 @app.get("/volume", dependencies=[Depends(verify_pin)])
 def get_volume():
     try:
@@ -70,6 +76,7 @@ def get_volume():
         return {"volume": current_vol, "muted": bool(muted)}
     except Exception as e:
         return {"error": str(e)}
+
 
 @app.post("/volume", dependencies=[Depends(verify_pin)])
 def set_volume(ctrl: VolumeControl):
@@ -82,6 +89,7 @@ def set_volume(ctrl: VolumeControl):
     except Exception as e:
         return {"error": str(e)}
 
+
 @app.post("/volume/mute", dependencies=[Depends(verify_pin)])
 def toggle_mute():
     try:
@@ -91,6 +99,7 @@ def toggle_mute():
         return {"status": "success", "muted": not muted}
     except Exception as e:
         return {"error": str(e)}
+
 
 @app.post("/volume/up", dependencies=[Depends(verify_pin)])
 def volume_up():
@@ -104,6 +113,7 @@ def volume_up():
     except Exception as e:
         return {"error": str(e)}
 
+
 @app.post("/volume/down", dependencies=[Depends(verify_pin)])
 def volume_down():
     try:
@@ -115,28 +125,31 @@ def volume_down():
     except Exception as e:
         return {"error": str(e)}
 
+
 @app.post("/media/{action}", dependencies=[Depends(verify_pin)])
 def media_control(action: str):
     if action == "playpause":
-        pyautogui.press('playpause')
+        pyautogui.press("playpause")
     elif action == "next":
-        pyautogui.press('nexttrack')
+        pyautogui.press("nexttrack")
     elif action == "prev":
-        pyautogui.press('prevtrack')
+        pyautogui.press("prevtrack")
     else:
         return {"error": "unknown action"}
     return {"status": "success", "action": action}
+
 
 @app.get("/screen", dependencies=[Depends(verify_pin)])
 def capture_screen():
     try:
         screenshot = pyautogui.screenshot()
         img_byte_arr = io.BytesIO()
-        screenshot.save(img_byte_arr, format='JPEG', quality=60)
+        screenshot.save(img_byte_arr, format="JPEG", quality=60)
         img_byte_arr.seek(0)
         return Response(content=img_byte_arr.read(), media_type="image/jpeg")
     except Exception as e:
         return {"error": str(e)}
+
 
 @app.get("/stats", dependencies=[Depends(verify_pin)])
 def get_stats():
@@ -144,7 +157,7 @@ def get_stats():
     cpu = psutil.cpu_percent(interval=0.1)
     total_mem = ram.total
     processes = []
-    for proc in psutil.process_iter(['pid', 'name', 'cpu_percent']):
+    for proc in psutil.process_iter(["pid", "name", "cpu_percent"]):
         try:
             info = proc.info
             try:
@@ -154,55 +167,79 @@ def get_stats():
             except (psutil.NoSuchProcess, psutil.AccessDenied):
                 rss_mb = 0
                 mem_pct = 0
-            info['memory_percent'] = mem_pct
-            info['memory_mb'] = rss_mb
+            info["memory_percent"] = mem_pct
+            info["memory_mb"] = rss_mb
             processes.append(info)
         except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
             pass
-    processes = sorted(processes, key=lambda p: p['memory_percent'] or 0, reverse=True)[:30]
+    processes = sorted(processes, key=lambda p: p["memory_percent"] or 0, reverse=True)[
+        :30
+    ]
     return {
         "cpu_percent": cpu,
         "ram_percent": ram.percent,
         "ram_used_gb": round(ram.used / (1024**3), 2),
         "ram_total_gb": round(ram.total / (1024**3), 2),
-        "top_processes": processes
+        "top_processes": processes,
     }
+
 
 @app.post("/power/{action}", dependencies=[Depends(verify_pin)])
 def power_control(action: str):
     if action == "shutdown":
         os.system("shutdown /s /t 5")
-        return {"status": "success", "action": action, "message": "Shutting down in 5 seconds..."}
+        return {
+            "status": "success",
+            "action": action,
+            "message": "Shutting down in 5 seconds...",
+        }
     elif action == "restart":
         os.system("shutdown /r /t 5")
-        return {"status": "success", "action": action, "message": "Restarting in 5 seconds..."}
+        return {
+            "status": "success",
+            "action": action,
+            "message": "Restarting in 5 seconds...",
+        }
     elif action == "cancel":
         os.system("shutdown /a")
-        return {"status": "success", "action": "cancel", "message": "Shutdown/restart cancelled"}
+        return {
+            "status": "success",
+            "action": "cancel",
+            "message": "Shutdown/restart cancelled",
+        }
     else:
         return {"error": "unknown action"}
 
+
 # --- Tray Icon ---
 def create_image():
-    image = Image.new('RGB', (64, 64), color=(0, 122, 204))
+    image = Image.new("RGB", (64, 64), color=(0, 122, 204))
     dc = ImageDraw.Draw(image)
     dc.rectangle((16, 16, 48, 48), fill=(255, 255, 255))
     return image
 
+
 def setup_tray_icon():
     image = create_image()
-    
+
     def on_quit(icon, item):
         icon.stop()
         os._exit(0)
-    
+
     def show_pin_code(icon, item):
         def run_msg():
-            ctypes.windll.user32.MessageBoxW(0, f"Your Nexus Pairing PIN is:\n\n{ACCESS_PIN}\n\nEnter this PIN in your Mobile App to pair.", "Nexus Pairing Code", 0x40)
+            ctypes.windll.user32.MessageBoxW(
+                0,
+                f"Your Nexus Pairing PIN is:\n\n{ACCESS_PIN}\n\nEnter this PIN in your Mobile App to pair.",
+                "Nexus Pairing Code",
+                0x40,
+            )
+
         threading.Thread(target=run_msg, daemon=True).start()
 
     def show_qr_code(icon, item):
         print("Opening QR code...")
+
         def run_qr():
             s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             try:
@@ -215,11 +252,14 @@ def setup_tray_icon():
             try:
                 import qrcode
                 import json
-                payload = json.dumps({
-                    "url": f"http://{IP}:8000",
-                    "pin": ACCESS_PIN,
-                    "hostname": socket.gethostname()
-                })
+
+                payload = json.dumps(
+                    {
+                        "url": f"http://{IP}:8000",
+                        "pin": ACCESS_PIN,
+                        "hostname": socket.gethostname(),
+                    }
+                )
                 qr = qrcode.QRCode(version=1, box_size=10, border=4)
                 qr.add_data(payload)
                 qr.make(fit=True)
@@ -228,12 +268,19 @@ def setup_tray_icon():
             except Exception as e:
                 print(f"Error showing QR: {e}")
                 pass
+
         threading.Thread(target=run_qr, daemon=True).start()
-        
+
     def is_autostart_enabled():
         try:
             import winreg
-            key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Run", 0, winreg.KEY_READ)
+
+            key = winreg.OpenKey(
+                winreg.HKEY_CURRENT_USER,
+                r"Software\Microsoft\Windows\CurrentVersion\Run",
+                0,
+                winreg.KEY_READ,
+            )
             val, _ = winreg.QueryValueEx(key, "NexusServer")
             winreg.CloseKey(key)
             return True
@@ -242,7 +289,13 @@ def setup_tray_icon():
 
     def toggle_autostart(icon, item):
         import winreg
-        key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Run", 0, winreg.KEY_SET_VALUE)
+
+        key = winreg.OpenKey(
+            winreg.HKEY_CURRENT_USER,
+            r"Software\Microsoft\Windows\CurrentVersion\Run",
+            0,
+            winreg.KEY_SET_VALUE,
+        )
         if item.checked:
             # Disable
             try:
@@ -251,18 +304,26 @@ def setup_tray_icon():
                 pass
         else:
             # Enable
-            exe_path = sys.executable if getattr(sys, 'frozen', False) else os.path.abspath(__file__)
+            exe_path = (
+                sys.executable
+                if getattr(sys, "frozen", False)
+                else os.path.abspath(__file__)
+            )
             winreg.SetValueEx(key, "NexusServer", 0, winreg.REG_SZ, f'"{exe_path}"')
         winreg.CloseKey(key)
 
     menu = Menu(
-        MenuItem('Show Pairing PIN', show_pin_code),
-        MenuItem('Scan QR to Connect', show_qr_code),
-        MenuItem('Run on Windows Startup', toggle_autostart, checked=lambda item: is_autostart_enabled()),
-        MenuItem('Quit Backend', on_quit)
+        MenuItem("Show Pairing PIN", show_pin_code),
+        MenuItem("Scan QR to Connect", show_qr_code),
+        MenuItem(
+            "Run on Windows Startup",
+            toggle_autostart,
+            checked=lambda item: is_autostart_enabled(),
+        ),
+        MenuItem("Quit Backend", on_quit),
     )
     icon = Icon("PCRemote", image, "Nexus PC Controller Server", menu)
-    
+
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     try:
         s.connect(("10.255.255.255", 1))
@@ -271,14 +332,15 @@ def setup_tray_icon():
         IP = "127.0.0.1"
     finally:
         s.close()
-    
+
     print(f"=====================================")
     print(f"NEXUS TRAY SERVER RUNNING")
     print(f"Server IP: {IP}")
     print(f"Pairing PIN: {ACCESS_PIN}")
     print(f"=====================================")
-    
+
     icon.run()
+
 
 def start_server():
     try:
@@ -290,10 +352,12 @@ def start_server():
     except Exception as e:
         with open("nexus_server_error.log", "w") as f:
             import traceback
+
             f.write(traceback.format_exc())
+
 
 if __name__ == "__main__":
     server_thread = threading.Thread(target=start_server, daemon=True)
     server_thread.start()
-    
+
     setup_tray_icon()
