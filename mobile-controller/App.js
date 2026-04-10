@@ -55,6 +55,10 @@ export default function App() {
   // Manual input
   const [showManualInput, setShowManualInput] = useState(false);
 
+  // Rename
+  const [renameTarget, setRenameTarget] = useState(null);
+  const [renameValue, setRenameValue] = useState('');
+
   // Pairing logic
   const [pairingModalOpen, setPairingModalOpen] = useState(false);
   const [pairingIp, setPairingIp] = useState(null);
@@ -95,14 +99,42 @@ export default function App() {
   };
 
   const removeSavedDevice = async (ip) => {
-    Alert.alert("Remove Device?", `Forget paired PC ${ip}?`, [
-       { text: "Cancel", style: "cancel" },
-       { text: "Remove", style: "destructive", onPress: async () => {
-            let updated = savedDevices.filter(d => d.ip !== ip);
-            setSavedDevices(updated);
-            await AsyncStorage.setItem('nexus_devices_v2', JSON.stringify(updated));
-       }}
-    ]);
+    let updated = savedDevices.filter(d => d.ip !== ip);
+    setSavedDevices(updated);
+    await AsyncStorage.setItem('nexus_devices_v2', JSON.stringify(updated));
+  };
+
+  const renameSavedDevice = async (ip, newName) => {
+    let updated = savedDevices.map(d => d.ip === ip ? { ...d, hostname: newName } : d);
+    setSavedDevices(updated);
+    await AsyncStorage.setItem('nexus_devices_v2', JSON.stringify(updated));
+  };
+
+  const handleDeviceLongPress = (dev) => {
+    Alert.alert(
+      dev.hostname || dev.ip,
+      `IP: ${dev.ip}`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Rename",
+          onPress: () => {
+            // React Native Alert.prompt is iOS only, so use a workaround
+            Alert.prompt
+              ? Alert.prompt("Rename Device", "Enter a new name:", [
+                  { text: "Cancel", style: "cancel" },
+                  { text: "Save", onPress: (name) => { if (name && name.trim()) renameSavedDevice(dev.ip, name.trim()); } }
+                ], "plain-text", dev.hostname || "")
+              : (() => { setRenameValue(dev.hostname || ''); setRenameTarget(dev); })();
+          }
+        },
+        {
+          text: "Remove",
+          style: "destructive",
+          onPress: () => removeSavedDevice(dev.ip)
+        }
+      ]
+    );
   };
 
   // ─── Connection & Pairing ───────────────────────────────────────────
@@ -316,16 +348,16 @@ export default function App() {
                 <TouchableOpacity 
                   key={i} 
                   style={styles.pcDeviceCard} 
-                  onPress={() => initiateConnect(dev.ip, dev.hostname, dev.pin)}
-                  onLongPress={() => removeSavedDevice(dev.ip)}
+                  onPress={() => initiateConnect(dev.ip, dev.hostname || dev.ip, dev.pin)}
+                  onLongPress={() => handleDeviceLongPress(dev)}
                   disabled={loadingAction.includes('connecting')}
                 >
                   <View style={[styles.deviceIconBox, { backgroundColor: COLORS.success + '18' }]}>
                     <Ionicons name="desktop" size={22} color={COLORS.success} />
                   </View>
                   <View style={styles.deviceInfo}>
-                    <Text style={styles.deviceName}>{dev.hostname}</Text>
-                    <Text style={styles.deviceIp}>{dev.ip} • Tap to reconnect</Text>
+                    <Text style={styles.deviceName}>{dev.hostname || `PC (${dev.ip})`}</Text>
+                    <Text style={styles.deviceIp}>{dev.ip} • Hold to rename</Text>
                   </View>
                   {loadingAction === `connecting_${dev.ip}` ? (
                     <ActivityIndicator size="small" color={COLORS.primary} />
@@ -376,6 +408,45 @@ export default function App() {
           )}
 
         </ScrollView>
+
+        {/* Rename Device Modal (Android fallback since Alert.prompt is iOS only) */}
+        <Modal visible={renameTarget !== null} transparent animationType="fade">
+          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.modalOverlay}>
+            <View style={styles.pairingBox}>
+              <View style={[styles.pairingIcon, { backgroundColor: COLORS.primary + '18' }]}>
+                <Ionicons name="create" size={28} color={COLORS.primary} />
+              </View>
+              <Text style={styles.pairingTitle}>Rename Device</Text>
+              <Text style={styles.pairingSub}>Enter a name for {renameTarget?.ip}</Text>
+              <TextInput
+                style={[styles.pinInput, { width: '100%', fontSize: 18, letterSpacing: 0, borderColor: COLORS.primary, color: COLORS.text }]}
+                value={renameValue}
+                onChangeText={setRenameValue}
+                placeholder="e.g. My Laptop"
+                placeholderTextColor={COLORS.textSecondary}
+                autoFocus
+              />
+              <View style={styles.pairingBtnRow}>
+                <TouchableOpacity style={styles.btnCancel} onPress={() => { setRenameTarget(null); setRenameValue(''); }}>
+                  <Text style={styles.btnCancelText}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.btnConfirm, !renameValue.trim() && { opacity: 0.4 }]}
+                  disabled={!renameValue.trim()}
+                  onPress={() => {
+                    if (renameValue.trim()) {
+                      renameSavedDevice(renameTarget.ip, renameValue.trim());
+                      setRenameTarget(null);
+                      setRenameValue('');
+                    }
+                  }}
+                >
+                  <Text style={styles.btnConfirmText}>Save</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </KeyboardAvoidingView>
+        </Modal>
 
         {/* QR Code Camera Modal */}
         <Modal visible={isScanningQR} animationType="slide" transparent={false}>
