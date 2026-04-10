@@ -215,7 +215,7 @@ def setup_tray_icon():
                 import qrcode
                 import json
                 payload = json.dumps({
-                    "ip": IP,
+                    "url": f"http://{IP}:8000",
                     "pin": ACCESS_PIN,
                     "hostname": socket.gethostname()
                 })

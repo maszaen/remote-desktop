@@ -222,7 +222,12 @@ export default function App() {
     setIsScanningQR(false);
     try {
       const payload = JSON.parse(data);
-      if (payload.ip && payload.pin) {
+      if (payload.url && payload.pin) {
+        // Extract IP from full URL (e.g. "http://192.168.100.5:8000" -> "192.168.100.5")
+        const cleanIp = payload.url.replace(/^https?:\/\//, '').replace(/:\d+$/, '').replace(/\/+$/, '');
+        initiateConnect(cleanIp, payload.hostname || "Nexus PC", payload.pin);
+      } else if (payload.ip && payload.pin) {
+        // Legacy fallback
         initiateConnect(payload.ip, payload.hostname || "Nexus PC", payload.pin);
       } else {
         Alert.alert("Invalid QR", "This QR code doesn't contain valid Nexus connection data.");
