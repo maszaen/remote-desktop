@@ -144,8 +144,10 @@ def capture_screen():
     try:
         import base64
         screenshot = pyautogui.screenshot()
+        # Resize to max 720p width for speed
+        screenshot.thumbnail((1280, 720))
         img_byte_arr = io.BytesIO()
-        screenshot.save(img_byte_arr, format="JPEG", quality=60)
+        screenshot.save(img_byte_arr, format="JPEG", quality=40)
         img_b64 = base64.b64encode(img_byte_arr.getvalue()).decode('utf-8')
         return {"status": "success", "image": f"data:image/jpeg;base64,{img_b64}"}
     except Exception as e:
@@ -154,35 +156,36 @@ def capture_screen():
 
 @app.get("/stats", dependencies=[Depends(verify_pin)])
 def get_stats():
-    ram = psutil.virtual_memory()
-    cpu = psutil.cpu_percent(interval=0.1)
-    total_mem = ram.total
-    processes = []
-    for proc in psutil.process_iter(["pid", "name", "cpu_percent"]):
-        try:
-            info = proc.info
+    try:
+        ram = psutil.virtual_memory()
+        cpu = psutil.cpu_percent(interval=0.1)
+        total_mem = ram.total
+        processes = []
+        for proc in psutil.process_iter(["pid", "name", "cpu_percent"]):
             try:
-                mem_info = proc.memory_info()
-                rss_mb = round(mem_info.rss / (1024**2), 1)
-                mem_pct = round((mem_info.rss / total_mem) * 100, 1)
-            except (psutil.NoSuchProcess, psutil.AccessDenied):
-                rss_mb = 0
-                mem_pct = 0
-            info["memory_percent"] = mem_pct
-            info["memory_mb"] = rss_mb
-            processes.append(info)
-        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
-            pass
-    processes = sorted(processes, key=lambda p: p["memory_percent"] or 0, reverse=True)[
-        :30
-    ]
-    return {
-        "cpu_percent": cpu,
-        "ram_percent": ram.percent,
-        "ram_used_gb": round(ram.used / (1024**3), 2),
-        "ram_total_gb": round(ram.total / (1024**3), 2),
-        "top_processes": processes,
-    }
+                info = proc.info
+                try:
+                    mem_info = proc.memory_info()
+                    rss_mb = round(mem_info.rss / (1024**2), 1)
+                    mem_pct = round((mem_info.rss / total_mem) * 100, 1)
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    rss_mb = 0
+                    mem_pct = 0
+                info["memory_percent"] = mem_pct
+                info["memory_mb"] = rss_mb
+                processes.append(info)
+            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                pass
+        processes = sorted(processes, key=lambda p: p["memory_percent"] or 0, reverse=True)[:30]
+        return {
+            "cpu_percent": cpu,
+            "ram_percent": ram.percent,
+            "ram_used_gb": round(ram.used / (1024**3), 2),
+            "ram_total_gb": round(ram.total / (1024**3), 2),
+            "top_processes": processes,
+        }
+    except Exception as e:
+        return {"error": str(e)}
 
 
 @app.post("/power/{action}", dependencies=[Depends(verify_pin)])

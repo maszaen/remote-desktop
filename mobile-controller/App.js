@@ -326,7 +326,7 @@ export default function App() {
     const data = await sendAction('/stats', 'GET', null, url, pin);
     const elapsed = Date.now() - start;
     if (elapsed < 1000) await new Promise(resolve => setTimeout(resolve, 1000 - elapsed));
-    if (data && !data.error) setStats(data);
+    if (data && data.cpu_percent !== undefined) setStats(data);
     setLoadingAction('');
   };
   const handlePower = (action) => {
