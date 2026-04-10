@@ -17,35 +17,28 @@ from comtypes import CoInitialize
 from fastapi.middleware.cors import CORSMiddleware
 
 CONFIG_DIR = os.path.join(os.environ.get('LOCALAPPDATA', os.path.expanduser('~')), 'NexusRemote')
-CONFIG_FILE = os.path.join(CONFIG_DIR, 'nexus_config.json')
+CONFIG_FILE = os.path.join(CONFIG_DIR, 'nexus_trusted.json')
 
-def load_config():
+def load_trusted_devices():
     if not os.path.exists(CONFIG_DIR):
         os.makedirs(CONFIG_DIR)
-    
     import json
     if os.path.exists(CONFIG_FILE):
         try:
             with open(CONFIG_FILE, 'r') as f:
-                return json.load(f)
+                return set(json.load(f))
         except:
-            pass
-    return {}
+            return set()
+    return set()
 
-def save_config(pin, trusted):
+def save_trusted_devices(trusted_set):
     import json
     with open(CONFIG_FILE, 'w') as f:
-        json.dump({'pin': pin, 'trusted': list(trusted)}, f)
+        json.dump(list(trusted_set), f)
 
-def init_auth():
-    config = load_config()
-    pin = config.get('pin', str(random.randint(1000, 9999)))
-    trusted = set(config.get('trusted', []))
-    # Save once to ensure file exists
-    save_config(pin, trusted)
-    return pin, trusted
-
-ACCESS_PIN, TRUSTED_DEVICES = init_auth()
+# PAIRING_CODE (OTP) is random EVERY START (As requested - "Ini Pairing Code, bukan PIN")
+PAIRING_CODE = str(random.randint(1000, 9999))
+TRUSTED_DEVICES = load_trusted_devices()
 IS_REMOTE_CONNECTED = False
 
 app = FastAPI(title="Nexus PC Remote")
@@ -58,29 +51,27 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-
 # Auth Dependency
-def verify_pin(pin: str = Header(None), nexus_id: str = Header(None, alias="nexus-id")):
-    global ACCESS_PIN, TRUSTED_DEVICES, IS_REMOTE_CONNECTED
+def verify_pin(pin: str = Header(None), x_nexus_id: str = Header(None)):
+    global PAIRING_CODE, TRUSTED_DEVICES, IS_REMOTE_CONNECTED
     
-    # 1. Check if device is already trusted
-    if nexus_id and nexus_id in TRUSTED_DEVICES:
+    # 1. Check Whitelist (Persistent)
+    if x_nexus_id and x_nexus_id in TRUSTED_DEVICES:
         IS_REMOTE_CONNECTED = True
         return pin
 
-    # 2. If not trusted, check PIN
-    if str(pin) == ACCESS_PIN:
-        if nexus_id:
-            # Add to trust list
-            TRUSTED_DEVICES.add(nexus_id)
-            # ROTATE PIN for security (One-time use)
-            ACCESS_PIN = str(random.randint(1000, 9999))
-            save_config(ACCESS_PIN, TRUSTED_DEVICES)
-            
+    # 2. Check Pairing Code (Session-based OTP)
+    if str(pin) == PAIRING_CODE:
+        if x_nexus_id:
+            TRUSTED_DEVICES.add(x_nexus_id)
+            save_trusted_devices(TRUSTED_DEVICES)
+            # Once a device is paired, we roll the code for the next one
+            PAIRING_CODE = str(random.randint(1000, 9999))
+        
         IS_REMOTE_CONNECTED = True
         return pin
     
-    raise HTTPException(status_code=401, detail="Invalid Nexus Pairing PIN")
+    raise HTTPException(status_code=401, detail="Invalid Nexus Pairing Code")
 
 
 def get_volume_interface():
@@ -337,7 +328,7 @@ def setup_tray_icon():
         def run_msg():
             ctypes.windll.user32.MessageBoxW(
                 0,
-                f"Your Nexus Pairing PIN is:\n\n{ACCESS_PIN}\n\nEnter this PIN in your Mobile App to pair.",
+                f"Your Nexus Pairing OTP is:\n\n{PAIRING_CODE}\n\nEnter this Code in your Mobile App to pair.",
                 "Nexus Pairing Code",
                 0x40,
             )
@@ -363,7 +354,7 @@ def setup_tray_icon():
                 payload = json.dumps(
                     {
                         "url": f"http://{IP}:8000",
-                        "pin": ACCESS_PIN,
+                        "pin": PAIRING_CODE,
                         "hostname": socket.gethostname(),
                     }
                 )
@@ -423,7 +414,7 @@ def setup_tray_icon():
         MenuItem("Status: Monitoring Local Network", lambda x: None, enabled=False),
         Menu.SEPARATOR,
         MenuItem("Pair New Device (QR)", show_qr_code),
-        MenuItem("Show Pairing PIN", show_pin_code),
+        MenuItem("Show Pairing OTP Code", show_pin_code),
         Menu.SEPARATOR,
         MenuItem(
             "Run on Windows Startup",
@@ -446,7 +437,7 @@ def setup_tray_icon():
     print(f"=====================================")
     print(f"NEXUS TRAY SERVER RUNNING")
     print(f"Server IP: {IP}")
-    print(f"Pairing PIN: {ACCESS_PIN}")
+    print(f"Pairing OTP (New Devices): {PAIRING_CODE}")
     print(f"=====================================")
 
     icon.run()

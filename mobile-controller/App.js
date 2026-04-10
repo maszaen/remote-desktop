@@ -296,7 +296,7 @@ export default function App() {
           headers: { 
             'Content-Type': 'application/json', 
             'pin': targetPin,
-            'nexus-id': deviceId
+            'x-nexus-id': deviceId
           }, 
           signal: controller.signal 
       };
@@ -537,7 +537,7 @@ export default function App() {
                        <Ionicons name="lock-closed" size={32} color={COLORS.warning} />
                    </View>
                    <Text style={styles.pairingTitle}>Pairing Required</Text>
-                   <Text style={styles.pairingSub}>Enter the 4-digit PIN shown on{'\n'}{pairingHostname}'s system tray icon.</Text>
+                   <Text style={styles.pairingSub}>Enter the 4-digit Pairing Code shown on{'\n'}{pairingHostname}'s system tray icon.</Text>
                    
                    <TextInput
                       style={styles.pinInput}
