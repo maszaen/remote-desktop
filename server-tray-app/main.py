@@ -402,24 +402,20 @@ def setup_tray_icon():
             winreg.SetValueEx(key, "NexusServer", 0, winreg.REG_SZ, f'"{exe_path}"')
         winreg.CloseKey(key)
 
-    def get_menu():
-        items = []
-        if IS_REMOTE_CONNECTED:
-            items.append(MenuItem("Status: 🟢 Connected to Phone", lambda x: None, enabled=False))
-            items.append(Menu.SEPARATOR)
-        
-        items.append(MenuItem("Pair New Device (QR)", show_qr_code))
-        items.append(MenuItem("Show Pairing PIN", show_pin_code))
-        items.append(Menu.SEPARATOR)
-        items.append(MenuItem(
+    menu = Menu(
+        MenuItem("Status: Monitoring Local Network", lambda x: None, enabled=False),
+        Menu.SEPARATOR,
+        MenuItem("Pair New Device (QR)", show_qr_code),
+        MenuItem("Show Pairing PIN", show_pin_code),
+        Menu.SEPARATOR,
+        MenuItem(
             "Run on Windows Startup",
             toggle_autostart,
             checked=lambda item: is_autostart_enabled(),
-        ))
-        items.append(MenuItem("Quit Backend", on_quit))
-        return Menu(*items)
-
-    icon = Icon("PCRemote", image, "Nexus PC Controller Server", menu=get_menu)
+        ),
+        MenuItem("Quit Backend", on_quit),
+    )
+    icon = Icon("PCRemote", image, "Nexus PC Controller Server", menu=menu)
 
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     try:
