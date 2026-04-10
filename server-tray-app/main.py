@@ -253,68 +253,11 @@ def setup_tray_icon():
     
     icon.run()
 
-def udp_broadcaster():
-    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    s.bind(('', 0))
-    s.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-    while True:
-        try:
-            # Get current active LAN ip
-            temp_s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            temp_s.connect(("10.255.255.255", 1))
-            current_ip = temp_s.getsockname()[0]
-            temp_s.close()
-            
-            message = f"NEXUS_SERVER:{socket.gethostname()}:{current_ip}:8000".encode('utf-8')
-            s.sendto(message, ('<broadcast>', 8001))
-            s.sendto(message, ('255.255.255.255', 8001))
-        except Exception:
-            pass
-        import time
-        time.sleep(2)
-
-from zeroconf import ServiceInfo, Zeroconf
-
-def setup_mdns(ip):
-    # Register mDNS Service
-    try:
-        info = ServiceInfo(
-            "_http._tcp.local.",
-            f"NexusPC._http._tcp.local.",
-            addresses=[socket.inet_aton(ip)],
-            port=8000,
-            properties={"hostname": socket.gethostname()}
-        )
-        zc = Zeroconf()
-        zc.register_service(info)
-        return zc
-    except Exception as e:
-        return None
-
 def start_server():
     uvicorn.run(app, host="0.0.0.0", port=8000, log_level="error")
 
 if __name__ == "__main__":
-    # Start UDP Broadcaster
-    threading.Thread(target=udp_broadcaster, daemon=True).start()
-    
-    # Get active LAN IP for mDNS
-    test_s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    try:
-        test_s.connect(("10.255.255.255", 1))
-        local_ip = test_s.getsockname()[0]
-    except Exception:
-        local_ip = "127.0.0.1"
-    finally:
-        test_s.close()
-        
-    zc = setup_mdns(local_ip)
-    
     server_thread = threading.Thread(target=start_server, daemon=True)
     server_thread.start()
     
-    try:
-        setup_tray_icon()
-    finally:
-        if zc:
-            zc.close()
+    setup_tray_icon()

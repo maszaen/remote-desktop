@@ -18,20 +18,28 @@ import {
 } from 'react-native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import * as Network from 'expo-network';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 // --- THEME ---
 const COLORS = {
-  background: '#000000', surface: '#121212', card: '#1C1C1E', cardElevated: '#2C2C2E',
-  primary: '#0A84FF', danger: '#FF453A', warning: '#FF9F0A', success: '#32D74B',
-  text: '#FFFFFF', textSecondary: '#8E8E93', border: '#2C2C2E',
+  background: '#050505',
+  surface: '#0F0F0F',
+  card: '#161618',
+  cardElevated: '#222225',
+  primary: '#0A84FF',
+  danger: '#FF453A',
+  warning: '#FF9F0A',
+  success: '#30D158',
+  text: '#FFFFFF',
+  textSecondary: '#7C7C80',
+  border: '#2A2A2D',
+  accent: '#5E5CE6',
 };
 
 const SPACING = { xs: 4, sm: 8, md: 16, lg: 24, xl: 32 };
-const RADIUS = { sm: 8, md: 16, lg: 24, round: 999 };
+const RADIUS = { sm: 10, md: 16, lg: 20, round: 999 };
 
 export default function App() {
   const [isConnected, setIsConnected] = useState(false);
@@ -40,15 +48,13 @@ export default function App() {
   const [savedDevices, setSavedDevices] = useState([]);
   const [activePin, setActivePin] = useState(null);
 
-  // Network Discovery
-  const [discoveredDevices, setDiscoveredDevices] = useState([]);
-  const [isScanning, setIsScanning] = useState(false);
-  const [showManualInput, setShowManualInput] = useState(false);
-  
   // QR Code
   const [isScanningQR, setIsScanningQR] = useState(false);
   const [permission, requestPermission] = useCameraPermissions();
-  
+
+  // Manual input
+  const [showManualInput, setShowManualInput] = useState(false);
+
   // Pairing logic
   const [pairingModalOpen, setPairingModalOpen] = useState(false);
   const [pairingIp, setPairingIp] = useState(null);
@@ -69,9 +75,9 @@ export default function App() {
 
   useEffect(() => {
     loadSavedDevices();
-    scanLocalNetwork(); // auto-scan on startup
   }, []);
 
+  // ─── Device Storage ───────────────────────────────────────────
   const loadSavedDevices = async () => {
     try {
       const data = await AsyncStorage.getItem('nexus_devices_v2');
@@ -99,71 +105,6 @@ export default function App() {
     ]);
   };
 
-  // ─── Network Scanning ───────────────────────────────────────────
-  const scanLocalNetwork = async () => {
-    setIsScanning(true);
-    setDiscoveredDevices([]); 
-    try {
-        const pingIp = (targetIp) => {
-            return new Promise((resolve) => {
-                let finished = false;
-                const controller = new AbortController();
-                const timer = setTimeout(() => { 
-                    if (!finished) {
-                        try { controller.abort(); } catch(e){}
-                        finished = true; resolve(null); 
-                    }
-                }, 1200); 
-                
-                fetch(`http://${targetIp}:8000/`, { signal: controller.signal })
-                    .then(res => res.json())
-                    .then(data => {
-                        if (finished) return;
-                        clearTimeout(timer);
-                        finished = true;
-                        if (data && data.status === 'ok') {
-                            setDiscoveredDevices(prev => {
-                               if (!prev.find(d => d.ip === targetIp)) return [...prev, { ip: targetIp, hostname: data.hostname }];
-                               return prev;
-                            });
-                        }
-                        resolve(null);
-                    })
-                    .catch(() => { 
-                        if (finished) return;
-                        clearTimeout(timer);
-                        finished = true; resolve(null); 
-                    });
-            });
-        };
-
-        const ipsToScan = ['NexusPC.local', '10.0.2.2'];
-        const standardPrefixes = ['192.168.100.', '192.168.1.', '192.168.0.', '192.168.8.', '10.0.0.'];
-        
-        // Always derive Phone IP just in case it's on a custom subnet
-        const ipInfo = await Network.getIpAddressAsync();
-        if (ipInfo && ipInfo !== '0.0.0.0' && ipInfo.includes('.') && !ipInfo.startsWith('127.')) {
-            const currentPrefix = ipInfo.split('.').slice(0, 3).join('.') + '.';
-            if (!standardPrefixes.includes(currentPrefix)) standardPrefixes.unshift(currentPrefix);
-        }
-
-        // Generate full global sweep list
-        for (const prefix of standardPrefixes) {
-             for (let i = 1; i <= 254; i++) ipsToScan.push(`${prefix}${i}`);
-        }
-
-        // Extremely safe STAGGERED dispatch to bypass Android Port-Scan blocks & Bridge flooding
-        for (let i = 0; i < ipsToScan.length; i++) {
-           pingIp(ipsToScan[i]); // Fire without blocking loop!
-           await new Promise(r => setTimeout(r, 12)); // 12ms stagger -> 1200 IPs takes ~14 seconds to fully dispatch
-        }
-        
-    } catch(e) {}
-    
-    // Allow lingering requests to complete gracefully
-    setTimeout(() => setIsScanning(false), 2000);
-  };
-
   // ─── Connection & Pairing ───────────────────────────────────────────
   const initiateConnect = async (ip, hostname = "PC", savedPin = null) => {
     const targetIp = ip || ipAddress;
@@ -173,21 +114,18 @@ export default function App() {
     const url = `http://${cleanIp}:8000`;
     setLoadingAction(`connecting_${cleanIp}`);
     
-    // First, verify connection works and PIN is valid (if provided)
     try {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 4000);
       
       const res = await fetch(`${url}/volume`, { 
           headers: savedPin ? { 'pin': savedPin } : {}, 
-
           signal: controller.signal 
       });
       clearTimeout(timeoutId);
 
       if (res.status === 401 || !savedPin) {
-          // Needs PIN or unauthorized
-          setPairingIp(ip);
+          setPairingIp(cleanIp);
           setPairingHostname(hostname);
           setPairingModalOpen(true);
           setLoadingAction('');
@@ -195,7 +133,6 @@ export default function App() {
       }
 
       if (res.ok) {
-          // Success
           setActivePin(savedPin);
           setServerUrl(url);
           setIsConnected(true);
@@ -205,7 +142,7 @@ export default function App() {
           Alert.alert('Connection Failed', 'Server rejected the connection.');
       }
     } catch (e) {
-      Alert.alert('Connection Error', `Target ${ip} is unreachable.`);
+      Alert.alert('Connection Error', `Target ${cleanIp} is unreachable.\n\nMake sure:\n• PC Server is running\n• Both devices are on the same WiFi\n• Windows Firewall allows the connection`);
     } finally {
       if (!pairingModalOpen) setLoadingAction('');
     }
@@ -219,7 +156,6 @@ export default function App() {
      try {
         const res = await fetch(`${url}/volume`, { headers: { 'pin': inputPin } });
         if (res.ok) {
-            // Pair successful
             await saveDevice(pairingIp, pairingHostname, inputPin);
             setActivePin(inputPin);
             setServerUrl(url);
@@ -236,6 +172,32 @@ export default function App() {
         Alert.alert("Pairing Error", "Lost connection to the PC.");
      }
      setLoadingAction('');
+  };
+
+  // ─── QR Code Handler ──────────────────────────────────────────
+  const handleQRScan = async () => {
+    if (!permission || !permission.granted) {
+      const result = await requestPermission();
+      if (!result.granted) {
+        Alert.alert("Camera Required", "Camera permission is needed to scan QR codes from your PC.");
+        return;
+      }
+    }
+    setIsScanningQR(true);
+  };
+
+  const onBarcodeScanned = ({ data }) => {
+    setIsScanningQR(false);
+    try {
+      const payload = JSON.parse(data);
+      if (payload.ip && payload.pin) {
+        initiateConnect(payload.ip, payload.hostname || "Nexus PC", payload.pin);
+      } else {
+        Alert.alert("Invalid QR", "This QR code doesn't contain valid Nexus connection data.");
+      }
+    } catch (e) {
+      Alert.alert("Invalid QR", "Could not read QR code. Make sure you're scanning the Nexus Server QR.");
+    }
   };
 
   const disconnect = () => {
@@ -288,7 +250,7 @@ export default function App() {
     if (!isConnected) return;
     setIsCapturing(true);
     setImgLoading(true);
-    setScreenshot(`${serverUrl}/screen?t=${Date.now()}`); // uses headers inside <Image/> component
+    setScreenshot(`${serverUrl}/screen?t=${Date.now()}`);
     await new Promise(r => setTimeout(r, 600)); 
     setIsCapturing(false);
   };
@@ -325,144 +287,124 @@ export default function App() {
         <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
         
         <ScrollView contentContainerStyle={styles.scrollContentUnconnected} showsVerticalScrollIndicator={false}>
-          <View style={styles.loginHeader}>
-            <Ionicons name="wifi" size={56} color={COLORS.primary} style={styles.loginIcon} />
-            <Text style={styles.loginTitle}>NEXUS NETWORK</Text>
-            <Text style={styles.loginSubtitle}>Select a local PC to pair securely</Text>
-          </View>
           
-          {/* Discovered Devices */}
-          <View style={styles.sectionBlock}>
-             <View style={styles.sectionHeaderFlex}>
-                <Text style={styles.sectionLabel}>DISCOVERED PCS</Text>
-                <TouchableOpacity onPress={scanLocalNetwork} disabled={isScanning}>
-                   {isScanning ? <ActivityIndicator size="small" color={COLORS.primary} /> : <Ionicons name="sync" size={18} color={COLORS.primary} />}
-                </TouchableOpacity>
-             </View>
-             
-             {discoveredDevices.length === 0 && !isScanning && (
-                 <View style={styles.emptyCard}>
-                    <Text style={styles.emptyText}>No Nexus PCs found on your WiFi.</Text>
-                 </View>
-             )}
-
-             {discoveredDevices.map((dev, i) => {
-                const isPaired = savedDevices.find(s => s.ip === dev.ip);
-                return (
-                  <TouchableOpacity 
-                     key={i} 
-                     style={styles.pcDeviceCard} 
-                     onPress={() => initiateConnect(dev.ip, dev.hostname, isPaired ? isPaired.pin : null)}
-                     disabled={loadingAction.includes('connecting')}
-                  >
-                     <View style={[styles.deviceIconBox, isPaired && {backgroundColor: COLORS.success + '22'}]}>
-                        <Ionicons name={isPaired ? "checkmark-circle" : "desktop"} size={24} color={isPaired ? COLORS.success : COLORS.primary} />
-                     </View>
-                     <View style={styles.deviceInfo}>
-                        <Text style={styles.deviceName}>{dev.hostname}</Text>
-                        <Text style={styles.deviceIp}>IP: {dev.ip} {!isPaired && ' • Requires PIN'}</Text>
-                     </View>
-                     {loadingAction === `connecting_${dev.ip}` ? (
-                         <ActivityIndicator size="small" color={COLORS.primary} />
-                     ) : (
-                         <Ionicons name="chevron-forward" size={20} color={COLORS.textSecondary} />
-                     )}
-                  </TouchableOpacity>
-                )
-             })}
+          {/* Header */}
+          <View style={styles.loginHeader}>
+            <View style={styles.logoCircle}>
+              <MaterialCommunityIcons name="remote-desktop" size={36} color={COLORS.primary} />
+            </View>
+            <Text style={styles.loginTitle}>NEXUS</Text>
+            <Text style={styles.loginSubtitle}>Remote Desktop Controller</Text>
           </View>
 
-          {/* Saved Offline Devices */}
+          {/* Primary Action: QR Code */}
+          <View style={styles.qrSection}>
+            <TouchableOpacity style={styles.qrButton} onPress={handleQRScan} activeOpacity={0.8}>
+              <View style={styles.qrIconCircle}>
+                <MaterialCommunityIcons name="qrcode-scan" size={32} color={COLORS.text} />
+              </View>
+              <Text style={styles.qrButtonTitle}>Scan QR Code</Text>
+              <Text style={styles.qrButtonSub}>Open PC tray icon → "Scan QR to Connect"</Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* Saved Devices */}
           {savedDevices.length > 0 && (
-             <View style={styles.sectionBlock}>
-                 <Text style={styles.sectionLabel}>PREVIOUSLY PAIRED (OFFLINE)</Text>
-                 {savedDevices.filter(s => !discoveredDevices.find(d => d.ip === s.ip)).map((dev, i) => (
-                    <TouchableOpacity 
-                       key={i} 
-                       style={[styles.pcDeviceCard, {opacity: 0.6}]} 
-                       onPress={() => initiateConnect(dev.ip, dev.hostname, dev.pin)}
-                       onLongPress={() => removeSavedDevice(dev.ip)}
-                    >
-                       <View style={styles.deviceIconBox}>
-                          <Ionicons name="desktop-outline" size={24} color={COLORS.textSecondary} />
-                       </View>
-                       <View style={styles.deviceInfo}>
-                          <Text style={styles.deviceName}>{dev.hostname}</Text>
-                          <Text style={styles.deviceIp}>{dev.ip} • Paired</Text>
-                       </View>
-                    </TouchableOpacity>
-                 ))}
-             </View>
+            <View style={styles.sectionBlock}>
+              <Text style={styles.sectionLabel}>PAIRED DEVICES</Text>
+              {savedDevices.map((dev, i) => (
+                <TouchableOpacity 
+                  key={i} 
+                  style={styles.pcDeviceCard} 
+                  onPress={() => initiateConnect(dev.ip, dev.hostname, dev.pin)}
+                  onLongPress={() => removeSavedDevice(dev.ip)}
+                  disabled={loadingAction.includes('connecting')}
+                >
+                  <View style={[styles.deviceIconBox, { backgroundColor: COLORS.success + '18' }]}>
+                    <Ionicons name="desktop" size={22} color={COLORS.success} />
+                  </View>
+                  <View style={styles.deviceInfo}>
+                    <Text style={styles.deviceName}>{dev.hostname}</Text>
+                    <Text style={styles.deviceIp}>{dev.ip} • Tap to reconnect</Text>
+                  </View>
+                  {loadingAction === `connecting_${dev.ip}` ? (
+                    <ActivityIndicator size="small" color={COLORS.primary} />
+                  ) : (
+                    <Ionicons name="chevron-forward" size={18} color={COLORS.textSecondary} />
+                  )}
+                </TouchableOpacity>
+              ))}
+            </View>
           )}
 
-          {/* Fallback Manual Connection Option */}
-          <View style={{ alignItems: 'center', marginTop: SPACING.xl }}>
-             
-             {/* QR Scanner Button */}
-             <TouchableOpacity style={[styles.btnConnect, { backgroundColor: COLORS.cardElevated, width: '100%', marginBottom: SPACING.lg, flexDirection: 'row', justifyContent: 'center' }]} 
-                 onPress={async () => {
-                     if (!permission || !permission.granted) {
-                         const { status } = await requestPermission();
-                         if (status !== 'granted') { Alert.alert("Permission Error", "Camera access is required for QR scanning."); return; }
-                     }
-                     setIsScanningQR(true);
-                 }}>
-                <MaterialCommunityIcons name="qrcode-scan" size={20} color={COLORS.primary} style={{ marginRight: SPACING.sm }} />
-                <Text style={[styles.btnConnectText, { color: COLORS.primary }]}>SCAN QR CODE ON PC</Text>
-             </TouchableOpacity>
-
-             {!showManualInput ? (
-                <TouchableOpacity onPress={() => setShowManualInput(true)}>
-                   <Text style={{ color: COLORS.textSecondary, fontSize: 13, textDecorationLine: 'underline' }}>
-                      Can't find your PC or QR? Enter IP Manually
-                   </Text>
-                </TouchableOpacity>
-             ) : (
-                <View style={[styles.sectionBlock, { width: '100%', marginTop: SPACING.md }]}>
-                   <Text style={styles.sectionLabel}>DIRECT IP CONNECTION</Text>
-                   <View style={styles.inputWrapper}>
-                      <Ionicons name="link" size={20} color={COLORS.textSecondary} />
-                      <TextInput
-                         style={styles.inputField}
-                         placeholder="e.g. 192.168.100.236"
-                         placeholderTextColor={COLORS.textSecondary}
-                         value={ipAddress}
-                         onChangeText={setIpAddress}
-                         keyboardType="default"
-                         autoCapitalize="none"
-                      />
-                   </View>
-                   <TouchableOpacity style={styles.btnConnect} onPress={() => initiateConnect(null, "Direct PC", null)}>
-                      <Text style={styles.btnConnectText}>CONNECT NOW</Text>
-                   </TouchableOpacity>
-                </View>
-             )}
+          {/* Divider */}
+          <View style={styles.dividerRow}>
+            <View style={styles.dividerLine} />
+            <Text style={styles.dividerText}>OR</Text>
+            <View style={styles.dividerLine} />
           </View>
+
+          {/* Manual IP Fallback */}
+          {!showManualInput ? (
+            <TouchableOpacity style={styles.manualToggle} onPress={() => setShowManualInput(true)}>
+              <Ionicons name="create-outline" size={18} color={COLORS.textSecondary} />
+              <Text style={styles.manualToggleText}>Enter IP address manually</Text>
+            </TouchableOpacity>
+          ) : (
+            <View style={styles.sectionBlock}>
+              <Text style={styles.sectionLabel}>MANUAL CONNECTION</Text>
+              <View style={styles.inputWrapper}>
+                <Ionicons name="globe-outline" size={20} color={COLORS.textSecondary} />
+                <TextInput
+                  style={styles.inputField}
+                  placeholder="192.168.x.x"
+                  placeholderTextColor={COLORS.textSecondary}
+                  value={ipAddress}
+                  onChangeText={setIpAddress}
+                  keyboardType="default"
+                  autoCapitalize="none"
+                />
+              </View>
+              <TouchableOpacity 
+                style={[styles.btnConnect, !ipAddress.trim() && { opacity: 0.4 }]} 
+                onPress={() => initiateConnect(null, "Direct PC", null)}
+                disabled={!ipAddress.trim()}
+              >
+                <Text style={styles.btnConnectText}>CONNECT</Text>
+              </TouchableOpacity>
+            </View>
+          )}
 
         </ScrollView>
 
         {/* QR Code Camera Modal */}
         <Modal visible={isScanningQR} animationType="slide" transparent={false}>
-             <View style={{ flex: 1, backgroundColor: 'black' }}>
-                <CameraView
-                  style={{ flex: 1 }}
-                  facing="back"
-                  onBarcodeScanned={({ data }) => {
-                       setIsScanningQR(false);
-                       try {
-                           const payload = JSON.parse(data);
-                           if (payload.ip && payload.pin) initiateConnect(payload.ip, payload.hostname || "Nexus PC", payload.pin);
-                           else Alert.alert("Error", "Invalid QR code format.");
-                       } catch(e) { Alert.alert("Error", "Could not parse QR code."); }
-                  }}
-                />
-                <View style={{ position: 'absolute', top: 50, left: 0, right: 0, alignItems: 'center' }}>
-                   <Text style={{ color: 'white', backgroundColor: 'rgba(0,0,0,0.5)', padding: 10, borderRadius: 10 }}>Point camera at Nexus PC's QR Code</Text>
+          <View style={styles.qrCameraContainer}>
+            <CameraView
+              style={StyleSheet.absoluteFillObject}
+              facing="back"
+              onBarcodeScanned={onBarcodeScanned}
+            />
+            {/* Overlay */}
+            <View style={styles.qrOverlay}>
+              <View style={styles.qrOverlayTop}>
+                <Text style={styles.qrOverlayTitle}>Scan Nexus QR Code</Text>
+                <Text style={styles.qrOverlayHint}>Point camera at QR shown on your PC</Text>
+              </View>
+              <View style={styles.qrFrameOuter}>
+                <View style={styles.qrFrame}>
+                  <View style={[styles.qrCorner, styles.qrCornerTL]} />
+                  <View style={[styles.qrCorner, styles.qrCornerTR]} />
+                  <View style={[styles.qrCorner, styles.qrCornerBL]} />
+                  <View style={[styles.qrCorner, styles.qrCornerBR]} />
                 </View>
-                <TouchableOpacity style={{ position: 'absolute', bottom: 50, alignSelf: 'center', backgroundColor: COLORS.cardElevated, padding: 20, borderRadius: RADIUS.round }} onPress={() => setIsScanningQR(false)}>
-                   <Ionicons name="close" size={30} color="white" />
-                </TouchableOpacity>
-             </View>
+              </View>
+              <TouchableOpacity style={styles.qrCloseBtn} onPress={() => setIsScanningQR(false)}>
+                <Ionicons name="close" size={28} color={COLORS.text} />
+                <Text style={styles.qrCloseBtnText}>Cancel</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
         </Modal>
 
         {/* Pairing Code Modal */}
@@ -473,7 +415,7 @@ export default function App() {
                        <Ionicons name="lock-closed" size={32} color={COLORS.warning} />
                    </View>
                    <Text style={styles.pairingTitle}>Pairing Required</Text>
-                   <Text style={styles.pairingSub}>Enter the 4-digit PIN shown on {pairingHostname}'s Nexus Server PC Tray Icon.</Text>
+                   <Text style={styles.pairingSub}>Enter the 4-digit PIN shown on{'\n'}{pairingHostname}'s system tray icon.</Text>
                    
                    <TextInput
                       style={styles.pinInput}
@@ -488,10 +430,10 @@ export default function App() {
                    />
                    
                    <View style={styles.pairingBtnRow}>
-                       <TouchableOpacity style={styles.btnCancel} onPress={() => setPairingModalOpen(false)}>
+                       <TouchableOpacity style={styles.btnCancel} onPress={() => { setPairingModalOpen(false); setInputPin(''); }}>
                            <Text style={styles.btnCancelText}>Cancel</Text>
                        </TouchableOpacity>
-                       <TouchableOpacity style={styles.btnConfirm} onPress={handlePairingSubmit} disabled={inputPin.length !== 4 || loadingAction === 'pairing'}>
+                       <TouchableOpacity style={[styles.btnConfirm, inputPin.length !== 4 && { opacity: 0.4 }]} onPress={handlePairingSubmit} disabled={inputPin.length !== 4 || loadingAction === 'pairing'}>
                            {loadingAction === 'pairing' ? <ActivityIndicator color={COLORS.background} /> : <Text style={styles.btnConfirmText}>Verify</Text>}
                        </TouchableOpacity>
                    </View>
@@ -511,12 +453,12 @@ export default function App() {
         <View style={styles.navLeft}>
             <View style={styles.statusIndicator} />
             <View>
-              <Text style={styles.navStatusText}>SECURE CONNECTION</Text>
+              <Text style={styles.navStatusText}>CONNECTED</Text>
               <Text style={styles.navIpText}>{serverUrl.replace('http://', '')}</Text>
             </View>
         </View>
         <TouchableOpacity style={styles.navBtnDisconnect} onPress={disconnect}>
-          <Ionicons name="power" size={20} color={COLORS.text} />
+          <Ionicons name="power" size={20} color={COLORS.danger} />
         </TouchableOpacity>
       </View>
 
@@ -530,14 +472,14 @@ export default function App() {
           <Text style={styles.cardTitle}>Media Controls</Text>
           <View style={styles.mediaCluster}>
             <TouchableOpacity style={styles.mediaBtnSecondary} onPress={() => mediaControl('prev')}>
-              <Ionicons name="play-skip-back" size={24} color={COLORS.text} />
+              <Ionicons name="play-skip-back" size={22} color={COLORS.text} />
             </TouchableOpacity>
             <TouchableOpacity style={styles.mediaBtnPrimary} onPress={() => mediaControl('playpause')}>
-               <Ionicons name="play" size={24} color={COLORS.text} style={{ position: 'absolute', transform: [{ translateX: -7 }] }} />
-               <Ionicons name="pause" size={24} color={COLORS.text} style={{ position: 'absolute', transform: [{ translateX: 6 }] }} />
+               <Ionicons name="play" size={22} color={COLORS.text} style={{ position: 'absolute', transform: [{ translateX: -6 }] }} />
+               <Ionicons name="pause" size={22} color={COLORS.text} style={{ position: 'absolute', transform: [{ translateX: 6 }] }} />
             </TouchableOpacity>
             <TouchableOpacity style={styles.mediaBtnSecondary} onPress={() => mediaControl('next')}>
-              <Ionicons name="play-skip-forward" size={24} color={COLORS.text} />
+              <Ionicons name="play-skip-forward" size={22} color={COLORS.text} />
             </TouchableOpacity>
           </View>
         </View>
@@ -547,17 +489,17 @@ export default function App() {
           <Text style={styles.cardTitle}>System Volume</Text>
           <View style={styles.volumeCluster}>
             <TouchableOpacity onPress={handleToggleMute} style={styles.muteBtn}>
-              <Ionicons name={isMuted || currentVolume === 0 ? "volume-mute" : "volume-high"} size={28} color={isMuted ? COLORS.danger : COLORS.primary} />
+              <Ionicons name={isMuted || currentVolume === 0 ? "volume-mute" : "volume-high"} size={26} color={isMuted ? COLORS.danger : COLORS.primary} />
             </TouchableOpacity>
             <View style={styles.volumeStepper}>
               <TouchableOpacity onPress={handleVolumeDown} style={styles.stepBtn}>
-                <Ionicons name="remove" size={24} color={COLORS.text} />
+                <Ionicons name="remove" size={22} color={COLORS.text} />
               </TouchableOpacity>
               <View style={styles.volValueWrapper}>
                 <Text style={styles.volValueText}>{currentVolume}%</Text>
               </View>
               <TouchableOpacity onPress={handleVolumeUp} style={styles.stepBtn}>
-                <Ionicons name="add" size={24} color={COLORS.text} />
+                <Ionicons name="add" size={22} color={COLORS.text} />
               </TouchableOpacity>
             </View>
           </View>
@@ -568,7 +510,7 @@ export default function App() {
           <View style={styles.cardHeaderFlex}>
              <Text style={styles.cardTitleNoMargin}>Live Desktop</Text>
              <TouchableOpacity style={styles.cardHeaderBtn} onPress={captureScreen} disabled={isCapturing}>
-                {isCapturing ? <ActivityIndicator size="small" color={COLORS.primary} /> : <Ionicons name="sync" size={20} color={COLORS.textSecondary} />}
+                {isCapturing ? <ActivityIndicator size="small" color={COLORS.primary} /> : <Ionicons name="sync" size={18} color={COLORS.textSecondary} />}
              </TouchableOpacity>
           </View>
           <View style={styles.screenFrame}>
@@ -590,7 +532,7 @@ export default function App() {
              ) : (
                  <View style={styles.screenPlaceholder}>
                     <Ionicons name="image-outline" size={32} color={COLORS.textSecondary} />
-                    <Text style={styles.screenPlaceholderText}>No desktop capture yet.</Text>
+                    <Text style={styles.screenPlaceholderText}>Tap sync to capture desktop</Text>
                  </View>
              )}
           </View>
@@ -601,20 +543,20 @@ export default function App() {
            <View style={styles.cardHeaderFlex}>
               <Text style={styles.cardTitleNoMargin}>System Performance</Text>
               <TouchableOpacity style={styles.cardHeaderBtn} onPress={() => getStats()} disabled={loadingAction === 'stats'}>
-                 {loadingAction === 'stats' ? <ActivityIndicator size="small" color={COLORS.warning} /> : <Ionicons name="sync" size={20} color={COLORS.textSecondary} />}
+                 {loadingAction === 'stats' ? <ActivityIndicator size="small" color={COLORS.warning} /> : <Ionicons name="sync" size={18} color={COLORS.textSecondary} />}
               </TouchableOpacity>
            </View>
            {stats ? (
               <View style={styles.statsContainer}>
                  <View style={styles.hwWidgets}>
                    <View style={styles.hwWidget}>
-                     <View style={styles.hwWidgetHeader}><Ionicons name="hardware-chip" size={16} color={COLORS.textSecondary} /><Text style={styles.hwWidgetLabel}>CPU</Text></View>
+                     <View style={styles.hwWidgetHeader}><Ionicons name="hardware-chip" size={14} color={COLORS.textSecondary} /><Text style={styles.hwWidgetLabel}>CPU</Text></View>
                      <Text style={styles.hwWidgetValue}>{stats.cpu_percent.toFixed(0)}%</Text>
                      <View style={styles.hwTrack}><View style={[styles.hwFill, { width: `${Math.min(100, stats.cpu_percent)}%`, backgroundColor: stats.cpu_percent > 80 ? COLORS.danger : COLORS.success }]} /></View>
                    </View>
                    <View style={styles.separatorVertical} />
                    <View style={styles.hwWidget}>
-                     <View style={styles.hwWidgetHeader}><Ionicons name="server" size={16} color={COLORS.textSecondary} /><Text style={styles.hwWidgetLabel}>RAM</Text></View>
+                     <View style={styles.hwWidgetHeader}><Ionicons name="server" size={14} color={COLORS.textSecondary} /><Text style={styles.hwWidgetLabel}>RAM</Text></View>
                      <Text style={styles.hwWidgetValue}>{stats.ram_percent.toFixed(0)}%</Text>
                      <View style={styles.hwTrack}><View style={[styles.hwFill, { width: `${Math.min(100, stats.ram_percent)}%`, backgroundColor: stats.ram_percent > 80 ? COLORS.danger : COLORS.primary }]} /></View>
                    </View>
@@ -622,7 +564,7 @@ export default function App() {
                  <View style={styles.processesSection}>
                    <View style={styles.processesFilterRow}>
                       <Text style={styles.processesLabel}>Processes</Text>
-                      <TouchableOpacity onPress={() => setShowAllProcesses(!showAllProcesses)}><Text style={styles.toggleDisplayBtn}>{showAllProcesses ? 'Show Less' : 'View Full List'}</Text></TouchableOpacity>
+                      <TouchableOpacity onPress={() => setShowAllProcesses(!showAllProcesses)}><Text style={styles.toggleDisplayBtn}>{showAllProcesses ? 'Show Less' : 'View All'}</Text></TouchableOpacity>
                    </View>
                    <View style={styles.tableHeader}>
                      <Text style={[styles.thCell, {flex: 3}]}>Name</Text>
@@ -641,12 +583,15 @@ export default function App() {
                  </View>
               </View>
            ) : (
-              <View style={styles.screenPlaceholder}><Ionicons name="pie-chart-outline" size={32} color={COLORS.textSecondary} /><Text style={styles.screenPlaceholderText}>Metrics unavailable. Tap sync.</Text></View>
+              <View style={styles.screenPlaceholder}>
+                <Ionicons name="pie-chart-outline" size={32} color={COLORS.textSecondary} />
+                <Text style={styles.screenPlaceholderText}>Tap sync to fetch system metrics</Text>
+              </View>
            )}
         </View>
 
         <TouchableOpacity style={styles.triggerBtnDanger} onPress={() => setPowerMenuVisible(true)}>
-             <Ionicons name="power" size={24} color={COLORS.danger} />
+             <Ionicons name="power" size={22} color={COLORS.danger} />
              <Text style={styles.triggerBtnTextDanger}>Power Menu</Text>
         </TouchableOpacity>
       </ScrollView>
@@ -660,11 +605,11 @@ export default function App() {
                <Text style={styles.sheetHeadline}>PC Power Options</Text>
                <View style={styles.sheetActionGroup}>
                    <TouchableOpacity style={styles.sheetBtnWarning} onPress={() => { setPowerMenuVisible(false); handlePower('restart'); }}>
-                       <Ionicons name="refresh" size={22} color={COLORS.background} />
+                       <Ionicons name="refresh" size={20} color={COLORS.background} />
                        <Text style={styles.sheetBtnTextDark}>Restart</Text>
                    </TouchableOpacity>
                    <TouchableOpacity style={styles.sheetBtnDanger} onPress={() => { setPowerMenuVisible(false); handlePower('shutdown'); }}>
-                       <Ionicons name="power" size={22} color={COLORS.text} />
+                       <Ionicons name="power" size={20} color={COLORS.text} />
                        <Text style={styles.sheetBtnTextLight}>Shutdown</Text>
                    </TouchableOpacity>
                </View>
@@ -679,107 +624,149 @@ export default function App() {
 }
 
 const styles = StyleSheet.create({
-  // Global
+  // ─── Global ───────────────────────────────────────────────────
   baseContainer: { flex: 1, backgroundColor: COLORS.background, paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 0 },
-  scrollContentUnconnected: { padding: SPACING.lg, paddingBottom: SPACING.xl },
-  scrollContent: { padding: SPACING.md, paddingBottom: SPACING.xl * 2, gap: SPACING.lg },
-  
-  // Inputs
-  inputWrapper: { flexDirection: 'row', alignItems: 'center', backgroundColor: COLORS.cardElevated, borderRadius: RADIUS.md, borderWidth: 1, borderColor: COLORS.border, paddingHorizontal: SPACING.md, marginBottom: SPACING.md },
-  inputField: { flex: 1, color: COLORS.text, fontSize: 16, paddingVertical: Platform.OS === 'ios' ? 14 : 10, paddingLeft: SPACING.sm, fontWeight: '500' },
-  btnConnect: { backgroundColor: COLORS.primary, paddingVertical: 14, borderRadius: RADIUS.md, alignItems: 'center' },
+  scrollContentUnconnected: { paddingHorizontal: SPACING.lg, paddingTop: SPACING.xl, paddingBottom: SPACING.xl * 2 },
+  scrollContent: { padding: SPACING.md, paddingBottom: SPACING.xl * 2, gap: SPACING.md },
+
+  // ─── Login Header ─────────────────────────────────────────────
+  loginHeader: { alignItems: 'center', marginBottom: SPACING.xl },
+  logoCircle: { width: 80, height: 80, borderRadius: 40, backgroundColor: COLORS.primary + '15', justifyContent: 'center', alignItems: 'center', marginBottom: SPACING.md, borderWidth: 1, borderColor: COLORS.primary + '30' },
+  loginTitle: { fontSize: 36, fontWeight: '900', color: COLORS.text, letterSpacing: 4 },
+  loginSubtitle: { fontSize: 14, color: COLORS.textSecondary, marginTop: SPACING.xs, fontWeight: '500' },
+
+  // ─── QR Section ───────────────────────────────────────────────
+  qrSection: { marginBottom: SPACING.lg },
+  qrButton: { backgroundColor: COLORS.card, borderRadius: RADIUS.lg, padding: SPACING.xl, alignItems: 'center', borderWidth: 1, borderColor: COLORS.primary + '25' },
+  qrIconCircle: { width: 72, height: 72, borderRadius: 36, backgroundColor: COLORS.primary, justifyContent: 'center', alignItems: 'center', marginBottom: SPACING.md },
+  qrButtonTitle: { fontSize: 20, fontWeight: '800', color: COLORS.text, marginBottom: SPACING.xs },
+  qrButtonSub: { fontSize: 13, color: COLORS.textSecondary, textAlign: 'center', lineHeight: 18 },
+
+  // ─── QR Camera View ───────────────────────────────────────────
+  qrCameraContainer: { flex: 1, backgroundColor: 'black' },
+  qrOverlay: { ...StyleSheet.absoluteFillObject, justifyContent: 'space-between', alignItems: 'center', paddingVertical: 60 },
+  qrOverlayTop: { alignItems: 'center' },
+  qrOverlayTitle: { color: COLORS.text, fontSize: 20, fontWeight: '800' },
+  qrOverlayHint: { color: COLORS.textSecondary, fontSize: 13, marginTop: SPACING.xs },
+  qrFrameOuter: { alignItems: 'center', justifyContent: 'center' },
+  qrFrame: { width: 240, height: 240, position: 'relative' },
+  qrCorner: { position: 'absolute', width: 40, height: 40, borderColor: COLORS.primary, borderWidth: 3 },
+  qrCornerTL: { top: 0, left: 0, borderRightWidth: 0, borderBottomWidth: 0, borderTopLeftRadius: 12 },
+  qrCornerTR: { top: 0, right: 0, borderLeftWidth: 0, borderBottomWidth: 0, borderTopRightRadius: 12 },
+  qrCornerBL: { bottom: 0, left: 0, borderRightWidth: 0, borderTopWidth: 0, borderBottomLeftRadius: 12 },
+  qrCornerBR: { bottom: 0, right: 0, borderLeftWidth: 0, borderTopWidth: 0, borderBottomRightRadius: 12 },
+  qrCloseBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: COLORS.cardElevated, paddingHorizontal: SPACING.xl, paddingVertical: SPACING.md, borderRadius: RADIUS.round, gap: SPACING.sm },
+  qrCloseBtnText: { color: COLORS.text, fontSize: 16, fontWeight: '700' },
+
+  // ─── Sections ─────────────────────────────────────────────────
+  sectionBlock: { marginBottom: SPACING.md },
+  sectionLabel: { fontSize: 12, fontWeight: '800', color: COLORS.textSecondary, letterSpacing: 1.5, marginBottom: SPACING.md },
+
+  // ─── Divider ──────────────────────────────────────────────────
+  dividerRow: { flexDirection: 'row', alignItems: 'center', marginVertical: SPACING.lg },
+  dividerLine: { flex: 1, height: 1, backgroundColor: COLORS.border },
+  dividerText: { color: COLORS.textSecondary, fontSize: 12, fontWeight: '700', marginHorizontal: SPACING.md },
+
+  // ─── Manual Toggle ────────────────────────────────────────────
+  manualToggle: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: SPACING.md, gap: SPACING.sm },
+  manualToggleText: { color: COLORS.textSecondary, fontSize: 14, fontWeight: '500' },
+
+  // ─── Inputs ───────────────────────────────────────────────────
+  inputWrapper: { flexDirection: 'row', alignItems: 'center', backgroundColor: COLORS.card, borderRadius: RADIUS.sm, borderWidth: 1, borderColor: COLORS.border, paddingHorizontal: SPACING.md, marginBottom: SPACING.md },
+  inputField: { flex: 1, color: COLORS.text, fontSize: 16, paddingVertical: Platform.OS === 'ios' ? 14 : 12, paddingLeft: SPACING.sm, fontWeight: '500' },
+  btnConnect: { backgroundColor: COLORS.primary, paddingVertical: 14, borderRadius: RADIUS.sm, alignItems: 'center' },
   btnConnectText: { color: COLORS.text, fontSize: 15, fontWeight: '800', letterSpacing: 1 },
 
-  // Unconnected Header
-  loginHeader: { alignItems: 'center', marginVertical: SPACING.xl },
-  loginIcon: { marginBottom: SPACING.md },
-  loginTitle: { fontSize: 32, fontWeight: '900', color: COLORS.text, letterSpacing: 2 },
-  loginSubtitle: { fontSize: 13, color: COLORS.textSecondary, marginTop: SPACING.sm, fontWeight: '600' },
-  
-  // PC Blocks
-  sectionBlock: { marginBottom: SPACING.xl },
-  sectionHeaderFlex: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: SPACING.sm },
-  sectionLabel: { fontSize: 13, fontWeight: '800', color: COLORS.textSecondary, letterSpacing: 1 },
-  emptyCard: { backgroundColor: 'transparent', borderWidth: 1, borderColor: COLORS.border, borderRadius: RADIUS.md, padding: SPACING.lg, alignItems: 'center', borderStyle: 'dashed' },
-  emptyText: { color: COLORS.textSecondary, fontSize: 14, fontWeight: '500' },
-  
-  pcDeviceCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: COLORS.card, borderRadius: RADIUS.md, padding: SPACING.md, marginBottom: SPACING.sm, borderWidth: 1, borderColor: COLORS.border },
+  // ─── Device Cards ─────────────────────────────────────────────
+  pcDeviceCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: COLORS.card, borderRadius: RADIUS.sm, padding: SPACING.md, marginBottom: SPACING.sm, borderWidth: 1, borderColor: COLORS.border },
   deviceIconBox: { width: 44, height: 44, borderRadius: RADIUS.sm, backgroundColor: COLORS.cardElevated, justifyContent: 'center', alignItems: 'center', marginRight: SPACING.md },
   deviceInfo: { flex: 1 },
-  deviceName: { fontSize: 16, fontWeight: '700', color: COLORS.text, marginBottom: 4 },
-  deviceIp: { fontSize: 12, color: COLORS.textSecondary, fontWeight: '600' },
+  deviceName: { fontSize: 16, fontWeight: '700', color: COLORS.text, marginBottom: 3 },
+  deviceIp: { fontSize: 12, color: COLORS.textSecondary, fontWeight: '500' },
 
-  // Pairing Modal
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.8)', justifyContent: 'center', padding: SPACING.lg },
-  pairingBox: { backgroundColor: COLORS.card, borderRadius: RADIUS.lg, padding: SPACING.xl, alignItems: 'center' },
-  pairingIcon: { width: 64, height: 64, borderRadius: 32, backgroundColor: COLORS.warning + '22', justifyContent: 'center', alignItems: 'center', marginBottom: SPACING.lg },
-  pairingTitle: { fontSize: 24, fontWeight: '800', color: COLORS.text, marginBottom: 8 },
+  // ─── Pairing Modal ────────────────────────────────────────────
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.85)', justifyContent: 'center', padding: SPACING.lg },
+  pairingBox: { backgroundColor: COLORS.card, borderRadius: RADIUS.lg, padding: SPACING.xl, alignItems: 'center', borderWidth: 1, borderColor: COLORS.border },
+  pairingIcon: { width: 64, height: 64, borderRadius: 32, backgroundColor: COLORS.warning + '18', justifyContent: 'center', alignItems: 'center', marginBottom: SPACING.lg },
+  pairingTitle: { fontSize: 22, fontWeight: '800', color: COLORS.text, marginBottom: SPACING.sm },
   pairingSub: { fontSize: 14, color: COLORS.textSecondary, textAlign: 'center', marginBottom: SPACING.xl, lineHeight: 20 },
-  pinInput: { width: 140, height: 60, backgroundColor: COLORS.cardElevated, borderRadius: RADIUS.md, borderWidth: 1, borderColor: COLORS.warning, color: COLORS.warning, fontSize: 32, fontWeight: '900', textAlign: 'center', letterSpacing: 8, marginBottom: SPACING.xl },
+  pinInput: { width: 160, height: 60, backgroundColor: COLORS.cardElevated, borderRadius: RADIUS.sm, borderWidth: 1.5, borderColor: COLORS.warning, color: COLORS.warning, fontSize: 30, fontWeight: '900', textAlign: 'center', letterSpacing: 10, marginBottom: SPACING.xl },
   pairingBtnRow: { flexDirection: 'row', gap: SPACING.md, width: '100%' },
-  btnCancel: { flex: 1, paddingVertical: SPACING.md, borderRadius: RADIUS.md, backgroundColor: COLORS.cardElevated, alignItems: 'center' },
+  btnCancel: { flex: 1, paddingVertical: SPACING.md, borderRadius: RADIUS.sm, backgroundColor: COLORS.cardElevated, alignItems: 'center' },
   btnCancelText: { color: COLORS.textSecondary, fontWeight: '700', fontSize: 16 },
-  btnConfirm: { flex: 1, paddingVertical: SPACING.md, borderRadius: RADIUS.md, backgroundColor: COLORS.primary, alignItems: 'center' },
+  btnConfirm: { flex: 1, paddingVertical: SPACING.md, borderRadius: RADIUS.sm, backgroundColor: COLORS.primary, alignItems: 'center' },
   btnConfirmText: { color: COLORS.text, fontWeight: '800', fontSize: 16 },
 
-  // Connected UI Components Same Logic as previous design...
+  // ─── Connected UI ─────────────────────────────────────────────
   topNavigation: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: SPACING.md, paddingVertical: SPACING.md, borderBottomWidth: 1, borderBottomColor: COLORS.card },
   navLeft: { flexDirection: 'row', alignItems: 'center' },
   statusIndicator: { width: 8, height: 8, borderRadius: 4, backgroundColor: COLORS.success, marginRight: SPACING.sm },
   navStatusText: { fontSize: 11, fontWeight: '800', color: COLORS.success, letterSpacing: 0.5 },
   navIpText: { fontSize: 14, fontWeight: '700', color: COLORS.text, marginTop: 2 },
-  navBtnDisconnect: { backgroundColor: COLORS.cardElevated, padding: SPACING.sm, borderRadius: RADIUS.sm },
+  navBtnDisconnect: { backgroundColor: COLORS.cardElevated, padding: SPACING.sm + 2, borderRadius: RADIUS.sm },
+
+  // ─── Cards ────────────────────────────────────────────────────
   card: { backgroundColor: COLORS.card, borderRadius: RADIUS.lg, padding: SPACING.lg },
-  cardTitle: { fontSize: 18, fontWeight: '800', color: COLORS.text, marginBottom: SPACING.lg },
-  cardTitleNoMargin: { fontSize: 18, fontWeight: '800', color: COLORS.text },
+  cardTitle: { fontSize: 17, fontWeight: '800', color: COLORS.text, marginBottom: SPACING.md },
+  cardTitleNoMargin: { fontSize: 17, fontWeight: '800', color: COLORS.text },
   cardHeaderFlex: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: SPACING.md },
   cardHeaderBtn: { backgroundColor: COLORS.cardElevated, width: 36, height: 36, borderRadius: RADIUS.round, justifyContent: 'center', alignItems: 'center' },
+
+  // ─── Media ────────────────────────────────────────────────────
   mediaCluster: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: SPACING.xl },
-  mediaBtnSecondary: { width: 54, height: 54, borderRadius: RADIUS.round, backgroundColor: COLORS.cardElevated, justifyContent: 'center', alignItems: 'center' },
-  mediaBtnPrimary: { width: 72, height: 72, borderRadius: RADIUS.round, backgroundColor: COLORS.primary, justifyContent: 'center', alignItems: 'center', flexDirection: 'row' },
+  mediaBtnSecondary: { width: 52, height: 52, borderRadius: RADIUS.round, backgroundColor: COLORS.cardElevated, justifyContent: 'center', alignItems: 'center' },
+  mediaBtnPrimary: { width: 68, height: 68, borderRadius: RADIUS.round, backgroundColor: COLORS.primary, justifyContent: 'center', alignItems: 'center', flexDirection: 'row' },
+
+  // ─── Volume ───────────────────────────────────────────────────
   volumeCluster: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  muteBtn: { width: 54, height: 54, borderRadius: RADIUS.round, backgroundColor: COLORS.cardElevated, justifyContent: 'center', alignItems: 'center' },
+  muteBtn: { width: 52, height: 52, borderRadius: RADIUS.round, backgroundColor: COLORS.cardElevated, justifyContent: 'center', alignItems: 'center' },
   volumeStepper: { flexDirection: 'row', alignItems: 'center', backgroundColor: COLORS.cardElevated, borderRadius: RADIUS.round, padding: SPACING.xs },
-  stepBtn: { width: 48, height: 48, borderRadius: RADIUS.round, backgroundColor: COLORS.border, justifyContent: 'center', alignItems: 'center' },
+  stepBtn: { width: 46, height: 46, borderRadius: RADIUS.round, backgroundColor: COLORS.border, justifyContent: 'center', alignItems: 'center' },
   volValueWrapper: { width: 64, justifyContent: 'center', alignItems: 'center' },
   volValueText: { fontSize: 20, fontWeight: '700', color: COLORS.text },
-  screenFrame: { width: '100%', aspectRatio: 16/9, backgroundColor: COLORS.background, borderRadius: RADIUS.md, borderWidth: 1, borderColor: COLORS.border, overflow: 'hidden' },
+
+  // ─── Screen Capture ───────────────────────────────────────────
+  screenFrame: { width: '100%', aspectRatio: 16/9, backgroundColor: COLORS.background, borderRadius: RADIUS.sm, borderWidth: 1, borderColor: COLORS.border, overflow: 'hidden' },
   screenLoaderOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center', zIndex: 10 },
   screenScroll: { flexGrow: 1, justifyContent: 'center', alignItems: 'center' },
   screenImage: { width: '100%', height: '100%' },
-  screenPlaceholder: { flex: 1, justifyContent: 'center', alignItems: 'center', marginTop: SPACING.sm },
+  screenPlaceholder: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingVertical: SPACING.xl },
   screenPlaceholderText: { color: COLORS.textSecondary, fontSize: 13, marginTop: SPACING.sm },
+
+  // ─── Stats ────────────────────────────────────────────────────
   statsContainer: { marginTop: SPACING.xs },
-  hwWidgets: { flexDirection: 'row', backgroundColor: COLORS.cardElevated, borderRadius: RADIUS.md, padding: SPACING.md, marginBottom: SPACING.lg },
+  hwWidgets: { flexDirection: 'row', backgroundColor: COLORS.cardElevated, borderRadius: RADIUS.sm, padding: SPACING.md, marginBottom: SPACING.md },
   separatorVertical: { width: 1, backgroundColor: COLORS.card, marginHorizontal: SPACING.md },
   hwWidget: { flex: 1 },
   hwWidgetHeader: { flexDirection: 'row', alignItems: 'center', gap: SPACING.xs },
-  hwWidgetLabel: { fontSize: 13, fontWeight: '700', color: COLORS.textSecondary, textTransform: 'uppercase' },
+  hwWidgetLabel: { fontSize: 12, fontWeight: '700', color: COLORS.textSecondary, textTransform: 'uppercase' },
   hwWidgetValue: { fontSize: 28, fontWeight: '800', color: COLORS.text, marginVertical: SPACING.sm },
-  hwTrack: { height: 6, backgroundColor: COLORS.card, borderRadius: RADIUS.round, overflow: 'hidden' },
+  hwTrack: { height: 5, backgroundColor: COLORS.card, borderRadius: RADIUS.round, overflow: 'hidden' },
   hwFill: { height: '100%', borderRadius: RADIUS.round },
   processesSection: { marginTop: SPACING.xs },
   processesFilterRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: SPACING.md },
   processesLabel: { fontSize: 15, fontWeight: '700', color: COLORS.text },
   toggleDisplayBtn: { fontSize: 13, fontWeight: '600', color: COLORS.primary },
   tableHeader: { flexDirection: 'row', paddingBottom: SPACING.sm, borderBottomWidth: 1, borderBottomColor: COLORS.border, marginBottom: SPACING.sm },
-  thCell: { fontSize: 12, fontWeight: '700', color: COLORS.textSecondary, textTransform: 'uppercase' },
+  thCell: { fontSize: 11, fontWeight: '700', color: COLORS.textSecondary, textTransform: 'uppercase', letterSpacing: 0.5 },
   tableBody: { gap: 0 },
-  tdRow: { flexDirection: 'row', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: COLORS.cardElevated },
+  tdRow: { flexDirection: 'row', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: COLORS.cardElevated },
   tdCellPrimary: { fontSize: 14, fontWeight: '600', color: COLORS.text },
   tdCellSecondary: { fontSize: 13, fontWeight: '500', color: COLORS.textSecondary },
-  triggerBtnDanger: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: '#3A1110', borderWidth: 1, borderColor: '#7A1C16', borderRadius: RADIUS.lg, padding: SPACING.lg, gap: SPACING.sm },
+
+  // ─── Power ────────────────────────────────────────────────────
+  triggerBtnDanger: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: COLORS.danger + '12', borderWidth: 1, borderColor: COLORS.danger + '30', borderRadius: RADIUS.lg, padding: SPACING.lg, gap: SPACING.sm },
   triggerBtnTextDanger: { color: COLORS.danger, fontSize: 16, fontWeight: '800' },
-  sheetOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.8)', justifyContent: 'flex-end' },
+  sheetOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.85)', justifyContent: 'flex-end' },
   sheetCloser: { flex: 1 },
   sheetBody: { backgroundColor: COLORS.card, borderTopLeftRadius: RADIUS.lg, borderTopRightRadius: RADIUS.lg, padding: SPACING.lg, paddingBottom: Platform.OS === 'ios' ? 40 : SPACING.xl },
   sheetDragHandle: { width: 40, height: 4, backgroundColor: COLORS.textSecondary, borderRadius: RADIUS.round, alignSelf: 'center', marginBottom: SPACING.lg },
-  sheetHeadline: { fontSize: 22, fontWeight: '800', color: COLORS.text, marginBottom: SPACING.xl, textAlign: 'center' },
-  sheetActionGroup: { flexDirection: 'row', gap: SPACING.md, marginBottom: SPACING.lg },
-  sheetBtnWarning: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: COLORS.warning, padding: SPACING.md, borderRadius: RADIUS.md, gap: SPACING.xs },
-  sheetBtnDanger: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: COLORS.danger, padding: SPACING.md, borderRadius: RADIUS.md, gap: SPACING.xs },
+  sheetHeadline: { fontSize: 20, fontWeight: '800', color: COLORS.text, marginBottom: SPACING.xl, textAlign: 'center' },
+  sheetActionGroup: { flexDirection: 'row', gap: SPACING.md, marginBottom: SPACING.md },
+  sheetBtnWarning: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: COLORS.warning, padding: SPACING.md, borderRadius: RADIUS.sm, gap: SPACING.xs },
+  sheetBtnDanger: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: COLORS.danger, padding: SPACING.md, borderRadius: RADIUS.sm, gap: SPACING.xs },
   sheetBtnTextDark: { fontSize: 15, fontWeight: '700', color: COLORS.background },
   sheetBtnTextLight: { fontSize: 15, fontWeight: '700', color: COLORS.text },
-  sheetBtnOutline: { borderWidth: 1, borderColor: COLORS.border, padding: SPACING.md, borderRadius: RADIUS.md, alignItems: 'center' },
-  sheetBtnOutlineText: { color: COLORS.textSecondary, fontSize: 14, fontWeight: '600' }
+  sheetBtnOutline: { borderWidth: 1, borderColor: COLORS.border, padding: SPACING.md, borderRadius: RADIUS.sm, alignItems: 'center' },
+  sheetBtnOutlineText: { color: COLORS.textSecondary, fontSize: 14, fontWeight: '600' },
 });
