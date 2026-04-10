@@ -78,7 +78,24 @@ export default function App() {
   const [powerMenuVisible, setPowerMenuVisible] = useState(false);
 
   useEffect(() => {
-    loadSavedDevices();
+    const init = async () => {
+      try {
+        const data = await AsyncStorage.getItem('nexus_devices_v2');
+        if (data) {
+          const parsed = JSON.parse(data);
+          setSavedDevices(parsed);
+          // Auto-connect to the most recently used device (first in array)
+          if (parsed && parsed.length > 0) {
+            const lastDev = parsed[0];
+            // Small delay to make sure UI is mounted
+            setTimeout(() => {
+              initiateConnect(lastDev.ip, lastDev.hostname || lastDev.ip, lastDev.pin, true);
+            }, 300);
+          }
+        }
+      } catch (e) {}
+    };
+    init();
   }, []);
 
   // ─── Device Storage ───────────────────────────────────────────
@@ -138,9 +155,12 @@ export default function App() {
   };
 
   // ─── Connection & Pairing ───────────────────────────────────────────
-  const initiateConnect = async (ip, hostname = "PC", savedPin = null) => {
+  const initiateConnect = async (ip, hostname = "PC", savedPin = null, isAutoConnect = false) => {
     const targetIp = ip || ipAddress;
-    if (!targetIp.trim()) return Alert.alert('Error', 'Enter a valid IP address.');
+    if (!targetIp.trim()) {
+      if (!isAutoConnect) Alert.alert('Error', 'Enter a valid IP address.');
+      return;
+    }
     let cleanIp = targetIp.trim().replace(/^https?:\/\//, '').replace(/:\d+$/, '').replace(/\/+$/, '');
     
     const url = `http://${cleanIp}:8000`;
@@ -171,10 +191,10 @@ export default function App() {
           fetchVolume(url, savedPin);
           getStats(url, savedPin);
       } else {
-          Alert.alert('Connection Failed', 'Server rejected the connection.');
+          if (!isAutoConnect) Alert.alert('Connection Failed', 'Server rejected the connection.');
       }
     } catch (e) {
-      Alert.alert('Connection Error', `Target ${cleanIp} is unreachable.\n\nMake sure:\n• PC Server is running\n• Both devices are on the same WiFi\n• Windows Firewall allows the connection`);
+      if (!isAutoConnect) Alert.alert('Connection Error', `Target ${cleanIp} is unreachable.\n\nMake sure:\n• PC Server is running\n• Both devices are on the same WiFi\n• Windows Firewall allows the connection`);
     } finally {
       if (!pairingModalOpen) setLoadingAction('');
     }

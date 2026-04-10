@@ -230,9 +230,35 @@ def setup_tray_icon():
                 pass
         threading.Thread(target=run_qr, daemon=True).start()
         
+    def is_autostart_enabled():
+        try:
+            import winreg
+            key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Run", 0, winreg.KEY_READ)
+            val, _ = winreg.QueryValueEx(key, "NexusServer")
+            winreg.CloseKey(key)
+            return True
+        except:
+            return False
+
+    def toggle_autostart(icon, item):
+        import winreg
+        key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Run", 0, winreg.KEY_SET_VALUE)
+        if item.checked:
+            # Disable
+            try:
+                winreg.DeleteValue(key, "NexusServer")
+            except:
+                pass
+        else:
+            # Enable
+            exe_path = sys.executable if getattr(sys, 'frozen', False) else os.path.abspath(__file__)
+            winreg.SetValueEx(key, "NexusServer", 0, winreg.REG_SZ, f'"{exe_path}"')
+        winreg.CloseKey(key)
+
     menu = Menu(
         MenuItem('Show Pairing PIN', show_pin_code),
         MenuItem('Scan QR to Connect', show_qr_code),
+        MenuItem('Run on Windows Startup', toggle_autostart, checked=lambda item: is_autostart_enabled()),
         MenuItem('Quit Backend', on_quit)
     )
     icon = Icon("PCRemote", image, "Nexus PC Controller Server", menu)
