@@ -22,6 +22,8 @@ import {
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { CameraView, useCameraPermissions } from "expo-camera";
+import { GestureHandlerRootView, GestureDetector, Gesture } from 'react-native-gesture-handler';
+import AnimatedRe, { useSharedValue, useAnimatedStyle, withSpring, withTiming, runOnJS } from 'react-native-reanimated';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
 
@@ -51,95 +53,71 @@ const F = { xs: 11, sm: 13, md: 15, lg: 17, xl: 22, hero: 44 };
 
 // ─── SLIDE-UP BOTTOM SHEET ────────────────────────────────────────────────────
 const BottomSheet = ({ visible, onClose, children, title, subtitle }) => {
-  const translateY = useRef(new Animated.Value(SCREEN_HEIGHT)).current;
-  const overlayOpacity = useRef(new Animated.Value(0)).current;
   const [mounted, setMounted] = useState(false);
+  const translateY = useSharedValue(SCREEN_HEIGHT);
+  const overlayOpacity = useSharedValue(0);
 
   useEffect(() => {
     if (visible) {
       setMounted(true);
-      Animated.parallel([
-        Animated.timing(overlayOpacity, {
-          toValue: 1,
-          duration: 260,
-          easing: Easing.out(Easing.quad),
-          useNativeDriver: true,
-        }),
-        Animated.timing(translateY, {
-          toValue: 0,
-          duration: 380,
-          easing: Easing.out(Easing.cubic),
-          useNativeDriver: true,
-        }),
-      ]).start();
+      translateY.value = withSpring(0, { damping: 24, stiffness: 220, mass: 0.8 });
+      overlayOpacity.value = withTiming(1, { duration: 250 });
     } else {
-      Animated.parallel([
-        Animated.timing(overlayOpacity, {
-          toValue: 0,
-          duration: 240,
-          easing: Easing.in(Easing.quad),
-          useNativeDriver: true,
-        }),
-        Animated.timing(translateY, {
-          toValue: SCREEN_HEIGHT,
-          duration: 300,
-          easing: Easing.in(Easing.cubic),
-          useNativeDriver: true,
-        }),
-      ]).start(() => setMounted(false));
+      translateY.value = withTiming(SCREEN_HEIGHT, { duration: 250 }, () => {
+        runOnJS(setMounted)(false);
+      });
+      overlayOpacity.value = withTiming(0, { duration: 200 });
     }
   }, [visible]);
 
-  const panResponder = useRef(
-    PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder: (_, g) => g.dy > 6,
-      onPanResponderMove: (_, g) => {
-        if (g.dy > 0) translateY.setValue(g.dy);
-      },
-      onPanResponderRelease: (_, g) => {
-        if (g.dy > 80 || g.vy > 0.5) {
-          onClose();
-        } else {
-          Animated.spring(translateY, {
-            toValue: 0,
-            useNativeDriver: true,
-            tension: 70,
-            friction: 11,
-          }).start();
-        }
-      },
-    }),
-  ).current;
+  const pan = Gesture.Pan()
+    .onUpdate((e) => {
+      if (e.translationY > 0) {
+        translateY.value = e.translationY;
+      } else {
+        translateY.value = e.translationY * 0.15;
+      }
+    })
+    .onEnd((e) => {
+      if (e.translationY > 120 || e.velocityY > 500) {
+        runOnJS(onClose)();
+      } else {
+        translateY.value = withSpring(0, { damping: 24, stiffness: 220, mass: 0.8 });
+      }
+    });
+
+  const sheetStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: translateY.value }],
+  }));
+  const overlayStyle = useAnimatedStyle(() => ({
+    opacity: overlayOpacity.value,
+  }));
 
   if (!mounted) return null;
 
   return (
     <View style={StyleSheet.absoluteFillObject} pointerEvents="box-none">
-      {/* Overlay fades independently — not tied to sheet translateY */}
-      <Animated.View
+      <AnimatedRe.View
         style={[
           StyleSheet.absoluteFillObject,
-          { backgroundColor: "rgba(0,0,0,0.50)", opacity: overlayOpacity },
+          { backgroundColor: "rgba(0,0,0,0.50)" },
+          overlayStyle
         ]}
         pointerEvents={visible ? "auto" : "none"}
       >
-        <TouchableOpacity
-          style={{ flex: 1 }}
-          activeOpacity={1}
-          onPress={onClose}
-        />
-      </Animated.View>
+        <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={onClose} />
+      </AnimatedRe.View>
 
-      {/* Sheet slides up separately */}
-      <Animated.View style={[s.sheet, { transform: [{ translateY }] }]}>
-        <View {...panResponder.panHandlers} style={s.sheetDragArea}>
-          <View style={s.sheetHandle} />
-          {title ? <Text style={s.sheetTitle}>{title}</Text> : null}
-          {subtitle ? <Text style={s.sheetSubtitle}>{subtitle}</Text> : null}
-        </View>
+      <AnimatedRe.View style={[s.sheet, sheetStyle]}>
+        <GestureDetector gesture={pan}>
+          <AnimatedRe.View style={s.sheetDragArea}>
+            <View style={s.sheetHandle} />
+            {title ? <Text style={s.sheetTitle}>{title}</Text> : null}
+            {subtitle ? <Text style={s.sheetSubtitle}>{subtitle}</Text> : null}
+          </AnimatedRe.View>
+        </GestureDetector>
         {children}
-      </Animated.View>
+      </AnimatedRe.View>
     </View>
   );
 };
@@ -288,7 +266,7 @@ const FadeSlideIn = ({ children, delay = 0, style }) => {
 };
 
 // ─── APP ──────────────────────────────────────────────────────────────────────
-export default function App() {
+function AppMain() {
   const [isConnected, setIsConnected] = useState(false);
   const [serverUrl, setServerUrl] = useState("");
   const [ipAddress, setIpAddress] = useState("");
@@ -612,12 +590,36 @@ export default function App() {
     await sendAction("/power/cancel");
     Alert.alert("Aborted", "Shutdown/Restart cancelled.");
   };
+
+  const handleKillProcess = (proc) => {
+    Alert.alert(
+      "End Task",
+      `Are you sure you want to force quit ${proc.name || 'this process'}?`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Force Quit",
+          style: "destructive",
+          onPress: async () => {
+            await sendAction("/process/kill", "POST", { pid: proc.pid, name: proc.name });
+            setTimeout(() => getStats(), 500);
+          },
+        },
+      ]
+    );
+  };
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     await fetchVolume();
     await getStats();
     setRefreshing(false);
   }, [serverUrl, activePin]);
+
+  useEffect(() => {
+    if (isConnected && currentVolume === undefined) {
+      fetchVolume();
+    }
+  }, [isConnected, currentVolume]);
 
   const cpuColor =
     stats?.cpu_percent > 80
@@ -1046,7 +1048,7 @@ export default function App() {
           <View style={s.menuRowBody}>
             <Text style={s.menuRowTitle}>System Volume</Text>
             <Text style={s.menuRowSub}>
-              {isMuted ? "Muted" : `${currentVolume}%`}
+              {isMuted ? "Muted" : currentVolume !== undefined ? `${currentVolume}%` : "Loading..."}
             </Text>
           </View>
           <Ionicons name="chevron-forward" size={16} color={C.muted} />
@@ -1058,7 +1060,10 @@ export default function App() {
           <View style={s.sectionHeaderRow}>
             <Text style={s.groupLabel}>DESKTOP CAPTURE</Text>
             <TouchableOpacity
-              onPress={() => captureScreen()}
+              onPress={() => {
+                captureScreen();
+                getStats();
+              }}
               disabled={isCapturing}
               style={s.refreshChip}
               activeOpacity={0.7}
@@ -1225,21 +1230,31 @@ export default function App() {
                   <Text style={[s.thCell, { flex: 1, textAlign: "right" }]}>
                     CPU
                   </Text>
+                  <View style={{ width: 26 + SP.sm }} />
                 </View>
                 {(showAllProcesses
                   ? stats.top_processes
                   : stats.top_processes.slice(0, 5)
                 ).map((p, i) => (
                   <View key={i} style={s.tableRow}>
-                    <Text style={[s.tdName, { flex: 3 }]} numberOfLines={1}>
-                      {p.name}
-                    </Text>
+                    <View style={{ flex: 3, paddingRight: SP.sm, justifyContent: 'center' }}>
+                      <Text style={s.tdName} numberOfLines={1}>
+                        {p.name}
+                      </Text>
+                    </View>
                     <Text style={[s.tdVal, { flex: 1.5, textAlign: "right" }]}>
                       {p.memory_mb} MB
                     </Text>
                     <Text style={[s.tdVal, { flex: 1, textAlign: "right" }]}>
                       {p.cpu_percent?.toFixed(1)}%
                     </Text>
+                    <TouchableOpacity
+                      onPress={() => handleKillProcess(p)}
+                      style={s.killBtn}
+                      activeOpacity={0.6}
+                    >
+                      <Ionicons name="close" size={16} color={C.danger} />
+                    </TouchableOpacity>
                   </View>
                 ))}
               </View>
@@ -1324,7 +1339,7 @@ export default function App() {
         visible={volumeSheetOpen}
         onClose={() => setVolumeSheetOpen(false)}
         title="System Volume"
-        subtitle={isMuted ? "Muted" : `${currentVolume}%`}
+        subtitle={isMuted ? "Muted" : currentVolume !== undefined ? `${currentVolume}%` : "Loading..."}
       >
         <View style={s.sheetContent}>
           <TouchableOpacity
@@ -1379,7 +1394,7 @@ export default function App() {
                 style={[
                   s.volBarFill,
                   {
-                    width: `${isMuted ? 0 : currentVolume}%`,
+                    width: `${isMuted ? 0 : (currentVolume || 0)}%`,
                     backgroundColor: isMuted ? C.danger : C.primary,
                   },
                 ]}
@@ -1397,7 +1412,7 @@ export default function App() {
               <Ionicons name="remove" size={22} color={C.text} />
             </TouchableOpacity>
             <Text style={s.volStepValue}>
-              {isMuted ? "—" : `${currentVolume}%`}
+              {isMuted ? "—" : currentVolume !== undefined ? `${currentVolume}%` : "..."}
             </Text>
             <TouchableOpacity
               style={s.volStepBtn}
@@ -1420,41 +1435,61 @@ export default function App() {
         <View style={s.sheetContent}>
           <View style={s.powerBtnRow}>
             <TouchableOpacity
-              style={s.powerBtnWarn}
+              style={s.powerTileWarn}
               onPress={() => {
                 setPowerSheetOpen(false);
                 handlePower("restart");
               }}
               activeOpacity={0.8}
             >
-              <Ionicons name="refresh" size={20} color={C.bg} />
-              <Text style={s.powerBtnDarkText}>Restart</Text>
+              <View style={[s.powerTileIconPill, { backgroundColor: C.warning + '25' }]}>
+                <Ionicons name="refresh" size={24} color={C.warning} />
+              </View>
+              <View>
+                <Text style={s.powerTileTitle}>Restart</Text>
+                <Text style={s.powerTileSub}>Reboot system</Text>
+              </View>
             </TouchableOpacity>
+
             <TouchableOpacity
-              style={s.powerBtnDanger}
+              style={s.powerTileDanger}
               onPress={() => {
                 setPowerSheetOpen(false);
                 handlePower("shutdown");
               }}
               activeOpacity={0.8}
             >
-              <Ionicons name="power" size={20} color={C.text} />
-              <Text style={s.powerBtnLightText}>Shutdown</Text>
+              <View style={[s.powerTileIconPill, { backgroundColor: C.danger + '25' }]}>
+                <Ionicons name="power" size={24} color={C.danger} />
+              </View>
+              <View>
+                <Text style={s.powerTileTitle}>Shutdown</Text>
+                <Text style={s.powerTileSub}>Turn off PC</Text>
+              </View>
             </TouchableOpacity>
           </View>
           <TouchableOpacity
-            style={s.powerBtnOutline}
+            style={s.powerAbortBtn}
             onPress={() => {
               setPowerSheetOpen(false);
               cancelShutdown();
             }}
             activeOpacity={0.7}
           >
-            <Text style={s.powerBtnOutlineText}>Abort Active Action</Text>
+            <Ionicons name="close-circle" size={20} color={C.sub} style={{ marginRight: 8 }} />
+            <Text style={s.powerAbortText}>Abort Active Action</Text>
           </TouchableOpacity>
         </View>
       </BottomSheet>
     </View>
+  );
+}
+
+export default function App() {
+  return (
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <AppMain />
+    </GestureHandlerRootView>
   );
 }
 
@@ -1871,12 +1906,24 @@ const s = StyleSheet.create({
   },
   tableRow: {
     flexDirection: "row",
+    alignItems: "center",
     paddingVertical: 9,
     borderBottomWidth: 1,
     borderBottomColor: C.separator + "80",
   },
   tdName: { fontSize: F.md, fontWeight: "600", color: C.text },
-  tdVal: { fontSize: F.sm, color: C.muted, fontWeight: "500" },
+  tdVal: { fontSize: F.sm, color: C.muted, fontWeight: "500", alignSelf: "center" },
+  killBtn: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: C.dangerDim,
+    justifyContent: "center",
+    alignItems: "center",
+    marginLeft: SP.sm,
+    borderWidth: 1,
+    borderColor: C.danger + "30",
+  },
 
   // ── Bottom Sheet ──
   sheet: {
@@ -2013,35 +2060,42 @@ const s = StyleSheet.create({
 
   // ── Power Sheet ──
   powerBtnRow: { flexDirection: "row", gap: SP.md, marginBottom: SP.md },
-  powerBtnWarn: {
+  powerTileWarn: {
     flex: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: C.warning,
-    paddingVertical: 16,
-    borderRadius: R.md,
-    gap: SP.sm,
+    backgroundColor: C.elevated,
+    padding: SP.md,
+    borderRadius: R.lg,
+    borderWidth: 1,
+    borderColor: C.warning + "40",
   },
-  powerBtnDanger: {
+  powerTileDanger: {
     flex: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: C.danger,
-    paddingVertical: 16,
-    borderRadius: R.md,
-    gap: SP.sm,
+    backgroundColor: C.elevated,
+    padding: SP.md,
+    borderRadius: R.lg,
+    borderWidth: 1,
+    borderColor: C.danger + "40",
   },
-  powerBtnDarkText: { fontSize: F.md, fontWeight: "800", color: C.bg },
-  powerBtnLightText: { fontSize: F.md, fontWeight: "800", color: C.text },
-  powerBtnOutline: {
+  powerTileIconPill: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    justifyContent: "center",
+    alignItems: "center",
+    marginBottom: SP.lg,
+  },
+  powerTileTitle: { fontSize: F.lg, fontWeight: "800", color: C.text, marginBottom: 2 },
+  powerTileSub: { fontSize: F.xs, fontWeight: "600", color: C.muted },
+  
+  powerAbortBtn: {
+    flexDirection: "row",
     borderWidth: 1,
     borderColor: C.border,
-    paddingVertical: 14,
-    borderRadius: R.md,
+    paddingVertical: 16,
+    borderRadius: R.lg,
     alignItems: "center",
-    backgroundColor: C.elevated,
+    justifyContent: "center",
+    backgroundColor: C.surface,
   },
-  powerBtnOutlineText: { color: C.sub, fontSize: F.md, fontWeight: "700" },
+  powerAbortText: { color: C.sub, fontSize: F.md, fontWeight: "700" },
 });
