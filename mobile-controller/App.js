@@ -235,6 +235,41 @@ const BlinkDot = ({ color = C.success }) => {
   );
 };
 
+const SpinningIcon = ({ name, size, color, spinning }) => {
+  const spin = useRef(new Animated.Value(0)).current;
+  const spinRef = useRef(null);
+
+  useEffect(() => {
+    if (spinning) {
+      spin.setValue(0);
+      spinRef.current = Animated.loop(
+        Animated.timing(spin, {
+          toValue: 1,
+          duration: 800,
+          easing: Easing.linear,
+          useNativeDriver: true,
+        })
+      );
+      spinRef.current.start();
+    } else {
+      if (spinRef.current) spinRef.current.stop();
+      spin.setValue(0);
+    }
+    return () => { if (spinRef.current) spinRef.current.stop(); };
+  }, [spinning]);
+
+  const rotate = spin.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['0deg', '360deg'],
+  });
+
+  return (
+    <Animated.View style={{ transform: [{ rotate }] }}>
+      <Ionicons name={name} size={size} color={color} />
+    </Animated.View>
+  );
+};
+
 const FadeSlideIn = ({ children, delay = 0, style }) => {
   const op = useRef(new Animated.Value(0)).current;
   const ty = useRef(new Animated.Value(18)).current;
@@ -288,8 +323,11 @@ function AppMain() {
   const [currentVolume, setCurrentVolume] = useState(0);
   const [isMuted, setIsMuted] = useState(false);
   const [stats, setStats] = useState(null);
+  const [visibleApps, setVisibleApps] = useState([]);
+  const [isLoadingApps, setIsLoadingApps] = useState(false);
   const [showAllProcesses, setShowAllProcesses] = useState(false);
   const [screenshot, setScreenshot] = useState(null);
+  const [screenshotKey, setScreenshotKey] = useState(0);
   const [imgLoading, setImgLoading] = useState(false);
   const [isCapturing, setIsCapturing] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -465,6 +503,7 @@ function AppMain() {
       fetchVolume(url, savedPin);
       getStats(url, savedPin);
       captureScreen(url, savedPin);
+      fetchApps(url, savedPin);
     } catch (e) {
     } finally {
       setLoadingAction("");
@@ -487,6 +526,7 @@ function AppMain() {
       fetchVolume(url, inputPin);
       getStats(url, inputPin);
       captureScreen(url, inputPin);
+      fetchApps(url, inputPin);
     } else
       Alert.alert("Pairing Failed", "Incorrect Code or Server unreachable.");
     setLoadingAction("");
@@ -526,6 +566,7 @@ function AppMain() {
     setIsConnected(false);
     setServerUrl("");
     setStats(null);
+    setVisibleApps([]);
     setScreenshot(null);
     setActivePin(null);
   };
@@ -561,7 +602,10 @@ function AppMain() {
     setIsCapturing(true);
     setImgLoading(true);
     const d = await sendAction("/screen", "GET", null, url, pin);
-    if (d?.image) setScreenshot(d.image);
+    if (d?.image) {
+      setScreenshot(d.image);
+      setScreenshotKey(prev => prev + 1);
+    }
     setIsCapturing(false);
     setImgLoading(false);
   };
@@ -573,6 +617,12 @@ function AppMain() {
     if (el < 1000) await new Promise((r) => setTimeout(r, 1000 - el));
     if (d?.cpu_percent !== undefined) setStats(d);
     setLoadingAction("");
+  };
+  const fetchApps = async (url = null, pin = null) => {
+    setIsLoadingApps(true);
+    const d = await sendAction("/apps", "GET", null, url, pin);
+    if (d?.apps) setVisibleApps(d.apps);
+    setIsLoadingApps(false);
   };
   const handlePower = (action) =>
     Alert.alert("Confirm", `${action.toUpperCase()} your PC? Runs in 5 sec.`, [
@@ -591,18 +641,24 @@ function AppMain() {
     Alert.alert("Aborted", "Shutdown/Restart cancelled.");
   };
 
-  const handleKillProcess = (proc) => {
+  const handleKillProcess = (app) => {
     Alert.alert(
       "End Task",
-      `Are you sure you want to force quit ${proc.name || 'this process'}?`,
+      `Force quit ${app.name}?\n\n"${app.title}"`,
       [
         { text: "Cancel", style: "cancel" },
         {
           text: "Force Quit",
           style: "destructive",
           onPress: async () => {
-            await sendAction("/process/kill", "POST", { pid: proc.pid, name: proc.name });
-            setTimeout(() => getStats(), 500);
+            const res = await sendAction("/process/kill", "POST", { pid: app.pid, name: app.name });
+            if (res?.error) {
+              Alert.alert("Failed", res.error);
+            }
+            setTimeout(() => {
+              fetchApps();
+              getStats();
+            }, 500);
           },
         },
       ]
@@ -611,6 +667,7 @@ function AppMain() {
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     await fetchVolume();
+    await fetchApps();
     await getStats();
     setRefreshing(false);
   }, [serverUrl, activePin]);
@@ -985,9 +1042,8 @@ function AppMain() {
       {/* Top Nav */}
       <View style={s.topNav}>
         <View style={s.topNavLeft}>
-          <BlinkDot />
           <View>
-            <Text style={s.navBadge}>CONNECTED</Text>
+            <Text style={s.navBadge}><BlinkDot /> CONNECTED</Text>
             <Text style={s.navHost}>{hostname}</Text>
           </View>
         </View>
@@ -1068,14 +1124,8 @@ function AppMain() {
               style={s.refreshChip}
               activeOpacity={0.7}
             >
-              {isCapturing ? (
-                <ActivityIndicator size="small" color={C.primary} />
-              ) : (
-                <>
-                  <Ionicons name="sync-outline" size={13} color={C.sub} />
-                  <Text style={s.refreshChipText}> Refresh</Text>
-                </>
-              )}
+              <SpinningIcon name="sync-outline" size={13} color={C.sub} spinning={isCapturing} />
+              <Text style={s.refreshChipText}> Refresh</Text>
             </TouchableOpacity>
           </View>
 
@@ -1092,6 +1142,7 @@ function AppMain() {
                 contentContainerStyle={{ flexGrow: 1 }}
               >
                 <Image
+                  key={screenshotKey}
                   source={{ uri: screenshot }}
                   style={s.screenImg}
                   resizeMode="contain"
@@ -1124,19 +1175,16 @@ function AppMain() {
           <View style={s.sectionHeaderRow}>
             <Text style={s.groupLabel}>SYSTEM</Text>
             <TouchableOpacity
-              onPress={() => getStats()}
+              onPress={() => {
+                getStats();
+                fetchApps();
+              }}
               disabled={loadingAction === "stats"}
               style={s.refreshChip}
               activeOpacity={0.7}
             >
-              {loadingAction === "stats" ? (
-                <ActivityIndicator size="small" color={C.warning} />
-              ) : (
-                <>
-                  <Ionicons name="sync-outline" size={13} color={C.sub} />
-                  <Text style={s.refreshChipText}> Refresh</Text>
-                </>
-              )}
+              <SpinningIcon name="sync-outline" size={13} color={C.sub} spinning={loadingAction === "stats"} />
+              <Text style={s.refreshChipText}> Refresh</Text>
             </TouchableOpacity>
           </View>
 
@@ -1212,44 +1260,54 @@ function AppMain() {
 
               <View style={{ marginTop: SP.lg }}>
                 <View style={s.procHeader}>
-                  <Text style={s.procTitle}>Top Processes</Text>
-                  <TouchableOpacity
-                    onPress={() => setShowAllProcesses(!showAllProcesses)}
-                    activeOpacity={0.7}
-                  >
-                    <Text style={s.procToggle}>
-                      {showAllProcesses ? "Show Less" : "View All"}
-                    </Text>
-                  </TouchableOpacity>
+                  <Text style={s.procTitle}>Running Apps</Text>
+                  {visibleApps.length > 5 && (
+                    <TouchableOpacity
+                      onPress={() => setShowAllProcesses(!showAllProcesses)}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={s.procToggle}>
+                        {showAllProcesses ? "Show Less" : `View All (${visibleApps.length})`}
+                      </Text>
+                    </TouchableOpacity>
+                  )}
                 </View>
                 <View style={s.tableHead}>
-                  <Text style={[s.thCell, { flex: 3 }]}>Process</Text>
+                  <Text style={[s.thCell, { flex: 3 }]}>App</Text>
                   <Text style={[s.thCell, { flex: 1.5, textAlign: "right" }]}>
                     Mem
-                  </Text>
-                  <Text style={[s.thCell, { flex: 1, textAlign: "right" }]}>
-                    CPU
                   </Text>
                   <View style={{ width: 26 + SP.sm }} />
                 </View>
                 {(showAllProcesses
-                  ? stats.top_processes
-                  : stats.top_processes.slice(0, 5)
-                ).map((p, i) => (
-                  <View key={i} style={s.tableRow}>
+                  ? visibleApps
+                  : visibleApps.slice(0, 5)
+                ).map((app, i) => (
+                  <View key={app.pid} style={s.tableRow}>
                     <View style={{ flex: 3, paddingRight: SP.sm, justifyContent: 'center' }}>
-                      <Text style={s.tdName} numberOfLines={1}>
-                        {p.name}
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                        <Text style={[s.tdName, { textTransform: "capitalize", width: "100%" }]} numberOfLines={1}>
+                          {app.name}{"  "}
+                          {app.is_focused && (
+                            <View style={{
+                              width: 5, height: 5, borderRadius: 3,
+                              backgroundColor: C.success, marginLeft: 2,
+                            }} />
+                          )}
+                        </Text>
+                      </View>
+                      <Text style={{ fontSize: F.xs - 1, color: C.muted, marginTop: 1 }} numberOfLines={1}>
+                        {app.title}
                       </Text>
                     </View>
                     <Text style={[s.tdVal, { flex: 1.5, textAlign: "right" }]}>
-                      {p.memory_mb} MB
-                    </Text>
-                    <Text style={[s.tdVal, { flex: 1, textAlign: "right" }]}>
-                      {p.cpu_percent?.toFixed(1)}%
+                      {app.memory_mb >= 1024 
+                        ? `${(app.memory_mb / 1024).toFixed(1)} GB`
+                        : `${app.memory_mb} MB`
+                      }
                     </Text>
                     <TouchableOpacity
-                      onPress={() => handleKillProcess(p)}
+                      onPress={() => handleKillProcess(app)}
                       style={s.killBtn}
                       activeOpacity={0.6}
                     >
@@ -1257,6 +1315,11 @@ function AppMain() {
                     </TouchableOpacity>
                   </View>
                 ))}
+                {visibleApps.length === 0 && (
+                  <View style={[s.screenPlaceholder, { paddingVertical: SP.lg }]}>
+                    <Text style={s.placeholderText}>No visible apps</Text>
+                  </View>
+                )}
               </View>
             </>
           ) : (
@@ -1605,6 +1668,7 @@ const s = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     backgroundColor: C.elevated,
+    gap: 4,
     paddingHorizontal: SP.sm + 2,
     paddingVertical: SP.xs + 2,
     borderRadius: R.full,

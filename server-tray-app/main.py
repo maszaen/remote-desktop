@@ -6,6 +6,7 @@ import psutil
 import pyautogui
 import uvicorn
 import socket
+import subprocess
 import random
 import ctypes
 from fastapi import FastAPI, Response, HTTPException, Depends, Header
@@ -195,6 +196,186 @@ def capture_screen():
         screenshot.save(img_byte_arr, format="JPEG", quality=40)
         img_b64 = base64.b64encode(img_byte_arr.getvalue()).decode('utf-8')
         return {"status": "success", "image": f"data:image/jpeg;base64,{img_b64}"}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.get("/apps", dependencies=[Depends(verify_pin)])
+def get_visible_apps():
+    """Return only visible windowed applications (like Alt-Tab list), not background processes."""
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        user32 = ctypes.windll.user32
+
+        # Get the foreground (active) window
+        foreground_hwnd = user32.GetForegroundWindow()
+        fg_pid = ctypes.c_ulong()
+        user32.GetWindowThreadProcessId(foreground_hwnd, ctypes.byref(fg_pid))
+        foreground_pid = fg_pid.value
+
+        # Enumerate all visible top-level windows with titles
+        visible_windows = []  # list of (hwnd, pid, title)
+
+        def enum_callback(hwnd, lParam):
+            if not user32.IsWindowVisible(hwnd):
+                return True
+
+            # Skip windows with no title
+            length = user32.GetWindowTextLengthW(hwnd)
+            if length == 0:
+                return True
+
+            buff = ctypes.create_unicode_buffer(length + 1)
+            user32.GetWindowTextW(hwnd, buff, length + 1)
+            title = buff.value.strip()
+            if not title:
+                return True
+
+            # Skip cloaked windows (UWP hidden windows)
+            try:
+                DWMWA_CLOAKED = 14
+                cloaked = ctypes.c_int(0)
+                ctypes.windll.dwmapi.DwmGetWindowAttribute(
+                    hwnd, DWMWA_CLOAKED, ctypes.byref(cloaked), ctypes.sizeof(cloaked)
+                )
+                if cloaked.value != 0:
+                    return True
+            except:
+                pass
+
+            # Check window extended styles
+            GWL_EXSTYLE = -20
+            WS_EX_TOOLWINDOW = 0x00000080
+            WS_EX_APPWINDOW = 0x00040000
+            ex_style = user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
+
+            # Skip tool windows unless they explicitly have APPWINDOW
+            if (ex_style & WS_EX_TOOLWINDOW) and not (ex_style & WS_EX_APPWINDOW):
+                return True
+
+            # Get owner - top-level app windows typically have no owner
+            owner = user32.GetWindow(hwnd, 4)  # GW_OWNER = 4
+            if owner and not (ex_style & WS_EX_APPWINDOW):
+                return True
+
+            pid = ctypes.c_ulong()
+            user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+            visible_windows.append((hwnd, pid.value, title))
+            return True
+
+        WNDENUMPROC = ctypes.WINFUNCTYPE(ctypes.c_bool, wintypes.HWND, wintypes.LPARAM)
+        user32.EnumWindows(WNDENUMPROC(enum_callback), 0)
+
+        # Collect PIDs of visible apps
+        visible_pids = set(w[1] for w in visible_windows)
+
+        # Blacklist system/shell processes
+        system_names = {
+            "explorer.exe", "searchhost.exe", "searchui.exe",
+            "shellexperiencehost.exe", "startmenuexperiencehost.exe",
+            "textinputhost.exe", "lockapp.exe",
+            "applicationframehost.exe"
+        }
+
+        # Build per-process info
+        app_map = {}
+        total_mem = psutil.virtual_memory().total
+
+        for pid in visible_pids:
+            try:
+                proc = psutil.Process(pid)
+                pname = proc.name().lower()
+
+                if pname in system_names:
+                    continue
+
+                mem_info = proc.memory_info()
+
+                # Aggregate child process memory (e.g. Chrome, VS Code)
+                total_rss = mem_info.rss
+                try:
+                    children = proc.children(recursive=True)
+                    for child in children:
+                        try:
+                            total_rss += child.memory_info().rss
+                        except (psutil.NoSuchProcess, psutil.AccessDenied):
+                            pass
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    pass
+
+                rss_mb = round(total_rss / (1024**2), 1)
+                mem_pct = round((total_rss / total_mem) * 100, 1)
+
+                # Get window title for this PID
+                titles = [w[2] for w in visible_windows if w[1] == pid]
+                display_title = titles[0] if titles else proc.name()
+
+                # Clean up process name for display
+                display_name = proc.name().replace(".exe", "")
+
+                is_focused = (pid == foreground_pid)
+
+                app_map[pid] = {
+                    "pid": pid,
+                    "name": display_name,
+                    "title": display_title,
+                    "memory_mb": rss_mb,
+                    "memory_percent": mem_pct,
+                    "is_focused": is_focused,
+                }
+            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                continue
+
+        # Sort: focused first, then by memory descending
+        apps = sorted(app_map.values(), key=lambda a: (-a["is_focused"], -a["memory_mb"]))
+
+        return {"apps": apps}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+class KillRequest(BaseModel):
+    pid: int = None
+    name: str = None
+
+
+@app.post("/process/kill", dependencies=[Depends(verify_pin)])
+def kill_process(req: KillRequest):
+    try:
+        if req.pid:
+            proc = psutil.Process(req.pid)
+            proc_name = proc.name()
+            # Kill child processes first, then the main process
+            children = []
+            try:
+                children = proc.children(recursive=True)
+            except:
+                pass
+            for child in children:
+                try:
+                    child.kill()
+                except:
+                    pass
+            proc.kill()
+            return {"status": "success", "message": f"Killed {proc_name} (PID: {req.pid})"}
+        elif req.name:
+            killed = 0
+            for proc in psutil.process_iter(["pid", "name"]):
+                try:
+                    if proc.info["name"] and req.name.lower() in proc.info["name"].lower():
+                        proc.kill()
+                        killed += 1
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    pass
+            return {"status": "success", "message": f"Killed {killed} process(es) matching '{req.name}'"}
+        else:
+            return {"error": "Provide pid or name"}
+    except psutil.NoSuchProcess:
+        return {"error": "Process not found (already closed?)"}
+    except psutil.AccessDenied:
+        return {"error": "Access denied. Process may require admin privileges."}
     except Exception as e:
         return {"error": str(e)}
 
