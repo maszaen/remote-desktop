@@ -756,7 +756,7 @@ function AppMain() {
                   Open PC tray → "Show QR to Connect"
                 </Text>
               </View>
-              <Ionicons name="chevron-forward" size={16} color={C.muted} />
+              <Ionicons name="arrow-forward-outline" size={20} color={C.muted} style={{ paddingLeft: SP.sm }} />
             </TouchableOpacity>
             <View style={s.sep} />
           </FadeSlideIn>
@@ -824,7 +824,7 @@ function AppMain() {
                       Type the PC's local IP address
                     </Text>
                   </View>
-                  <Ionicons name="chevron-forward" size={16} color={C.muted} />
+                  <Ionicons name="arrow-forward-outline" size={20} color={C.muted} style={{ paddingLeft: SP.sm }} />
                 </TouchableOpacity>
                 <View style={s.sep} />
               </>
@@ -1082,7 +1082,7 @@ function AppMain() {
               {stats?.active_media || "Nothing Playing"}
             </Text>
           </View>
-          <Ionicons name="chevron-forward" size={16} color={C.muted} />
+          <Ionicons name="arrow-forward-outline" size={20} color={C.muted} style={{ paddingLeft: SP.sm }} />
         </TouchableOpacity>
         <View style={s.sep} />
 
@@ -1107,7 +1107,7 @@ function AppMain() {
               {isMuted ? "Muted" : currentVolume !== undefined ? `${currentVolume}%` : "Loading..."}
             </Text>
           </View>
-          <Ionicons name="chevron-forward" size={16} color={C.muted} />
+          <Ionicons name="arrow-forward-outline" size={20} color={C.muted} style={{ paddingLeft: SP.sm }} />
         </TouchableOpacity>
         <View style={s.sep} />
 
@@ -1155,17 +1155,13 @@ function AppMain() {
               </View>
             )}
           </View>
-          {stats && (
-            <>
-              {stats.active_window && (
-                <View style={s.activeWinRow}>
-                  <Text style={s.hwLabel}>Active Window</Text>
-                  <Text style={s.activeWinValue} numberOfLines={1}>
-                    {stats.active_window}
-                  </Text>
-                </View>
-              )}
-            </>
+          
+          {/* ── Active Window Pill ── */}
+          {stats.active_window && (
+            <View style={s.activeWinPill}>
+              <Text style={s.hwLabel}>Active Window</Text>
+              <Text style={s.activeWinValue} numberOfLines={1}>{stats.active_window}</Text>
+            </View>
           )}
         </View>
         <View style={[s.sep, { marginLeft: 0, marginTop: SP.lg }]} />
@@ -1175,10 +1171,7 @@ function AppMain() {
           <View style={s.sectionHeaderRow}>
             <Text style={s.groupLabel}>SYSTEM</Text>
             <TouchableOpacity
-              onPress={() => {
-                getStats();
-                fetchApps();
-              }}
+              onPress={() => { getStats(); fetchApps(); }}
               disabled={loadingAction === "stats"}
               style={s.refreshChip}
               activeOpacity={0.7}
@@ -1190,82 +1183,55 @@ function AppMain() {
 
           {stats ? (
             <>
-              <View style={s.hwRow}>
-                <View style={s.hwMeter}>
-                  <View style={s.hwMeterTop}>
-                    <View
-                      style={{
-                        flexDirection: "row",
-                        alignItems: "center",
-                        gap: 5,
-                      }}
-                    >
-                      <Ionicons
-                        name="hardware-chip-outline"
-                        size={12}
-                        color={C.muted}
-                      />
-                      <Text style={s.hwLabel}>CPU</Text>
-                    </View>
-                    <Text style={[s.hwValue, { color: cpuColor }]}>
-                      {stats.cpu_percent.toFixed(0)}%
-                    </Text>
+              {/* ── Usage Cards ── */}
+              <View style={s.usageCardGrid}>
+                {/* CPU */}
+                <View style={s.usageCard}>
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 5, marginBottom: SP.sm }}>
+                    <Ionicons name="hardware-chip-outline" size={12} color={C.muted} />
+                    <Text style={s.hwLabel}>CPU</Text>
                   </View>
+                  <Text style={[s.usagePct, { color: cpuColor }]}>
+                    {stats.cpu_percent.toFixed(0)}%
+                  </Text>
+                  <Text style={s.usageCardSub} numberOfLines={1}>
+                    {stats.cpu_name || "Processor"}
+                  </Text>
                   <View style={s.hwTrack}>
-                    <View
-                      style={[
-                        s.hwFill,
-                        {
-                          width: `${Math.min(100, stats.cpu_percent)}%`,
-                          backgroundColor: cpuColor,
-                        },
-                      ]}
-                    />
+                    <View style={[s.hwFill, { width: `${Math.min(100, stats.cpu_percent)}%`, backgroundColor: cpuColor }]} />
                   </View>
                 </View>
-                <View style={s.hwDivider} />
-                <View style={s.hwMeter}>
-                  <View style={s.hwMeterTop}>
-                    <View
-                      style={{
-                        flexDirection: "row",
-                        alignItems: "center",
-                        gap: 5,
-                      }}
-                    >
-                      <Ionicons
-                        name="server-outline"
-                        size={12}
-                        color={C.muted}
-                      />
-                      <Text style={s.hwLabel}>RAM</Text>
-                    </View>
-                    <Text style={[s.hwValue, { color: ramColor }]}>
-                      {stats.ram_percent.toFixed(0)}%
-                    </Text>
+
+                {/* RAM */}
+                <View style={s.usageCard}>
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 5, marginBottom: SP.sm }}>
+                    <Ionicons name="server-outline" size={12} color={C.muted} />
+                    <Text style={s.hwLabel}>RAM</Text>
                   </View>
+                  <Text style={[s.usagePct, { color: ramColor }]}>
+                    {stats.ram_percent.toFixed(0)}%
+                  </Text>
+                  <Text style={s.usageCardSub} numberOfLines={1}>
+                    {stats.ram_used_gb
+                      ? `${stats.ram_used_gb} / ${stats.ram_total_gb} GB`
+                      : `${stats.ram_percent.toFixed(0)}% used`}
+                  </Text>
                   <View style={s.hwTrack}>
-                    <View
-                      style={[
-                        s.hwFill,
-                        {
-                          width: `${Math.min(100, stats.ram_percent)}%`,
-                          backgroundColor: ramColor,
-                        },
-                      ]}
-                    />
+                    <View style={[s.hwFill, { width: `${Math.min(100, stats.ram_percent)}%`, backgroundColor: ramColor }]} />
                   </View>
                 </View>
               </View>
 
-              <View style={{ marginTop: SP.lg }}>
+              {/* ── Running Apps ── */}
+              <View style={{ backgroundColor: C.elevated,
+                  borderRadius: R.sm,
+                  borderWidth: 1,
+                  borderColor: C.border,
+                  padding: SP.md, }}>
                 <View style={s.procHeader}>
                   <Text style={s.procTitle}>Running Apps</Text>
                   {visibleApps.length > 5 && (
-                    <TouchableOpacity
-                      onPress={() => setShowAllProcesses(!showAllProcesses)}
-                      activeOpacity={0.7}
-                    >
+                    <TouchableOpacity onPress={() => setShowAllProcesses(!showAllProcesses)} activeOpacity={0.7}>
                       <Text style={s.procToggle}>
                         {showAllProcesses ? "Show Less" : `View All (${visibleApps.length})`}
                       </Text>
@@ -1274,44 +1240,31 @@ function AppMain() {
                 </View>
                 <View style={s.tableHead}>
                   <Text style={[s.thCell, { flex: 3 }]}>App</Text>
-                  <Text style={[s.thCell, { flex: 1.5, textAlign: "right" }]}>
-                    Mem
-                  </Text>
+                  <Text style={[s.thCell, { flex: 1.5, textAlign: "right" }]}>Mem</Text>
                   <View style={{ width: 26 + SP.sm }} />
                 </View>
-                {(showAllProcesses
-                  ? visibleApps
-                  : visibleApps.slice(0, 5)
-                ).map((app, i) => (
+                {(showAllProcesses ? visibleApps : visibleApps.slice(0, 5)).map((app) => (
                   <View key={app.pid} style={s.tableRow}>
-                    <View style={{ flex: 3, paddingRight: SP.sm, justifyContent: 'center' }}>
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-                        <Text style={[s.tdName, { textTransform: "capitalize", width: "100%" }]} numberOfLines={1}>
-                          {app.name}{"  "}
-                          {app.is_focused && (
-                            <View style={{
-                              width: 5, height: 5, borderRadius: 3,
-                              backgroundColor: C.success, marginLeft: 2,
-                            }} />
-                          )}
+                    <View style={{ flex: 3, paddingRight: SP.sm, justifyContent: "center" }}>
+                      <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                        {app.is_focused && (
+                          <View style={{ width: 5, height: 5, borderRadius: 3, backgroundColor: C.success, flexShrink: 0 }} />
+                        )}
+                        <Text style={[s.tdName, { textTransform: "capitalize", flex: 1 }]} numberOfLines={1}>
+                          {app.name}
                         </Text>
                       </View>
-                      <Text style={{ fontSize: F.xs - 1, color: C.muted, marginTop: 1 }} numberOfLines={1}>
+                      <Text style={{ fontSize: F.xs - 1, color: C.muted, marginTop: 2 }} numberOfLines={1}>
                         {app.title}
                       </Text>
                     </View>
                     <Text style={[s.tdVal, { flex: 1.5, textAlign: "right" }]}>
-                      {app.memory_mb >= 1024 
+                      {app.memory_mb >= 1024
                         ? `${(app.memory_mb / 1024).toFixed(1)} GB`
-                        : `${app.memory_mb} MB`
-                      }
+                        : `${app.memory_mb} MB`}
                     </Text>
-                    <TouchableOpacity
-                      onPress={() => handleKillProcess(app)}
-                      style={s.killBtn}
-                      activeOpacity={0.6}
-                    >
-                      <Ionicons name="close" size={16} color={C.danger} />
+                    <TouchableOpacity onPress={() => handleKillProcess(app)} style={s.killBtn} activeOpacity={0.6}>
+                      <Ionicons name="close" size={14} color={C.danger} />
                     </TouchableOpacity>
                   </View>
                 ))}
@@ -1346,7 +1299,7 @@ function AppMain() {
             </Text>
             <Text style={s.menuRowSub}>Shutdown, restart, or abort</Text>
           </View>
-          <Ionicons name="chevron-forward" size={16} color={C.muted} />
+          <Ionicons name="arrow-forward-outline" size={20} color={C.muted} style={{ paddingLeft: SP.sm }} />
         </TouchableOpacity>
 
         <View style={{ height: 60 }} />
@@ -1653,6 +1606,7 @@ const s = StyleSheet.create({
   groupLabel: {
     fontSize: F.sm,
     fontWeight: "800",
+    paddingLeft: SP.sm,
     color: C.muted,
     letterSpacing: 2,
   },
@@ -1733,7 +1687,7 @@ const s = StyleSheet.create({
     padding: SP.lg,
   },
   modalBox: {
-    backgroundColor: C.surface,
+    backgroundColor: C.elevated,
     borderRadius: R.xl,
     padding: SP.xl,
     alignItems: "center",
@@ -1892,6 +1846,8 @@ const s = StyleSheet.create({
   screenPlaceholder: {
     justifyContent: "center",
     alignItems: "center",
+    borderWidth: 1,
+    borderColor: C.border,
     paddingVertical: SP.xxl,
   },
   placeholderText: {
@@ -1946,6 +1902,47 @@ const s = StyleSheet.create({
     marginLeft: SP.md,
   },
 
+  // ── Usage Cards ──
+  usageCardGrid: {
+    flexDirection: "row",
+    gap: SP.sm,
+    marginBottom: SP.sm,
+  },
+  usageCard: {
+    flex: 1,
+    backgroundColor: C.elevated,
+    borderRadius: R.sm,
+    borderWidth: 1,
+    borderColor: C.border,
+    padding: SP.md,
+  },
+  usagePct: {
+    fontSize: F.xl + 4,
+    fontWeight: "800",
+    lineHeight: F.xl + 6,
+    marginBottom: 2,
+  },
+  usageCardSub: {
+    fontSize: F.xs,
+    color: C.muted,
+    fontWeight: "500",
+    marginBottom: SP.sm,
+  },
+
+  // ── Active Window Pill ──
+  activeWinPill: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    backgroundColor: C.elevated,
+    borderRadius: R.sm,
+    borderWidth: 1,
+    borderColor: C.border,
+    paddingHorizontal: SP.md,
+    paddingVertical: SP.sm + 2,
+    marginTop: SP.sm,
+  },
+
   // ── Processes ──
   procHeader: {
     flexDirection: "row",
@@ -1972,8 +1969,7 @@ const s = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     paddingVertical: 9,
-    borderBottomWidth: 1,
-    borderBottomColor: C.separator + "80",
+
   },
   tdName: { fontSize: F.md, fontWeight: "600", color: C.text },
   tdVal: { fontSize: F.sm, color: C.muted, fontWeight: "500", alignSelf: "center" },
@@ -1995,7 +1991,7 @@ const s = StyleSheet.create({
     bottom: 0,
     left: 0,
     right: 0,
-    backgroundColor: C.surface,
+    backgroundColor: C.elevated,
     borderTopLeftRadius: R.xl,
     borderTopRightRadius: R.xl,
     borderWidth: 1,
@@ -2126,7 +2122,7 @@ const s = StyleSheet.create({
   powerBtnRow: { flexDirection: "row", gap: SP.md, marginBottom: SP.md },
   powerTileWarn: {
     flex: 1,
-    backgroundColor: C.elevated,
+    backgroundColor: C.surface,
     padding: SP.md,
     borderRadius: R.lg,
     borderWidth: 1,
@@ -2134,7 +2130,7 @@ const s = StyleSheet.create({
   },
   powerTileDanger: {
     flex: 1,
-    backgroundColor: C.elevated,
+    backgroundColor: C.surface,
     padding: SP.md,
     borderRadius: R.lg,
     borderWidth: 1,
