@@ -23,7 +23,7 @@ import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import { GestureHandlerRootView, GestureDetector, Gesture } from 'react-native-gesture-handler';
-import AnimatedRe, { useSharedValue, useAnimatedStyle, withSpring, withTiming, withDecay, runOnJS } from 'react-native-reanimated';
+import AnimatedRe, { useSharedValue, useAnimatedStyle, withSpring, withTiming, withDecay, runOnJS, cancelAnimation } from 'react-native-reanimated';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
 
@@ -1685,7 +1685,14 @@ function AppMain() {
         <GestureHandlerRootView style={{ flex: 1 }}>
           <View style={s.imgModalRoot}>
             {/* Zoomable image — takes full screen, centered */}
-            <View style={StyleSheet.absoluteFillObject}>
+            <View style={[
+              StyleSheet.absoluteFillObject, 
+              { 
+                justifyContent: 'center', 
+                alignItems: 'center',
+                paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 0
+              }
+            ]}>
               {hiResImage ? (
                 <ZoomableImage uri={hiResImage} />
               ) : (
