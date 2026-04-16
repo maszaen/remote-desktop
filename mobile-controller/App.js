@@ -132,62 +132,78 @@ const IMG_H = SCREEN_WIDTH * (9 / 16);
 const ZoomableImage = ({ uri }) => {
   const scale = useSharedValue(1);
   const savedScale = useSharedValue(1);
-  const translateX = useSharedValue(0);
-  const translateY = useSharedValue(0);
-  const savedTranslateX = useSharedValue(0);
-  const savedTranslateY = useSharedValue(0);
+  
+  const offsetBaseX = useSharedValue(0);
+  const offsetBaseY = useSharedValue(0);
+  
+  const panX = useSharedValue(0);
+  const panY = useSharedValue(0);
+  const pinchX = useSharedValue(0);
+  const pinchY = useSharedValue(0);
 
-  // Reset when image changes
+  const originX = useSharedValue(0);
+  const originY = useSharedValue(0);
+
   useEffect(() => {
-    scale.value = 1;
-    savedScale.value = 1;
-    translateX.value = 0;
-    translateY.value = 0;
-    savedTranslateX.value = 0;
-    savedTranslateY.value = 0;
+    scale.value = 1;         savedScale.value = 1;
+    offsetBaseX.value = 0;   offsetBaseY.value = 0;
+    panX.value = 0;          panY.value = 0;
+    pinchX.value = 0;        pinchY.value = 0;
   }, [uri]);
 
   const pinchGesture = Gesture.Pinch()
+    .onStart((e) => {
+      savedScale.value = scale.value;
+      // Because we moved GestureDetector to absolute screen container,
+      // focalX is screen coordinate! We just need distance from screen center.
+      // BUT since the image might be PANNED, the true origin relative to the image's visual center
+      // must account for where the image currently is!
+      originX.value = e.focalX - (SCREEN_WIDTH / 2) - offsetBaseX.value;
+      originY.value = e.focalY - (SCREEN_HEIGHT / 2) - offsetBaseY.value;
+    })
     .onUpdate((e) => {
       scale.value = savedScale.value * e.scale;
+      // The expansion pushes originX further out by (scale - 1)
+      pinchX.value = -originX.value * (e.scale - 1);
+      pinchY.value = -originY.value * (e.scale - 1);
     })
     .onEnd(() => {
+      offsetBaseX.value += pinchX.value;
+      offsetBaseY.value += pinchY.value;
+      pinchX.value = 0;
+      pinchY.value = 0;
+      savedScale.value = scale.value;
+
       if (scale.value < 1) {
         scale.value = withSpring(1);
         savedScale.value = 1;
-        translateX.value = withSpring(0);
-        translateY.value = withSpring(0);
-        savedTranslateX.value = 0;
-        savedTranslateY.value = 0;
+        offsetBaseX.value = withSpring(0);
+        offsetBaseY.value = withSpring(0);
       } else if (scale.value > 5) {
         scale.value = withSpring(5);
         savedScale.value = 5;
-      } else {
-        savedScale.value = scale.value;
       }
     });
 
   const panGesture = Gesture.Pan()
     .onStart(() => {
-      // Save current position BEFORE canceling — so new pan starts from here
-      savedTranslateX.value = translateX.value;
-      savedTranslateY.value = translateY.value;
-      cancelAnimation(translateX);
-      cancelAnimation(translateY);
+      cancelAnimation(offsetBaseX);
+      cancelAnimation(offsetBaseY);
     })
     .onUpdate((e) => {
-      translateX.value = savedTranslateX.value + e.translationX;
-      translateY.value = savedTranslateY.value + e.translationY;
+      panX.value = e.translationX;
+      panY.value = e.translationY;
     })
     .onEnd((e) => {
+      offsetBaseX.value += panX.value;
+      offsetBaseY.value += panY.value;
+      panX.value = 0;
+      panY.value = 0;
+
       if (scale.value <= 1) {
-        // Not zoomed — snap back to center
-        translateX.value = withSpring(0);
-        translateY.value = withSpring(0);
-        savedTranslateX.value = 0;
-        savedTranslateY.value = 0;
+        offsetBaseX.value = withSpring(0);
+        offsetBaseY.value = withSpring(0);
       } else {
-        // Zoomed — calculate bounds
         const scaledW = IMG_W * scale.value;
         const scaledH = IMG_H * scale.value;
         const maxX = Math.max(0, (scaledW - SCREEN_WIDTH) / 2);
@@ -196,28 +212,19 @@ const ZoomableImage = ({ uri }) => {
         const clampX = (v) => Math.max(-maxX, Math.min(maxX, v));
         const clampY = (v) => Math.max(-maxY, Math.min(maxY, v));
 
-        const outOfBoundsX = translateX.value < -maxX || translateX.value > maxX;
-        const outOfBoundsY = translateY.value < -maxY || translateY.value > maxY;
+        const cx = offsetBaseX.value;
+        const cy = offsetBaseY.value;
+
+        const outOfBoundsX = cx < -maxX || cx > maxX;
+        const outOfBoundsY = cy < -maxY || cy > maxY;
         const lowVelocity = Math.abs(e.velocityX) < 100 && Math.abs(e.velocityY) < 100;
 
         if (lowVelocity || outOfBoundsX || outOfBoundsY) {
-          // Low velocity or out of bounds — spring to valid position
-          const targetX = clampX(translateX.value);
-          const targetY = clampY(translateY.value);
-          translateX.value = withSpring(targetX);
-          translateY.value = withSpring(targetY);
-          savedTranslateX.value = targetX;
-          savedTranslateY.value = targetY;
+          offsetBaseX.value = withSpring(clampX(cx));
+          offsetBaseY.value = withSpring(clampY(cy));
         } else {
-          // High velocity — decay with inertia, then sync saved values
-          translateX.value = withDecay(
-            { velocity: e.velocityX, clamp: [-maxX, maxX] },
-            (finished) => { if (finished) savedTranslateX.value = translateX.value; }
-          );
-          translateY.value = withDecay(
-            { velocity: e.velocityY, clamp: [-maxY, maxY] },
-            (finished) => { if (finished) savedTranslateY.value = translateY.value; }
-          );
+          offsetBaseX.value = withDecay({ velocity: e.velocityX, clamp: [-maxX, maxX] });
+          offsetBaseY.value = withDecay({ velocity: e.velocityY, clamp: [-maxY, maxY] });
         }
       }
     });
@@ -226,21 +233,18 @@ const ZoomableImage = ({ uri }) => {
     .numberOfTaps(2)
     .onEnd((e) => {
       if (scale.value > 1) {
-        // Zoom out — reset to center
         scale.value = withSpring(1);
         savedScale.value = 1;
-        translateX.value = withSpring(0);
-        translateY.value = withSpring(0);
-        savedTranslateX.value = 0;
-        savedTranslateY.value = 0;
+        offsetBaseX.value = withSpring(0);
+        offsetBaseY.value = withSpring(0);
       } else {
-        // Zoom in at tap point
         const targetScale = 2.5;
-        const focalX = e.x - SCREEN_WIDTH / 2;
-        const focalY = e.y - SCREEN_HEIGHT / 2;
+        // Since container is screen size, e.x is absolute screen position
+        const dx = e.x - (SCREEN_WIDTH / 2);
+        const dy = e.y - (SCREEN_HEIGHT / 2);
 
-        const offsetX = -focalX * (targetScale - 1);
-        const offsetY = -focalY * (targetScale - 1);
+        const offsetX = -dx * (targetScale - 1);
+        const offsetY = -dy * (targetScale - 1);
 
         const scaledW = IMG_W * targetScale;
         const scaledH = IMG_H * targetScale;
@@ -252,10 +256,8 @@ const ZoomableImage = ({ uri }) => {
 
         scale.value = withSpring(targetScale);
         savedScale.value = targetScale;
-        translateX.value = withSpring(clampedX);
-        translateY.value = withSpring(clampedY);
-        savedTranslateX.value = clampedX;
-        savedTranslateY.value = clampedY;
+        offsetBaseX.value = withSpring(clampedX);
+        offsetBaseY.value = withSpring(clampedY);
       }
     });
 
@@ -266,21 +268,23 @@ const ZoomableImage = ({ uri }) => {
 
   const animStyle = useAnimatedStyle(() => ({
     transform: [
-      { translateX: translateX.value },
-      { translateY: translateY.value },
+      { translateX: offsetBaseX.value + panX.value + pinchX.value },
+      { translateY: offsetBaseY.value + panY.value + pinchY.value },
       { scale: scale.value },
     ],
   }));
 
   return (
     <GestureDetector gesture={composedGestures}>
-      <AnimatedRe.View style={[{ justifyContent: 'center', alignItems: 'center' }, animStyle]}>
-        <Image
-          source={{ uri }}
-          style={{ width: IMG_W, height: IMG_H }}
-          resizeMode="contain"
-        />
-      </AnimatedRe.View>
+      <View style={[StyleSheet.absoluteFillObject, { justifyContent: 'center', alignItems: 'center' }]}>
+        <AnimatedRe.View style={animStyle}>
+          <Image
+            source={{ uri }}
+            style={{ width: IMG_W, height: IMG_H }}
+            resizeMode="contain"
+          />
+        </AnimatedRe.View>
+      </View>
     </GestureDetector>
   );
 };
