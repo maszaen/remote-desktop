@@ -186,14 +186,19 @@ def media_control(action: str):
 
 
 @app.get("/screen", dependencies=[Depends(verify_pin)])
-def capture_screen():
+def capture_screen(quality: str = "low"):
     try:
         import base64
         screenshot = pyautogui.screenshot()
-        # Resize to max 720p width for speed
-        screenshot.thumbnail((1280, 720))
-        img_byte_arr = io.BytesIO()
-        screenshot.save(img_byte_arr, format="JPEG", quality=40)
+        if quality == "high":
+            # Full native resolution, high quality for detail viewing
+            img_byte_arr = io.BytesIO()
+            screenshot.save(img_byte_arr, format="JPEG", quality=85)
+        else:
+            # Thumbnail for quick preview
+            screenshot.thumbnail((1280, 720))
+            img_byte_arr = io.BytesIO()
+            screenshot.save(img_byte_arr, format="JPEG", quality=40)
         img_b64 = base64.b64encode(img_byte_arr.getvalue()).decode('utf-8')
         return {"status": "success", "image": f"data:image/jpeg;base64,{img_b64}"}
     except Exception as e:

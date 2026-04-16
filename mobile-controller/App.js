@@ -23,7 +23,7 @@ import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import { GestureHandlerRootView, GestureDetector, Gesture } from 'react-native-gesture-handler';
-import AnimatedRe, { useSharedValue, useAnimatedStyle, withSpring, withTiming, runOnJS } from 'react-native-reanimated';
+import AnimatedRe, { useSharedValue, useAnimatedStyle, withSpring, withTiming, withDecay, runOnJS } from 'react-native-reanimated';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
 
@@ -52,6 +52,8 @@ const R = { sm: 10, md: 16, lg: 20, xl: 28, full: 999 };
 const F = { xs: 11, sm: 13, md: 15, lg: 17, xl: 22, hero: 44 };
 
 // ─── SLIDE-UP BOTTOM SHEET ────────────────────────────────────────────────────
+const SHEET_OVERFLOW = 300; // extra px below screen to prevent gap on swipe-up
+
 const BottomSheet = ({ visible, onClose, children, title, subtitle }) => {
   const [mounted, setMounted] = useState(false);
   const translateY = useSharedValue(SCREEN_HEIGHT);
@@ -75,7 +77,8 @@ const BottomSheet = ({ visible, onClose, children, title, subtitle }) => {
       if (e.translationY > 0) {
         translateY.value = e.translationY;
       } else {
-        translateY.value = e.translationY * 0.15;
+        // Rubber band upward — capped so it never exceeds SHEET_OVERFLOW
+        translateY.value = Math.max(-SHEET_OVERFLOW, e.translationY * 0.15);
       }
     })
     .onEnd((e) => {
@@ -119,6 +122,166 @@ const BottomSheet = ({ visible, onClose, children, title, subtitle }) => {
         {children}
       </AnimatedRe.View>
     </View>
+  );
+};
+
+// ─── ZOOMABLE IMAGE (ported from ImageViewerModal — momentum + edge snap) ────
+const IMG_W = SCREEN_WIDTH;
+const IMG_H = SCREEN_WIDTH * (9 / 16);
+
+const ZoomableImage = ({ uri }) => {
+  const scale = useSharedValue(1);
+  const savedScale = useSharedValue(1);
+  const translateX = useSharedValue(0);
+  const translateY = useSharedValue(0);
+  const savedTranslateX = useSharedValue(0);
+  const savedTranslateY = useSharedValue(0);
+
+  // Reset when image changes
+  useEffect(() => {
+    scale.value = 1;
+    savedScale.value = 1;
+    translateX.value = 0;
+    translateY.value = 0;
+    savedTranslateX.value = 0;
+    savedTranslateY.value = 0;
+  }, [uri]);
+
+  const pinchGesture = Gesture.Pinch()
+    .onUpdate((e) => {
+      scale.value = savedScale.value * e.scale;
+    })
+    .onEnd(() => {
+      if (scale.value < 1) {
+        scale.value = withSpring(1);
+        savedScale.value = 1;
+        translateX.value = withSpring(0);
+        translateY.value = withSpring(0);
+        savedTranslateX.value = 0;
+        savedTranslateY.value = 0;
+      } else if (scale.value > 5) {
+        scale.value = withSpring(5);
+        savedScale.value = 5;
+      } else {
+        savedScale.value = scale.value;
+      }
+    });
+
+  const panGesture = Gesture.Pan()
+    .onStart(() => {
+      // Save current position BEFORE canceling — so new pan starts from here
+      savedTranslateX.value = translateX.value;
+      savedTranslateY.value = translateY.value;
+      cancelAnimation(translateX);
+      cancelAnimation(translateY);
+    })
+    .onUpdate((e) => {
+      translateX.value = savedTranslateX.value + e.translationX;
+      translateY.value = savedTranslateY.value + e.translationY;
+    })
+    .onEnd((e) => {
+      if (scale.value <= 1) {
+        // Not zoomed — snap back to center
+        translateX.value = withSpring(0);
+        translateY.value = withSpring(0);
+        savedTranslateX.value = 0;
+        savedTranslateY.value = 0;
+      } else {
+        // Zoomed — calculate bounds
+        const scaledW = IMG_W * scale.value;
+        const scaledH = IMG_H * scale.value;
+        const maxX = Math.max(0, (scaledW - SCREEN_WIDTH) / 2);
+        const maxY = Math.max(0, (scaledH - SCREEN_HEIGHT) / 2);
+
+        const clampX = (v) => Math.max(-maxX, Math.min(maxX, v));
+        const clampY = (v) => Math.max(-maxY, Math.min(maxY, v));
+
+        const outOfBoundsX = translateX.value < -maxX || translateX.value > maxX;
+        const outOfBoundsY = translateY.value < -maxY || translateY.value > maxY;
+        const lowVelocity = Math.abs(e.velocityX) < 100 && Math.abs(e.velocityY) < 100;
+
+        if (lowVelocity || outOfBoundsX || outOfBoundsY) {
+          // Low velocity or out of bounds — spring to valid position
+          const targetX = clampX(translateX.value);
+          const targetY = clampY(translateY.value);
+          translateX.value = withSpring(targetX);
+          translateY.value = withSpring(targetY);
+          savedTranslateX.value = targetX;
+          savedTranslateY.value = targetY;
+        } else {
+          // High velocity — decay with inertia, then sync saved values
+          translateX.value = withDecay(
+            { velocity: e.velocityX, clamp: [-maxX, maxX] },
+            (finished) => { if (finished) savedTranslateX.value = translateX.value; }
+          );
+          translateY.value = withDecay(
+            { velocity: e.velocityY, clamp: [-maxY, maxY] },
+            (finished) => { if (finished) savedTranslateY.value = translateY.value; }
+          );
+        }
+      }
+    });
+
+  const doubleTapGesture = Gesture.Tap()
+    .numberOfTaps(2)
+    .onEnd((e) => {
+      if (scale.value > 1) {
+        // Zoom out — reset to center
+        scale.value = withSpring(1);
+        savedScale.value = 1;
+        translateX.value = withSpring(0);
+        translateY.value = withSpring(0);
+        savedTranslateX.value = 0;
+        savedTranslateY.value = 0;
+      } else {
+        // Zoom in at tap point
+        const targetScale = 2.5;
+        const focalX = e.x - SCREEN_WIDTH / 2;
+        const focalY = e.y - SCREEN_HEIGHT / 2;
+
+        const offsetX = -focalX * (targetScale - 1);
+        const offsetY = -focalY * (targetScale - 1);
+
+        const scaledW = IMG_W * targetScale;
+        const scaledH = IMG_H * targetScale;
+        const maxX = Math.max(0, (scaledW - SCREEN_WIDTH) / 2);
+        const maxY = Math.max(0, (scaledH - SCREEN_HEIGHT) / 2);
+
+        const clampedX = Math.max(-maxX, Math.min(maxX, offsetX));
+        const clampedY = Math.max(-maxY, Math.min(maxY, offsetY));
+
+        scale.value = withSpring(targetScale);
+        savedScale.value = targetScale;
+        translateX.value = withSpring(clampedX);
+        translateY.value = withSpring(clampedY);
+        savedTranslateX.value = clampedX;
+        savedTranslateY.value = clampedY;
+      }
+    });
+
+  const composedGestures = Gesture.Race(
+    doubleTapGesture,
+    Gesture.Simultaneous(pinchGesture, panGesture)
+  );
+
+  const animStyle = useAnimatedStyle(() => ({
+    transform: [
+      { translateX: translateX.value },
+      { translateY: translateY.value },
+      { scale: scale.value },
+    ],
+  }));
+
+  return (
+    <GestureDetector gesture={composedGestures}>
+      <AnimatedRe.View style={[{ justifyContent: 'center', alignItems: 'center' }, animStyle]}>
+        <Image
+          source={{ uri }}
+          style={{ width: IMG_W, height: IMG_H }}
+          resizeMode="contain"
+        />
+      </AnimatedRe.View>
+    </GestureDetector>
   );
 };
 
@@ -332,6 +495,9 @@ function AppMain() {
   const [isCapturing, setIsCapturing] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [loadingAction, setLoadingAction] = useState("");
+  const [imageModalOpen, setImageModalOpen] = useState(false);
+  const [hiResImage, setHiResImage] = useState(null);
+  const [hiResLoading, setHiResLoading] = useState(false);
 
   const [mediaSheetOpen, setMediaSheetOpen] = useState(false);
   const [volumeSheetOpen, setVolumeSheetOpen] = useState(false);
@@ -608,6 +774,22 @@ function AppMain() {
     }
     setIsCapturing(false);
     setImgLoading(false);
+  };
+  const captureHiRes = async () => {
+    setHiResLoading(true);
+    const d = await sendAction("/screen?quality=high", "GET");
+    if (d?.image) {
+      setHiResImage(d.image);
+      // Also update thumbnail preview with the hi-res image
+      setScreenshot(d.image);
+      setScreenshotKey(prev => prev + 1);
+    }
+    setHiResLoading(false);
+  };
+  const openImageDetail = () => {
+    setHiResImage(screenshot); // start with current image
+    setImageModalOpen(true);
+    captureHiRes(); // fetch hi-res in background
   };
   const getStats = async (url = null, pin = null) => {
     setLoadingAction("stats");
@@ -1136,18 +1318,18 @@ function AppMain() {
               </View>
             )}
             {screenshot ? (
-              <ScrollView
-                minimumZoomScale={1}
-                maximumZoomScale={4}
-                contentContainerStyle={{ flexGrow: 1 }}
-              >
+              <TouchableOpacity activeOpacity={0.85} onPress={openImageDetail}>
                 <Image
                   key={screenshotKey}
                   source={{ uri: screenshot }}
                   style={s.screenImg}
                   resizeMode="contain"
                 />
-              </ScrollView>
+                <View style={s.screenZoomHint}>
+                  <Ionicons name="expand-outline" size={14} color={C.sub} />
+                  <Text style={{ fontSize: F.xs, color: C.sub, marginLeft: 4, fontWeight: '600' }}>Tap to zoom</Text>
+                </View>
+              </TouchableOpacity>
             ) : (
               <View style={s.screenPlaceholder}>
                 <Ionicons name="image-outline" size={26} color={C.muted} />
@@ -1157,7 +1339,7 @@ function AppMain() {
           </View>
           
           {/* ── Active Window Pill ── */}
-          {stats.active_window && (
+          {stats?.active_window && (
             <View style={s.activeWinPill}>
               <Text style={s.hwLabel}>Active Window</Text>
               <Text style={s.activeWinValue} numberOfLines={1}>{stats.active_window}</Text>
@@ -1497,6 +1679,52 @@ function AppMain() {
           </TouchableOpacity>
         </View>
       </BottomSheet>
+
+      {/* ═══ IMAGE DETAIL MODAL ═══ */}
+      <Modal visible={imageModalOpen} transparent animationType="fade" statusBarTranslucent>
+        <GestureHandlerRootView style={{ flex: 1 }}>
+          <View style={s.imgModalRoot}>
+            {/* Zoomable image — takes full screen, centered */}
+            <View style={StyleSheet.absoluteFillObject}>
+              {hiResImage ? (
+                <ZoomableImage uri={hiResImage} />
+              ) : (
+                <View style={s.imgModalScrollContent}>
+                  <ActivityIndicator size="large" color={C.primary} />
+                </View>
+              )}
+            </View>
+
+            {/* Floating top bar — overlays the image */}
+            <View style={s.imgModalTopBar}>
+              <TouchableOpacity
+                onPress={() => setImageModalOpen(false)}
+                style={s.imgModalCloseBtn}
+                activeOpacity={0.7}
+              >
+                <Ionicons name="close" size={22} color={C.text} />
+              </TouchableOpacity>
+              <Text style={s.imgModalTitle}>Desktop Capture</Text>
+              <TouchableOpacity
+                onPress={captureHiRes}
+                disabled={hiResLoading}
+                style={s.imgModalRefreshBtn}
+                activeOpacity={0.7}
+              >
+                <SpinningIcon name="sync-outline" size={16} color={C.text} spinning={hiResLoading} />
+              </TouchableOpacity>
+            </View>
+
+            {/* Hi-res loading indicator */}
+            {hiResLoading && (
+              <View style={s.imgModalLoadingPill}>
+                <ActivityIndicator size="small" color={C.primary} style={{ marginRight: 8 }} />
+                <Text style={{ color: C.sub, fontSize: F.xs, fontWeight: '600' }}>Loading high resolution…</Text>
+              </View>
+            )}
+          </View>
+        </GestureHandlerRootView>
+      </Modal>
     </View>
   );
 }
@@ -1856,6 +2084,75 @@ const s = StyleSheet.create({
     marginTop: SP.sm,
     fontWeight: "500",
   },
+  screenZoomHint: {
+    position: "absolute",
+    bottom: SP.sm,
+    right: SP.sm,
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "rgba(0,0,0,0.55)",
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: R.full,
+  },
+
+  // ── Image Detail Modal ──
+  imgModalRoot: {
+    flex: 1,
+    backgroundColor: "#000",
+  },
+  imgModalTopBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingTop: Platform.OS === "ios" ? 54 : StatusBar.currentHeight + 10,
+    paddingHorizontal: SP.md,
+    paddingBottom: SP.sm,
+    zIndex: 10,
+  },
+  imgModalCloseBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: R.full,
+    backgroundColor: "rgba(255,255,255,0.1)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  imgModalTitle: {
+    fontSize: F.lg,
+    fontWeight: "800",
+    color: C.text,
+  },
+  imgModalRefreshBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: R.full,
+    backgroundColor: "rgba(255,255,255,0.1)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  imgModalScrollContent: {
+    flexGrow: 1,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  imgModalImage: {
+    width: SCREEN_WIDTH,
+    height: SCREEN_WIDTH * (9 / 16),
+  },
+  imgModalLoadingPill: {
+    position: "absolute",
+    bottom: Platform.OS === "ios" ? 40 : 24,
+    alignSelf: "center",
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "rgba(255,255,255,0.08)",
+    paddingHorizontal: SP.md,
+    paddingVertical: SP.sm,
+    borderRadius: R.full,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.06)",
+  },
 
   // ── HW ──
   hwRow: { flexDirection: "row", marginBottom: SP.md },
@@ -1988,7 +2285,7 @@ const s = StyleSheet.create({
   // ── Bottom Sheet ──
   sheet: {
     position: "absolute",
-    bottom: 0,
+    bottom: -SHEET_OVERFLOW,
     left: 0,
     right: 0,
     backgroundColor: C.elevated,
@@ -1997,7 +2294,7 @@ const s = StyleSheet.create({
     borderWidth: 1,
     borderBottomWidth: 0,
     borderColor: C.border,
-    paddingBottom: Platform.OS === "ios" ? 34 : SP.xl,
+    paddingBottom: (Platform.OS === "ios" ? 34 : SP.xl) + SHEET_OVERFLOW,
     shadowColor: "#000",
     shadowOffset: { width: 0, height: -10 },
     shadowOpacity: 0.5,
