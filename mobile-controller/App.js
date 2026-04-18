@@ -546,7 +546,13 @@ const SpinningIcon = ({ name, size, color, spinning }) => {
 
 // ── MARQUEE TEXT (auto-scrolling for long text) ──────────────────────────────
 const MARQUEE_H = 64; // height for the marquee container (matches font size 56 + buffer)
-const MarqueeText = ({ children, style, speed = 40, gradientColor = C.surface }) => {
+const MarqueeText = ({
+  children,
+  style,
+  speed = 40,
+  gradientColor = C.elevated,
+  onScrollChange,
+}) => {
   const [containerW, setContainerW] = useState(0);
   const [textW, setTextW] = useState(0);
   const scrollX = useRef(new Animated.Value(0)).current;
@@ -554,6 +560,10 @@ const MarqueeText = ({ children, style, speed = 40, gradientColor = C.surface })
 
   const overflow = textW - containerW;
   const shouldScroll = containerW > 0 && textW > 0 && overflow > 5;
+
+  useEffect(() => {
+    onScrollChange?.(shouldScroll);
+  }, [shouldScroll]);
 
   useEffect(() => {
     if (animRef.current) animRef.current.stop();
@@ -590,15 +600,38 @@ const MarqueeText = ({ children, style, speed = 40, gradientColor = C.surface })
       onLayout={(e) => setContainerW(e.nativeEvent.layout.width)}
     >
       {/* Hidden off-screen text for measuring true width (never wraps in 10000px row) */}
-      <View style={{ position: "absolute", top: -9999, flexDirection: "row", width: 10000 }} pointerEvents="none">
-        <Text style={style} onLayout={(e) => setTextW(e.nativeEvent.layout.width)}>
+      <View
+        style={{
+          position: "absolute",
+          top: -9999,
+          flexDirection: "row",
+          width: 10000,
+        }}
+        pointerEvents="none"
+      >
+        <Text
+          style={style}
+          onLayout={(e) => setTextW(e.nativeEvent.layout.width)}
+        >
           {children}
         </Text>
       </View>
 
       {/* Visible scrolling text */}
-      <Animated.View style={{ flexDirection: "row", width: 10000, transform: [{ translateX: shouldScroll ? scrollX : 0 }] }}>
-        <Text style={[style, !shouldScroll && { width: containerW, textAlign: "center" }]} numberOfLines={1}>
+      <Animated.View
+        style={{
+          flexDirection: "row",
+          width: 10000,
+          transform: [{ translateX: shouldScroll ? scrollX : 0 }],
+        }}
+      >
+        <Text
+          style={[
+            style,
+            !shouldScroll && { width: containerW, textAlign: "center" },
+          ]}
+          numberOfLines={1}
+        >
           {children}
         </Text>
       </Animated.View>
@@ -607,17 +640,29 @@ const MarqueeText = ({ children, style, speed = 40, gradientColor = C.surface })
       {shouldScroll && (
         <>
           <LinearGradient
-            colors={[gradientColor, gradientColor + "00"]}
+            colors={[gradientColor, "transparent"]}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 0 }}
-            style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: 32 }}
+            style={{
+              position: "absolute",
+              left: 0,
+              top: 0,
+              bottom: 0,
+              width: 30,
+            }}
             pointerEvents="none"
           />
           <LinearGradient
-            colors={[gradientColor + "00", gradientColor]}
+            colors={["transparent", gradientColor]}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 0 }}
-            style={{ position: "absolute", right: 0, top: 0, bottom: 0, width: 32 }}
+            style={{
+              position: "absolute",
+              right: 0,
+              top: 0,
+              bottom: 0,
+              width: 30,
+            }}
             pointerEvents="none"
           />
         </>
@@ -675,6 +720,8 @@ function AppMain() {
   const [pairingIp, setPairingIp] = useState(null);
   const [pairingHostname, setPairingHostname] = useState(null);
   const [inputPin, setInputPin] = useState("");
+
+  const [marqueeScrolling, setMarqueeScrolling] = useState(false);
 
   const [currentVolume, setCurrentVolume] = useState(0);
   const [isMuted, setIsMuted] = useState(false);
@@ -979,7 +1026,7 @@ function AppMain() {
       await Image.prefetch(rawUrl);
       setHiResImage(rawUrl);
     } catch (e) {
-      console.warn('Hi-res fetch failed', e);
+      console.warn("Hi-res fetch failed", e);
     }
     setHiResLoading(false);
   };
@@ -1061,7 +1108,7 @@ function AppMain() {
         captureScreen(),
       ]);
     } catch (e) {
-      console.warn('Refresh error', e);
+      console.warn("Refresh error", e);
     }
     setRefreshing(false);
   }, [serverUrl, activePin]);
@@ -1488,7 +1535,10 @@ function AppMain() {
         {/* Media row */}
         <TouchableOpacity
           style={s.menuRow}
-          onPress={() => { getStats(); setMediaSheetOpen(true); }}
+          onPress={() => {
+            getStats();
+            setMediaSheetOpen(true);
+          }}
           activeOpacity={0.6}
         >
           <View style={[s.menuRowIcon, { backgroundColor: C.primaryDim }]}>
@@ -1890,11 +1940,24 @@ function AppMain() {
           {/* Hero track title with marquee */}
           <View style={s.mediaTitleWrap}>
             {stats?.active_media && stats.active_media !== "Not Playing" ? (
-              <MarqueeText style={s.mediaHeroTitle}>
+              <MarqueeText
+                style={[
+                  s.mediaHeroTitle,
+                  marqueeScrolling && { paddingLeft: 20 }, // ← aktif kalau teks panjang
+                ]}
+                onScrollChange={setMarqueeScrolling}
+              >
                 {stats.active_media}
               </MarqueeText>
             ) : (
-              <Text style={[s.mediaHeroTitle, { color: C.muted, textAlign: "center" }]}>Not Playing</Text>
+              <Text
+                style={[
+                  s.mediaHeroTitle,
+                  { color: C.muted, textAlign: "center" },
+                ]}
+              >
+                Not Playing
+              </Text>
             )}
           </View>
           <View style={s.mediaCluster}>
@@ -1911,7 +1974,11 @@ function AppMain() {
               activeOpacity={0.8}
             >
               <Ionicons
-                name={stats?.active_media && stats.active_media !== "Not Playing" ? "pause" : "play"}
+                name={
+                  stats?.active_media && stats.active_media !== "Not Playing"
+                    ? "pause"
+                    : "play"
+                }
                 size={28}
                 color={C.text}
               />
@@ -1944,7 +2011,11 @@ function AppMain() {
           {/* Large volume display */}
           <View style={s.volDisplayCenter}>
             <Text style={[s.volBigNumber, isMuted && { color: C.danger }]}>
-              {isMuted ? "MUTE" : currentVolume !== undefined ? `${currentVolume}` : "—"}
+              {isMuted
+                ? "MUTE"
+                : currentVolume !== undefined
+                  ? `${currentVolume}`
+                  : "—"}
             </Text>
             {!isMuted && currentVolume !== undefined && (
               <Text style={s.volBigUnit}>%</Text>
@@ -1978,12 +2049,20 @@ function AppMain() {
               <Ionicons name="remove" size={24} color={C.text} />
             </TouchableOpacity>
             <TouchableOpacity
-              style={[s.volMuteBtn, isMuted && { backgroundColor: C.danger + "20", borderColor: C.danger + "50" }]}
+              style={[
+                s.volMuteBtn,
+                isMuted && {
+                  backgroundColor: C.danger + "20",
+                  borderColor: C.danger + "50",
+                },
+              ]}
               onPress={handleToggleMute}
               activeOpacity={0.7}
             >
               <Ionicons
-                name={isMuted || currentVolume === 0 ? "volume-mute" : "volume-high"}
+                name={
+                  isMuted || currentVolume === 0 ? "volume-mute" : "volume-high"
+                }
                 size={22}
                 color={isMuted ? C.danger : C.sub}
               />
@@ -2015,7 +2094,9 @@ function AppMain() {
             }}
             activeOpacity={0.7}
           >
-            <View style={[s.powerRowIcon, { backgroundColor: C.warning + "18" }]}>
+            <View
+              style={[s.powerRowIcon, { backgroundColor: C.warning + "18" }]}
+            >
               <Ionicons name="refresh" size={22} color={C.warning} />
             </View>
             <View style={{ flex: 1 }}>
@@ -2035,7 +2116,9 @@ function AppMain() {
             }}
             activeOpacity={0.7}
           >
-            <View style={[s.powerRowIcon, { backgroundColor: C.danger + "18" }]}>
+            <View
+              style={[s.powerRowIcon, { backgroundColor: C.danger + "18" }]}
+            >
               <Ionicons name="power" size={22} color={C.danger} />
             </View>
             <View style={{ flex: 1 }}>
@@ -2724,7 +2807,7 @@ const s = StyleSheet.create({
     marginTop: 4,
     fontWeight: "500",
   },
-  sheetContent: { paddingHorizontal: SP.lg, paddingTop: SP.xs },
+  sheetContent: { paddingHorizontal: SP.xs, paddingTop: SP.xs },
 
   // ── Media Sheet ──
   mediaTitleWrap: {
