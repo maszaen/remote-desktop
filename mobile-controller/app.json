@@ -1,27 +1,45 @@
 {
   "expo": {
-    "name": "mobile-controller",
-    "slug": "mobile-controller",
+    "name": "Nexus Controller",
+    "slug": "nexus-controller",
     "version": "1.0.0",
     "orientation": "portrait",
+    "owner": "zaeniahmad",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
+    "backgroundColor": "#000000",
     "splash": {
-      "image": "./assets/splash-icon.png",
+      "image": "./assets/adaptive-icon.png",
       "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
+      "backgroundColor": "#000000",
+      "dark": {
+        "image": "./assets/adaptive-icon.png",
+        "backgroundColor": "#000000",
+        "resizeMode": "contain"
+      }
     },
     "ios": {
       "supportsTablet": true
     },
     "android": {
+      "backgroundColor": "#000000",
+      "splash": {
+        "image": "./assets/adaptive-icon.png",
+        "resizeMode": "contain",
+        "backgroundColor": "#000000",
+        "dark": {
+          "image": "./assets/adaptive-icon.png",
+          "backgroundColor": "#000000",
+          "resizeMode": "contain"
+        }
+      },
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#ffffff"
+        "backgroundColor": "#000000"
       },
       "edgeToEdgeEnabled": true,
-      "package": "com.anonymous.mobilecontroller",
+      "package": "com.zaen.clustrix.mobile",
       "usesCleartextTraffic": true
     },
     "web": {
