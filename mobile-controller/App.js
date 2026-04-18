@@ -1028,6 +1028,10 @@ function AppMain() {
         setConnectivitySheetOpen(false);
         return true;
       }
+      if (clipboardSheetOpen) {
+        setClipboardSheetOpen(false);
+        return true;
+      }
       if (isScanningQR) {
         setIsScanningQR(false);
         return true;
@@ -1072,6 +1076,8 @@ function AppMain() {
     volumeSheetOpen,
     powerSheetOpen,
     shortcutSheetOpen,
+    connectivitySheetOpen,
+    clipboardSheetOpen,
     isScanningQR,
     pairingModalOpen,
     renameTarget,
@@ -2244,11 +2250,11 @@ function AppMain() {
           activeOpacity={0.6}
         >
           <View style={[s.menuRowIcon, { backgroundColor: C.primaryDim }]}>
-            <Ionicons name="clipboard" size={18} color={C.primary} />
+            <Ionicons name="file-tray-full" size={18} color={C.primary} />
           </View>
           <View style={s.menuRowBody}>
             <Text style={s.menuRowTitle}>Clipboard Access</Text>
-            <Text style={s.menuRowSub}>Cross device clipboard</Text>
+            <Text style={s.menuRowSub}>Cross-device clipboard</Text>
           </View>
           <Ionicons
             name="arrow-forward-outline"
@@ -2313,7 +2319,7 @@ function AppMain() {
                   { color: C.muted, textAlign: "center" },
                 ]}
               >
-                {mediaFetching ? "Fetching..." : "Not Playing"}
+                {mediaFetching ? "Loading..." : "Not Playing"}
               </Text>
             )}
           </View>
@@ -2727,7 +2733,7 @@ function AppMain() {
         visible={clipboardSheetOpen}
         onClose={() => setClipboardSheetOpen(false)}
         title="Clipboard Access"
-        subtitle={`Cross device clipboard`}
+        subtitle={`Cross-device clipboard`}
       >
         <View style={s.sheetContent}>
           <TouchableOpacity
