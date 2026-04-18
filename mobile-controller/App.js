@@ -377,7 +377,7 @@ const ZoomableImage = ({ uri }) => {
         <AnimatedRe.View style={animStyle}>
           <Image
             source={{ uri }}
-            style={{ width: IMG_W, height: IMG_H }}
+            style={{ width: IMG_W, height: IMG_H, borderRadius: R.md }}
             resizeMode="contain"
             fadeDuration={hasLoadedRef.current ? 0 : 300}
             onLoad={() => {
@@ -1775,28 +1775,6 @@ function AppMain() {
         </TouchableOpacity>
         <View style={s.sep} />
 
-        {/* Keyboard Shortcuts row */}
-        <TouchableOpacity
-          style={s.menuRow}
-          onPress={() => setShortcutSheetOpen(true)}
-          activeOpacity={0.6}
-        >
-          <View style={[s.menuRowIcon, { backgroundColor: C.warningDim }]}>
-            <Ionicons name="flash" size={18} color={C.warning} />
-          </View>
-          <View style={s.menuRowBody}>
-            <Text style={s.menuRowTitle}>Keyboard Shortcuts</Text>
-            <Text style={s.menuRowSub}>Common shortcuts</Text>
-          </View>
-          <Ionicons
-            name="arrow-forward-outline"
-            size={20}
-            color={C.muted}
-            style={{ paddingRight: SP.sm }}
-          />
-        </TouchableOpacity>
-        <View style={s.sep} />
-
         {/* Live Desktop */}
         <View style={{ paddingTop: SP.lg }}>
           <View style={s.sectionHeaderRow}>
@@ -1893,7 +1871,7 @@ function AppMain() {
                 activeOpacity={0.7}
               >
                 <Ionicons name="eye-off" size={14} color={C.danger} />
-                <Text style={s.panicBtnText}>HIDE</Text>
+                <Text style={s.panicBtnText}>Hide/Show</Text>
               </TouchableOpacity>
             </View>
           )}
@@ -2120,6 +2098,28 @@ function AppMain() {
         </View>
         <View style={[s.sep, { marginLeft: 0, marginTop: SP.lg }]} />
 
+        {/* Keyboard Shortcuts row */}
+        <TouchableOpacity
+          style={s.menuRow}
+          onPress={() => setShortcutSheetOpen(true)}
+          activeOpacity={0.6}
+        >
+          <View style={[s.menuRowIcon, { backgroundColor: C.warningDim }]}>
+            <Ionicons name="flash" size={18} color={C.warning} />
+          </View>
+          <View style={s.menuRowBody}>
+            <Text style={s.menuRowTitle}>Keyboard Shortcuts</Text>
+            <Text style={s.menuRowSub}>Common shortcuts</Text>
+          </View>
+          <Ionicons
+            name="arrow-forward-outline"
+            size={20}
+            color={C.muted}
+            style={{ paddingRight: SP.sm }}
+          />
+        </TouchableOpacity>
+
+        <View style={s.sep} />
         {/* Power row */}
         <TouchableOpacity
           style={s.menuRow}
@@ -2142,6 +2142,8 @@ function AppMain() {
             style={{ paddingRight: SP.sm }}
           />
         </TouchableOpacity>
+
+        <View style={s.sep} />
 
         <View style={{ height: 60 }} />
       </ScrollView>
@@ -3080,6 +3082,7 @@ const s = StyleSheet.create({
     borderWidth: 1,
     borderColor: C.border,
     paddingHorizontal: SP.md,
+    paddingRight: SP.md - 2,
     paddingVertical: SP.sm + 2,
     marginTop: SP.sm,
   },
