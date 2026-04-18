@@ -726,6 +726,7 @@ function AppMain() {
   const [currentVolume, setCurrentVolume] = useState(0);
   const [isMuted, setIsMuted] = useState(false);
   const [stats, setStats] = useState(null);
+  const [optimisticPlaying, setOptimisticPlaying] = useState(null); // null = use server state
   const [visibleApps, setVisibleApps] = useState([]);
   const [isLoadingApps, setIsLoadingApps] = useState(false);
   const [showAllProcesses, setShowAllProcesses] = useState(false);
@@ -1004,9 +1005,19 @@ function AppMain() {
     }
   };
   const mediaControl = async (a) => {
-    await sendAction(`/media/${a}`);
-    // Refresh stats after media action to update now-playing title
-    setTimeout(() => getStats(), 800);
+    // Optimistic toggle for play/pause — instant UI, server confirms later
+    if (a === "playpause") {
+      const currentlyPlaying =
+        stats?.active_media && stats.active_media !== "Not Playing";
+      setOptimisticPlaying(currentlyPlaying ? false : true);
+    }
+    sendAction(`/media/${a}`);
+    // Check real state after delay; clear optimistic override
+    setTimeout(async () => {
+      const d = await sendAction("/stats", "GET");
+      if (d?.cpu_percent !== undefined) setStats(d);
+      setOptimisticPlaying(null);
+    }, 3000);
   };
   const captureScreen = async (url = null, pin = null) => {
     setIsCapturing(true);
@@ -1975,12 +1986,31 @@ function AppMain() {
             >
               <Ionicons
                 name={
-                  stats?.active_media && stats.active_media !== "Not Playing"
+                  (
+                    optimisticPlaying !== null
+                      ? optimisticPlaying
+                      : stats?.active_media &&
+                        stats.active_media !== "Not Playing"
+                  )
                     ? "pause"
                     : "play"
                 }
-                size={28}
+                size={37}
                 color={C.text}
+                style={
+                  (
+                    optimisticPlaying !== null
+                      ? optimisticPlaying
+                      : stats?.active_media &&
+                        stats.active_media !== "Not Playing"
+                  )
+                    ? {
+                        paddingLeft: 0,
+                      }
+                    : {
+                        paddingLeft: 5,
+                      }
+                }
               />
             </TouchableOpacity>
             <TouchableOpacity
