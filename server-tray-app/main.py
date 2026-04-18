@@ -579,23 +579,65 @@ def get_stats():
 class ShortcutRequest(BaseModel):
     shortcut: str  # alt-tab, alt-shift-tab, ctrl-s, win-d
 
+# Precise key mapping using ctypes to avoid pyautogui generic key bugs
+# Map format: "key": (VirtualKeyCode, HardwareScanCode, IsExtendedKey)
+VK_MAP = {
+    "altleft": (0xA4, 0x38, 0),
+    "shiftleft": (0xA0, 0x2A, 0),
+    "ctrlleft": (0xA2, 0x1D, 0),
+    "winleft": (0x5B, 0x5B, 1),
+    "tab": (0x09, 0x0F, 0),
+    "left": (0x25, 0x4B, 1),
+    "c": (0x43, 0x2E, 0),
+    "s": (0x53, 0x1F, 0),
+    "d": (0x44, 0x20, 0),
+}
+KEYEVENTF_KEYUP = 0x0002
+KEYEVENTF_EXTENDEDKEY = 0x0001
+
+def execute_hotkey(*keys):
+    pressed = []
+    
+    # 1. Press each key sequentially, waiting before pressing the next
+    for key in keys:
+        mapping = VK_MAP.get(key)
+        if mapping:
+            vk, scan, ext = mapping
+            flags = 0
+            if ext:
+                flags |= KEYEVENTF_EXTENDEDKEY
+            ctypes.windll.user32.keybd_event(vk, scan, flags, 0)
+            pressed.append((vk, scan, ext))
+            time.sleep(0.052)  # Delay between individual down strokes
+            
+    # 2. Hold everything together slightly to ensure the OS registers the combo
+    time.sleep(0.052)
+    
+    # 3. Release in reverse order with delays
+    for vk, scan, ext in reversed(pressed):
+        flags = KEYEVENTF_KEYUP
+        if ext:
+            flags |= KEYEVENTF_EXTENDEDKEY
+        ctypes.windll.user32.keybd_event(vk, scan, flags, 0)
+        time.sleep(0.052)
+
 
 @app.post("/shortcut", dependencies=[Depends(verify_pin)])
 def send_shortcut(req: ShortcutRequest):
     shortcut = req.shortcut.lower().strip()
     try:
         if shortcut == "alt-tab":
-            pyautogui.hotkey("altleft", "tab")
+            execute_hotkey("altleft", "tab")
         elif shortcut == "alt-shift-tab":
-            pyautogui.hotkey("altleft", "shiftleft", "tab")
+            execute_hotkey("altleft", "shiftleft", "tab")
         elif shortcut == "ctrl-shift-left":
-            pyautogui.hotkey("ctrlleft", "shiftleft", "left")
+            execute_hotkey("ctrlleft", "shiftleft", "left")
         elif shortcut == "ctrl-c":
-            pyautogui.hotkey("ctrlleft", "c")
+            execute_hotkey("ctrlleft", "c")
         elif shortcut == "ctrl-s":
-            pyautogui.hotkey("ctrlleft", "s")
+            execute_hotkey("ctrlleft", "s")
         elif shortcut == "win-d":
-            pyautogui.hotkey("winleft", "d")
+            execute_hotkey("winleft", "d")
         else:
             return {"error": f"Unknown shortcut: {shortcut}"}
         print(f"[SHORTCUT] Sent: {shortcut}")
@@ -629,7 +671,7 @@ def set_clipboard(req: ClipboardRequest):
 def panic_button():
     """Instantly show desktop (Win+D) — hide everything."""
     try:
-        pyautogui.hotkey("winleft", "d")
+        execute_hotkey("winleft", "d")
         print("[PANIC] Desktop shown")
         return {"status": "success", "message": "Desktop shown"}
     except Exception as e:
