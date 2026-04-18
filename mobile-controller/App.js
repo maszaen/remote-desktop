@@ -13,6 +13,7 @@ import {
   Dimensions,
   Platform,
   ActivityIndicator,
+  Switch,
   Modal,
   KeyboardAvoidingView,
   Animated,
@@ -743,6 +744,12 @@ function AppMain() {
   const [volumeSheetOpen, setVolumeSheetOpen] = useState(false);
   const [powerSheetOpen, setPowerSheetOpen] = useState(false);
   const [shortcutSheetOpen, setShortcutSheetOpen] = useState(false);
+  const [connectivitySheetOpen, setConnectivitySheetOpen] = useState(false);
+
+  const [wifiActive, setWifiActive] = useState(false);
+  const [btActive, setBtActive] = useState(false);
+  const [wifiLoading, setWifiLoading] = useState(false);
+  const [btLoading, setBtLoading] = useState(false);
 
   // Live Screen (auto-refresh 1fps in image modal)
   const [liveScreenActive, setLiveScreenActive] = useState(false);
@@ -915,7 +922,7 @@ function AppMain() {
       getStats(url, savedPin);
       captureScreen(url, savedPin);
       fetchApps(url, savedPin);
-      fetchApps(url, savedPin);
+      fetchConnectivity(url, savedPin);
     } catch (e) {
     } finally {
       setLoadingAction("");
@@ -939,7 +946,7 @@ function AppMain() {
       getStats(url, inputPin);
       captureScreen(url, inputPin);
       fetchApps(url, inputPin);
-      fetchApps(url, inputPin);
+      fetchConnectivity(url, inputPin);
     } else
       Alert.alert("Pairing Failed", "Incorrect Code or Server unreachable.");
     setLoadingAction("");
@@ -982,6 +989,9 @@ function AppMain() {
     setVisibleApps([]);
     setScreenshot(null);
     setActivePin(null);
+    setConnectivitySheetOpen(false);
+    setWifiActive(false);
+    setBtActive(false);
 
     setLiveScreenActive(false);
     if (liveScreenRef.current) {
@@ -1010,6 +1020,10 @@ function AppMain() {
       }
       if (shortcutSheetOpen) {
         setShortcutSheetOpen(false);
+        return true;
+      }
+      if (connectivitySheetOpen) {
+        setConnectivitySheetOpen(false);
         return true;
       }
       if (isScanningQR) {
@@ -1214,6 +1228,32 @@ function AppMain() {
     await sendAction("/shortcut", "POST", { shortcut });
   };
 
+  // ── Connectivity ──
+  const fetchConnectivity = async (url = null, pin = null) => {
+    const d = await sendAction("/connectivity", "GET", null, url, pin);
+    if (d && d.wifi !== undefined) {
+      setWifiActive(d.wifi);
+      setBtActive(d.bluetooth);
+    }
+  };
+
+  const toggleRadio = async (type) => {
+    if (type === "wifi") setWifiLoading(true);
+    else setBtLoading(true);
+
+    const isCurrentlyActive = type === "wifi" ? wifiActive : btActive;
+    const action = isCurrentlyActive ? "off" : "on";
+    const r = await sendAction(`/connectivity/${type}/${action}`, "POST");
+
+    if (r && !r.error && r.status === "success") {
+      if (type === "wifi") setWifiActive(r.wifi);
+      else setBtActive(r.bluetooth);
+    }
+
+    if (type === "wifi") setWifiLoading(false);
+    else setBtLoading(false);
+  };
+
   // ── Panic Button ──
   const handlePanic = async () => {
     await sendAction("/panic");
@@ -1268,6 +1308,7 @@ function AppMain() {
         fetchApps(),
         getStats(),
         captureScreen(),
+        fetchConnectivity(),
       ]);
     } catch (e) {
       console.warn("Refresh error", e);
@@ -1286,6 +1327,7 @@ function AppMain() {
         getStats();
         fetchApps();
         fetchVolume();
+        fetchConnectivity();
       }, 500);
     }
     if (!isConnected) {
@@ -2120,6 +2162,29 @@ function AppMain() {
         </TouchableOpacity>
 
         <View style={s.sep} />
+
+        {/* Connectivity row */}
+        <TouchableOpacity
+          style={s.menuRow}
+          onPress={() => setConnectivitySheetOpen(true)}
+          activeOpacity={0.6}
+        >
+          <View style={[s.menuRowIcon, { backgroundColor: C.successDim }]}>
+            <Ionicons name="wifi" size={18} color={C.success} />
+          </View>
+          <View style={s.menuRowBody}>
+            <Text style={s.menuRowTitle}>Connectivity</Text>
+            <Text style={s.menuRowSub}>Wi-Fi & Bluetooth</Text>
+          </View>
+          <Ionicons
+            name="arrow-forward-outline"
+            size={20}
+            color={C.muted}
+            style={{ paddingRight: SP.sm }}
+          />
+        </TouchableOpacity>
+
+        <View style={s.sep} />
         {/* Power row */}
         <TouchableOpacity
           style={s.menuRow}
@@ -2458,6 +2523,62 @@ function AppMain() {
               <Text style={s.powerRowSub}>Show Desktop or Minimize Apps</Text>
             </View>
           </TouchableOpacity>
+        </View>
+      </BottomSheet>
+
+      {/* ═══ CONNECTIVITY MODAL ═══ */}
+      <BottomSheet
+        visible={connectivitySheetOpen}
+        onClose={() => setConnectivitySheetOpen(false)}
+        title="Connectivity"
+        subtitle={`Turn on / off connectivity`}
+      >
+        <View style={{ gap: SP.md }}>
+          <View style={s.powerRow}>
+            <View style={[s.powerRowIcon, { backgroundColor: C.successDim }]}>
+              <Ionicons name="wifi" size={22} color={C.success} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={s.powerRowTitle}>Wi-Fi</Text>
+              <Text style={s.powerRowSub}>
+                {wifiActive ? "Connected/On" : "Disabled/Off"}
+              </Text>
+            </View>
+            {wifiLoading ? (
+              <ActivityIndicator color={C.primary} />
+            ) : (
+              <Switch
+                value={wifiActive}
+                onValueChange={() => toggleRadio("wifi")}
+                trackColor={{ false: C.surface, true: C.success }}
+                thumbColor={C.text}
+              />
+            )}
+          </View>
+
+          <View style={[s.sep, { marginLeft: 56, marginVertical: 0 }]} />
+
+          <View style={s.powerRow}>
+            <View style={[s.powerRowIcon, { backgroundColor: "#007AFF30" }]}>
+              <Ionicons name="bluetooth" size={22} color="#007AFF" />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={s.powerRowTitle}>Bluetooth</Text>
+              <Text style={s.powerRowSub}>
+                {btActive ? "Connected/On" : "Disabled/Off"}
+              </Text>
+            </View>
+            {btLoading ? (
+              <ActivityIndicator color={C.primary} />
+            ) : (
+              <Switch
+                value={btActive}
+                onValueChange={() => toggleRadio("bluetooth")}
+                trackColor={{ false: C.surface, true: C.success }}
+                thumbColor={C.text}
+              />
+            )}
+          </View>
         </View>
       </BottomSheet>
 

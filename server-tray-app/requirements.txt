@@ -6,3 +6,5 @@ pyautogui
 psutil
 pystray
 Pillow
+winrt-Windows.Devices.Radios
+winrt-Windows.Foundation.Collections

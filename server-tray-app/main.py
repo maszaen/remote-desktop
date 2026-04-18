@@ -215,9 +215,6 @@ def capture_screen(quality: str = "low"):
         # Sample some pixels to verify real content
         center_px = screenshot.getpixel((w // 2, h // 2))
         corner_px = screenshot.getpixel((10, 10))
-        print(
-            f"[SCREEN] quality={quality}, size={w}x{h}, mode={mode}, center_px={center_px}, corner_px={corner_px}"
-        )
         if quality == "high":
             # Cap at 1920px width for mobile
             if w > 1920:
@@ -232,9 +229,7 @@ def capture_screen(quality: str = "low"):
             screenshot.save(img_byte_arr, format="JPEG", quality=40)
             mime = "image/jpeg"
         size_kb = len(img_byte_arr.getvalue()) / 1024
-        print(
-            f"[SCREEN] output_size={size_kb:.1f}KB, format={'PNG' if quality == 'high' else 'JPEG'}"
-        )
+
         img_b64 = base64.b64encode(img_byte_arr.getvalue()).decode("utf-8")
         return {"status": "success", "image": f"data:{mime};base64,{img_b64}"}
     except Exception as e:
@@ -638,6 +633,59 @@ def power_control(action: str):
         }
     else:
         return {"error": "unknown action"}
+
+
+# ── Connectivity (Wi-Fi & Bluetooth) ──
+@app.get("/connectivity", dependencies=[Depends(verify_pin)])
+async def get_connectivity():
+    try:
+        from winrt.windows.devices.radios import Radio, RadioKind, RadioState
+
+        radios = await Radio.get_radios_async()
+        status = {"wifi": False, "bluetooth": False}
+        for r in radios:
+            is_on = r.state == RadioState.ON
+            if r.kind == RadioKind.WI_FI:
+                status["wifi"] = is_on
+            elif r.kind == RadioKind.BLUETOOTH:
+                status["bluetooth"] = is_on
+        return status
+    except Exception as e:
+        print(f"[CONNECTIVITY] Error: {e}")
+        return {"error": str(e)}
+
+
+@app.post("/connectivity/{radio_type}/{action}", dependencies=[Depends(verify_pin)])
+async def toggle_connectivity(radio_type: str, action: str):
+    try:
+        from winrt.windows.devices.radios import Radio, RadioKind, RadioState
+
+        radios = await Radio.get_radios_async()
+
+        target_kind = None
+        if radio_type == "wifi":
+            target_kind = RadioKind.WI_FI
+        elif radio_type == "bluetooth":
+            target_kind = RadioKind.BLUETOOTH
+        else:
+            return {"error": "Invalid radio type. Use 'wifi' or 'bluetooth'."}
+
+        target_state = RadioState.ON if action == "on" else RadioState.OFF
+
+        found = False
+        for r in radios:
+            if r.kind == target_kind:
+                found = True
+                await r.set_state_async(target_state)
+                break
+
+        if not found:
+            return {"error": f"{radio_type} radio not found."}
+
+        return {"status": "success", radio_type: action == "on"}
+    except Exception as e:
+        print(f"[CONNECTIVITY] Error: {e}")
+        return {"error": str(e)}
 
 
 # --- Tray Icon ---
