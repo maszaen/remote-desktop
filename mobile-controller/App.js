@@ -846,10 +846,20 @@ function AppMain() {
     }
     setHiResLoading(false);
   };
-  const openImageDetail = () => {
-    setHiResImage(screenshot); // start with current image
+  const openImageDetail = async () => {
+    // Fetch hi-res BEFORE opening the modal to prevent low→high flickering
+    setHiResLoading(true);
+    const d = await sendAction("/screen?quality=high", "GET");
+    if (d?.image) {
+      setHiResImage(d.image);
+      setScreenshot(d.image);
+      setScreenshotKey(prev => prev + 1);
+    } else {
+      // Fallback to current thumbnail if hi-res fails
+      setHiResImage(screenshot);
+    }
+    setHiResLoading(false);
     setImageModalOpen(true);
-    captureHiRes(); // fetch hi-res in background
   };
   const getStats = async (url = null, pin = null) => {
     setLoadingAction("stats");
@@ -1378,7 +1388,7 @@ function AppMain() {
               </View>
             )}
             {screenshot ? (
-              <TouchableOpacity activeOpacity={0.85} onPress={openImageDetail}>
+              <TouchableOpacity activeOpacity={0.85} onPress={openImageDetail} disabled={hiResLoading}>
                 <Image
                   key={screenshotKey}
                   source={{ uri: screenshot }}
@@ -1386,8 +1396,17 @@ function AppMain() {
                   resizeMode="contain"
                 />
                 <View style={s.screenZoomHint}>
-                  <Ionicons name="expand-outline" size={14} color={C.sub} />
-                  <Text style={{ fontSize: F.xs, color: C.sub, marginLeft: 4, fontWeight: '600' }}>Tap to zoom</Text>
+                  {hiResLoading ? (
+                    <>
+                      <ActivityIndicator size={12} color={C.primary} />
+                      <Text style={{ fontSize: F.xs, color: C.primary, marginLeft: 4, fontWeight: '600' }}>Loading HD…</Text>
+                    </>
+                  ) : (
+                    <>
+                      <Ionicons name="expand-outline" size={14} color={C.sub} />
+                      <Text style={{ fontSize: F.xs, color: C.sub, marginLeft: 4, fontWeight: '600' }}>Tap to zoom</Text>
+                    </>
+                  )}
                 </View>
               </TouchableOpacity>
             ) : (

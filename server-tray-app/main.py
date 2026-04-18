@@ -17,6 +17,15 @@ from pycaw.pycaw import AudioUtilities
 from comtypes import CoInitialize
 from fastapi.middleware.cors import CORSMiddleware
 
+# Enable Per-Monitor DPI Awareness so screenshots capture at native resolution
+try:
+    ctypes.windll.shcore.SetProcessDpiAwareness(2)  # PROCESS_PER_MONITOR_DPI_AWARE
+except Exception:
+    try:
+        ctypes.windll.user32.SetProcessDPIAware()  # fallback for older Windows
+    except Exception:
+        pass
+
 CONFIG_DIR = os.path.join(os.environ.get('LOCALAPPDATA', os.path.expanduser('~')), 'NexusRemote')
 CONFIG_FILE = os.path.join(CONFIG_DIR, 'nexus_trusted.json')
 
@@ -190,18 +199,34 @@ def capture_screen(quality: str = "low"):
     try:
         import base64
         screenshot = pyautogui.screenshot()
+        w, h = screenshot.size
+        mode = screenshot.mode
+        # Sample some pixels to verify real content
+        center_px = screenshot.getpixel((w // 2, h // 2))
+        corner_px = screenshot.getpixel((10, 10))
+        print(f"[SCREEN] quality={quality}, size={w}x{h}, mode={mode}, center_px={center_px}, corner_px={corner_px}")
         if quality == "high":
-            # Full native resolution, high quality for detail viewing
+            # Save debug copy to disk for inspection
+            debug_path = os.path.join(os.path.dirname(__file__), "debug_screenshot.png")
+            screenshot.save(debug_path, format="PNG")
+            debug_size = os.path.getsize(debug_path) / 1024
+            print(f"[SCREEN] debug saved to {debug_path} ({debug_size:.1f}KB)")
+            # Full native resolution, lossless PNG for sharp text/details
             img_byte_arr = io.BytesIO()
-            screenshot.save(img_byte_arr, format="JPEG", quality=85)
+            screenshot.save(img_byte_arr, format="PNG")
+            mime = "image/png"
         else:
             # Thumbnail for quick preview
             screenshot.thumbnail((1280, 720))
             img_byte_arr = io.BytesIO()
             screenshot.save(img_byte_arr, format="JPEG", quality=40)
+            mime = "image/jpeg"
+        size_kb = len(img_byte_arr.getvalue()) / 1024
+        print(f"[SCREEN] output_size={size_kb:.1f}KB, format={'PNG' if quality == 'high' else 'JPEG'}")
         img_b64 = base64.b64encode(img_byte_arr.getvalue()).decode('utf-8')
-        return {"status": "success", "image": f"data:image/jpeg;base64,{img_b64}"}
+        return {"status": "success", "image": f"data:{mime};base64,{img_b64}"}
     except Exception as e:
+        print(f"[SCREEN] ERROR: {e}")
         return {"error": str(e)}
 
 
