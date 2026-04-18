@@ -727,6 +727,9 @@ function AppMain() {
   const [isMuted, setIsMuted] = useState(false);
   const [stats, setStats] = useState(null);
   const [optimisticPlaying, setOptimisticPlaying] = useState(null); // null = use server state
+  const [mediaFetching, setMediaFetching] = useState(false);
+  const [mediaCooldown, setMediaCooldown] = useState(false);
+  const mediaTimeoutRef = useRef(null);
   const [visibleApps, setVisibleApps] = useState([]);
   const [isLoadingApps, setIsLoadingApps] = useState(false);
   const [showAllProcesses, setShowAllProcesses] = useState(false);
@@ -1005,18 +1008,31 @@ function AppMain() {
     }
   };
   const mediaControl = async (a) => {
-    // Optimistic toggle for play/pause — instant UI, server confirms later
+    // Cooldown guard — prevent spam
+    if (mediaCooldown) return;
+    setMediaCooldown(true);
+    setTimeout(() => setMediaCooldown(false), 4000);
+
+    // Cancel any pending server check from a previous press
+    if (mediaTimeoutRef.current) clearTimeout(mediaTimeoutRef.current);
+
+    // Optimistic toggle for play/pause
     if (a === "playpause") {
       const currentlyPlaying =
         stats?.active_media && stats.active_media !== "Not Playing";
-      setOptimisticPlaying(currentlyPlaying ? false : true);
+      setOptimisticPlaying(!currentlyPlaying);
     }
+
+    setMediaFetching(true);
     sendAction(`/media/${a}`);
-    // Check real state after delay; clear optimistic override
-    setTimeout(async () => {
+
+    // Confirm real state after delay
+    mediaTimeoutRef.current = setTimeout(async () => {
       const d = await sendAction("/stats", "GET");
       if (d?.cpu_percent !== undefined) setStats(d);
       setOptimisticPlaying(null);
+      setMediaFetching(false);
+      mediaTimeoutRef.current = null;
     }, 3000);
   };
   const captureScreen = async (url = null, pin = null) => {
@@ -1954,7 +1970,7 @@ function AppMain() {
               <MarqueeText
                 style={[
                   s.mediaHeroTitle,
-                  marqueeScrolling && { paddingLeft: 20 }, // ← aktif kalau teks panjang
+                  marqueeScrolling && { paddingLeft: 20 },
                 ]}
                 onScrollChange={setMarqueeScrolling}
               >
@@ -1967,21 +1983,23 @@ function AppMain() {
                   { color: C.muted, textAlign: "center" },
                 ]}
               >
-                Not Playing
+                {mediaFetching ? "Fetching..." : "Not Playing"}
               </Text>
             )}
           </View>
           <View style={s.mediaCluster}>
             <TouchableOpacity
-              style={s.mediaBtnSm}
+              style={[s.mediaBtnSm, mediaCooldown && { opacity: 0.4 }]}
               onPress={() => mediaControl("prev")}
+              disabled={mediaCooldown}
               activeOpacity={0.7}
             >
               <Ionicons name="play-skip-back" size={20} color={C.text} />
             </TouchableOpacity>
             <TouchableOpacity
-              style={s.mediaBtnLg}
+              style={[s.mediaBtnLg, mediaCooldown && { opacity: 0.6 }]}
               onPress={() => mediaControl("playpause")}
+              disabled={mediaCooldown}
               activeOpacity={0.8}
             >
               <Ionicons
@@ -2014,8 +2032,9 @@ function AppMain() {
               />
             </TouchableOpacity>
             <TouchableOpacity
-              style={s.mediaBtnSm}
+              style={[s.mediaBtnSm, mediaCooldown && { opacity: 0.4 }]}
               onPress={() => mediaControl("next")}
+              disabled={mediaCooldown}
               activeOpacity={0.7}
             >
               <Ionicons name="play-skip-forward" size={20} color={C.text} />
@@ -2029,13 +2048,13 @@ function AppMain() {
         visible={volumeSheetOpen}
         onClose={() => setVolumeSheetOpen(false)}
         title="System Volume"
-        subtitle={
-          isMuted
-            ? "Muted"
-            : currentVolume !== undefined
-              ? `${currentVolume}%`
-              : "Loading..."
-        }
+        // subtitle={
+        //   isMuted
+        //     ? "Muted"
+        //     : currentVolume !== undefined
+        //       ? `${currentVolume}%`
+        //       : "Loading..."
+        // }
       >
         <View style={s.sheetContent}>
           {/* Large volume display */}
@@ -2908,6 +2927,7 @@ const s = StyleSheet.create({
     alignItems: "center",
     gap: SP.sm + 2,
     paddingVertical: SP.sm,
+    paddingHorizontal: SP.xl,
   },
   volBarWrap: {
     flex: 1,
