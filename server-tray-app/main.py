@@ -4,6 +4,7 @@ import io
 import threading
 import psutil
 import pyautogui
+import pyperclip
 import uvicorn
 import socket
 import subprocess
@@ -110,6 +111,9 @@ def get_volume_interface():
 
 class VolumeControl(BaseModel):
     volume: int
+
+class ClipboardRequest(BaseModel):
+    content: str
 
 
 # Public Endpoint for Discovery
@@ -581,18 +585,42 @@ def send_shortcut(req: ShortcutRequest):
     shortcut = req.shortcut.lower().strip()
     try:
         if shortcut == "alt-tab":
-            pyautogui.hotkey("alt", "tab")
+            pyautogui.hotkey("altleft", "tab")
         elif shortcut == "alt-shift-tab":
-            pyautogui.hotkey("alt", "shift", "tab")
+            pyautogui.hotkey("altleft", "shiftleft", "tab")
+        elif shortcut == "ctrl-shift-left":
+            pyautogui.hotkey("ctrlleft", "shiftleft", "left")
+        elif shortcut == "ctrl-c":
+            pyautogui.hotkey("ctrlleft", "c")
         elif shortcut == "ctrl-s":
-            pyautogui.hotkey("ctrl", "s")
+            pyautogui.hotkey("ctrlleft", "s")
         elif shortcut == "win-d":
-            pyautogui.hotkey("win", "d")
+            pyautogui.hotkey("winleft", "d")
         else:
             return {"error": f"Unknown shortcut: {shortcut}"}
         print(f"[SHORTCUT] Sent: {shortcut}")
         return {"status": "success", "shortcut": shortcut}
     except Exception as e:
+        return {"error": str(e)}
+
+# ── Clipboard Sync ──
+@app.get("/clipboard", dependencies=[Depends(verify_pin)])
+def get_clipboard():
+    try:
+        content = pyperclip.paste()
+        return {"status": "success", "content": content}
+    except Exception as e:
+        print(f"[CLIPBOARD] Error reading: {e}")
+        return {"error": str(e)}
+
+@app.post("/clipboard", dependencies=[Depends(verify_pin)])
+def set_clipboard(req: ClipboardRequest):
+    try:
+        pyperclip.copy(req.content)
+        print("[CLIPBOARD] Written from remote")
+        return {"status": "success"}
+    except Exception as e:
+        print(f"[CLIPBOARD] Error writing: {e}")
         return {"error": str(e)}
 
 
@@ -601,7 +629,7 @@ def send_shortcut(req: ShortcutRequest):
 def panic_button():
     """Instantly show desktop (Win+D) — hide everything."""
     try:
-        pyautogui.hotkey("win", "d")
+        pyautogui.hotkey("winleft", "d")
         print("[PANIC] Desktop shown")
         return {"status": "success", "message": "Desktop shown"}
     except Exception as e:

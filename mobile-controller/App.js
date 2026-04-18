@@ -25,6 +25,7 @@ import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import { LinearGradient } from "expo-linear-gradient";
+import * as Clipboard from "expo-clipboard";
 import {
   GestureHandlerRootView,
   GestureDetector,
@@ -1247,8 +1248,12 @@ function AppMain() {
         "This will disable Wi-Fi on your PC. You will lose connection to Nexus Remote and won't be able to reconnect until Wi-Fi is turned back on manually.",
         [
           { text: "Cancel", style: "cancel" },
-          { text: "Turn Off", style: "destructive", onPress: () => executeToggle(type, action) },
-        ]
+          {
+            text: "Turn Off",
+            style: "destructive",
+            onPress: () => executeToggle(type, action),
+          },
+        ],
       );
     } else {
       executeToggle(type, action);
@@ -1268,6 +1273,35 @@ function AppMain() {
 
     if (type === "wifi") setWifiLoading(false);
     else setBtLoading(false);
+  };
+
+  const handleSendClipboard = async () => {
+    try {
+      const text = await Clipboard.getStringAsync();
+      if (!text) return Alert.alert("Empty Clipboard", "Nothing to send.");
+      const r = await sendAction("/clipboard", "POST", { content: text });
+      if (r && !r.error && r.status === "success") {
+        Alert.alert("Sent", "Clipboard text sent to PC.");
+      } else {
+        Alert.alert("Error", "Failed to send clipboard.");
+      }
+    } catch (e) {
+      Alert.alert("Error", e.message);
+    }
+  };
+
+  const handleReceiveClipboard = async () => {
+    try {
+      const r = await sendAction("/clipboard", "GET");
+      if (r && !r.error && r.status === "success" && r.content) {
+        await Clipboard.setStringAsync(r.content);
+        Alert.alert("Received", "PC clipboard copied to your phone.");
+      } else {
+        Alert.alert("Empty or Error", "Could not get clipboard from PC.");
+      }
+    } catch (e) {
+      Alert.alert("Error", e.message);
+    }
   };
 
   // ── Panic Button ──
@@ -2509,6 +2543,38 @@ function AppMain() {
 
           <TouchableOpacity
             style={s.powerRow}
+            onPress={() => sendShortcut("ctrl-shift-left")}
+            activeOpacity={0.7}
+          >
+            <View style={[s.powerRowIcon, { backgroundColor: C.primaryDim }]}>
+              <Ionicons name="arrow-back" size={22} color={C.primary} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={s.powerRowTitle}>Ctrl + Shift + Left</Text>
+              <Text style={s.powerRowSub}>Select Text Left</Text>
+            </View>
+          </TouchableOpacity>
+
+          <View style={[s.sep, { marginLeft: 56, marginVertical: 0 }]} />
+
+          <TouchableOpacity
+            style={s.powerRow}
+            onPress={() => sendShortcut("ctrl-c")}
+            activeOpacity={0.7}
+          >
+            <View style={[s.powerRowIcon, { backgroundColor: C.primaryDim }]}>
+              <Ionicons name="copy-outline" size={22} color={C.primary} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={s.powerRowTitle}>Ctrl + C</Text>
+              <Text style={s.powerRowSub}>Copy Selection</Text>
+            </View>
+          </TouchableOpacity>
+
+          <View style={[s.sep, { marginLeft: 56, marginVertical: 0 }]} />
+
+          <TouchableOpacity
+            style={s.powerRow}
             onPress={() => sendShortcut("ctrl-s")}
             activeOpacity={0.7}
           >
@@ -2550,41 +2616,50 @@ function AppMain() {
         subtitle={`Turn on / off connectivity`}
       >
         <View style={s.sheetContent}>
-          <TouchableOpacity 
-            style={s.powerRow} 
-            activeOpacity={0.7} 
+          <TouchableOpacity
+            style={s.powerRow}
+            activeOpacity={0.7}
             onPress={() => toggleRadio("wifi")}
             disabled={wifiLoading}
           >
             <View style={[s.powerRowIcon, { backgroundColor: C.successDim }]}>
-              <Ionicons name="wifi" size={22} color={C.success} />
+              <Ionicons name="wifi-outline" size={22} color={C.success} />
             </View>
             <View style={{ flex: 1 }}>
               <Text style={s.powerRowTitle}>Wi-Fi</Text>
               <Text style={s.powerRowSub}>
-                {wifiActive ? "Connected/On" : "Disabled/Off"}
+                {wifiActive ? "Connected / On" : "Disabled / Off"}
               </Text>
             </View>
             {wifiLoading ? (
               <ActivityIndicator color={C.primary} />
             ) : (
-              <View style={[
-                s.customToggle, 
-                wifiActive && { backgroundColor: C.success + "25", borderColor: C.success + "50" }
-              ]}>
-                <View style={[
-                  s.customToggleThumb, 
-                  wifiActive ? { backgroundColor: C.success, alignSelf: "flex-end" } : { backgroundColor: C.muted }
-                ]} />
+              <View
+                style={[
+                  s.customToggle,
+                  wifiActive && {
+                    backgroundColor: C.success + "25",
+                    borderColor: C.success + "50",
+                  },
+                ]}
+              >
+                <View
+                  style={[
+                    s.customToggleThumb,
+                    wifiActive
+                      ? { backgroundColor: C.success, alignSelf: "flex-end" }
+                      : { backgroundColor: C.muted },
+                  ]}
+                />
               </View>
             )}
           </TouchableOpacity>
 
           <View style={[s.sep, { marginLeft: 56, marginVertical: 0 }]} />
 
-          <TouchableOpacity 
-            style={s.powerRow} 
-            activeOpacity={0.7} 
+          <TouchableOpacity
+            style={s.powerRow}
+            activeOpacity={0.7}
             onPress={() => toggleRadio("bluetooth")}
             disabled={btLoading}
           >
@@ -2594,22 +2669,71 @@ function AppMain() {
             <View style={{ flex: 1 }}>
               <Text style={s.powerRowTitle}>Bluetooth</Text>
               <Text style={s.powerRowSub}>
-                {btActive ? "Connected/On" : "Disabled/Off"}
+                {btActive ? "Connected / On" : "Disabled / Off"}
               </Text>
             </View>
             {btLoading ? (
               <ActivityIndicator color={C.primary} />
             ) : (
-              <View style={[
-                s.customToggle, 
-                btActive && { backgroundColor: "#007AFF25", borderColor: "#007AFF50" }
-              ]}>
-                <View style={[
-                  s.customToggleThumb, 
-                  btActive ? { backgroundColor: "#007AFF", alignSelf: "flex-end" } : { backgroundColor: C.muted }
-                ]} />
+              <View
+                style={[
+                  s.customToggle,
+                  btActive && {
+                    backgroundColor: "#007AFF25",
+                    borderColor: "#007AFF50",
+                  },
+                ]}
+              >
+                <View
+                  style={[
+                    s.customToggleThumb,
+                    btActive
+                      ? { backgroundColor: "#007AFF", alignSelf: "flex-end" }
+                      : { backgroundColor: C.muted },
+                  ]}
+                />
               </View>
             )}
+          </TouchableOpacity>
+
+          <View style={[s.sep, { marginLeft: 56, marginVertical: 0 }]} />
+
+          <TouchableOpacity
+            style={s.powerRow}
+            activeOpacity={0.7}
+            onPress={handleSendClipboard}
+          >
+            <View style={[s.powerRowIcon, { backgroundColor: C.warningDim }]}>
+              <Ionicons
+                name="cloud-upload-outline"
+                size={22}
+                color={C.warning}
+              />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={s.powerRowTitle}>Send Clipboard</Text>
+              <Text style={s.powerRowSub}>Copy phone clipboard to PC</Text>
+            </View>
+          </TouchableOpacity>
+
+          <View style={[s.sep, { marginLeft: 56, marginVertical: 0 }]} />
+
+          <TouchableOpacity
+            style={s.powerRow}
+            activeOpacity={0.7}
+            onPress={handleReceiveClipboard}
+          >
+            <View style={[s.powerRowIcon, { backgroundColor: C.primaryDim }]}>
+              <Ionicons
+                name="cloud-download-outline"
+                size={22}
+                color={C.primary}
+              />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={s.powerRowTitle}>Receive Clipboard</Text>
+              <Text style={s.powerRowSub}>Copy PC clipboard to phone</Text>
+            </View>
           </TouchableOpacity>
         </View>
       </BottomSheet>
