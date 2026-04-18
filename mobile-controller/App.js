@@ -1238,11 +1238,27 @@ function AppMain() {
   };
 
   const toggleRadio = async (type) => {
+    const isCurrentlyActive = type === "wifi" ? wifiActive : btActive;
+    const action = isCurrentlyActive ? "off" : "on";
+
+    if (type === "wifi" && action === "off") {
+      Alert.alert(
+        "Turn Off Wi-Fi?",
+        "This will disable Wi-Fi on your PC. You will lose connection to Nexus Remote and won't be able to reconnect until Wi-Fi is turned back on manually.",
+        [
+          { text: "Cancel", style: "cancel" },
+          { text: "Turn Off", style: "destructive", onPress: () => executeToggle(type, action) },
+        ]
+      );
+    } else {
+      executeToggle(type, action);
+    }
+  };
+
+  const executeToggle = async (type, action) => {
     if (type === "wifi") setWifiLoading(true);
     else setBtLoading(true);
 
-    const isCurrentlyActive = type === "wifi" ? wifiActive : btActive;
-    const action = isCurrentlyActive ? "off" : "on";
     const r = await sendAction(`/connectivity/${type}/${action}`, "POST");
 
     if (r && !r.error && r.status === "success") {
@@ -2533,8 +2549,13 @@ function AppMain() {
         title="Connectivity"
         subtitle={`Turn on / off connectivity`}
       >
-        <View style={{ gap: SP.md }}>
-          <View style={s.powerRow}>
+        <View style={s.sheetContent}>
+          <TouchableOpacity 
+            style={s.powerRow} 
+            activeOpacity={0.7} 
+            onPress={() => toggleRadio("wifi")}
+            disabled={wifiLoading}
+          >
             <View style={[s.powerRowIcon, { backgroundColor: C.successDim }]}>
               <Ionicons name="wifi" size={22} color={C.success} />
             </View>
@@ -2547,18 +2568,26 @@ function AppMain() {
             {wifiLoading ? (
               <ActivityIndicator color={C.primary} />
             ) : (
-              <Switch
-                value={wifiActive}
-                onValueChange={() => toggleRadio("wifi")}
-                trackColor={{ false: C.surface, true: C.success }}
-                thumbColor={C.text}
-              />
+              <View style={[
+                s.customToggle, 
+                wifiActive && { backgroundColor: C.success + "25", borderColor: C.success + "50" }
+              ]}>
+                <View style={[
+                  s.customToggleThumb, 
+                  wifiActive ? { backgroundColor: C.success, alignSelf: "flex-end" } : { backgroundColor: C.muted }
+                ]} />
+              </View>
             )}
-          </View>
+          </TouchableOpacity>
 
           <View style={[s.sep, { marginLeft: 56, marginVertical: 0 }]} />
 
-          <View style={s.powerRow}>
+          <TouchableOpacity 
+            style={s.powerRow} 
+            activeOpacity={0.7} 
+            onPress={() => toggleRadio("bluetooth")}
+            disabled={btLoading}
+          >
             <View style={[s.powerRowIcon, { backgroundColor: "#007AFF30" }]}>
               <Ionicons name="bluetooth" size={22} color="#007AFF" />
             </View>
@@ -2571,14 +2600,17 @@ function AppMain() {
             {btLoading ? (
               <ActivityIndicator color={C.primary} />
             ) : (
-              <Switch
-                value={btActive}
-                onValueChange={() => toggleRadio("bluetooth")}
-                trackColor={{ false: C.surface, true: C.success }}
-                thumbColor={C.text}
-              />
+              <View style={[
+                s.customToggle, 
+                btActive && { backgroundColor: "#007AFF25", borderColor: "#007AFF50" }
+              ]}>
+                <View style={[
+                  s.customToggleThumb, 
+                  btActive ? { backgroundColor: "#007AFF", alignSelf: "flex-end" } : { backgroundColor: C.muted }
+                ]} />
+              </View>
             )}
-          </View>
+          </TouchableOpacity>
         </View>
       </BottomSheet>
 
@@ -3431,6 +3463,23 @@ const s = StyleSheet.create({
     marginBottom: 2,
   },
   powerRowSub: { fontSize: F.xs, fontWeight: "500", color: C.muted },
+
+  // ── Custom Toggle ──
+  customToggle: {
+    width: 50,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: C.elevated,
+    borderWidth: 1,
+    borderColor: C.border,
+    padding: 2,
+    justifyContent: "center",
+  },
+  customToggleThumb: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+  },
 
   // ── Panic Button ──
   panicBtn: {
