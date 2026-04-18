@@ -174,16 +174,7 @@ const ZoomableImage = ({ uri }) => {
   const originY = useSharedValue(0);
   const pinchActive = useSharedValue(0);
 
-  useEffect(() => {
-    scale.value = MIN_SCALE;
-    savedScale.value = MIN_SCALE;
-    offsetBaseX.value = 0;
-    offsetBaseY.value = 0;
-    panX.value = 0;
-    panY.value = 0;
-    pinchX.value = 0;
-    pinchY.value = 0;
-  }, [uri]);
+  const hasLoadedRef = useRef(false);
 
   const pinchGesture = Gesture.Pinch()
     .onStart((e) => {
@@ -388,6 +379,10 @@ const ZoomableImage = ({ uri }) => {
             source={{ uri }}
             style={{ width: IMG_W, height: IMG_H }}
             resizeMode="contain"
+            fadeDuration={hasLoadedRef.current ? 0 : 300}
+            onLoad={() => {
+              hasLoadedRef.current = true;
+            }}
           />
         </AnimatedRe.View>
       </View>
@@ -749,10 +744,6 @@ function AppMain() {
   const [powerSheetOpen, setPowerSheetOpen] = useState(false);
   const [shortcutSheetOpen, setShortcutSheetOpen] = useState(false);
 
-  // Mouse Jiggler
-  const [jigglerActive, setJigglerActive] = useState(false);
-  const [jigglerLoading, setJigglerLoading] = useState(false);
-
   // Live Screen (auto-refresh 1fps in image modal)
   const [liveScreenActive, setLiveScreenActive] = useState(false);
   const liveScreenRef = useRef(null);
@@ -924,7 +915,7 @@ function AppMain() {
       getStats(url, savedPin);
       captureScreen(url, savedPin);
       fetchApps(url, savedPin);
-      fetchJigglerStatus(url, savedPin);
+      fetchApps(url, savedPin);
     } catch (e) {
     } finally {
       setLoadingAction("");
@@ -948,7 +939,7 @@ function AppMain() {
       getStats(url, inputPin);
       captureScreen(url, inputPin);
       fetchApps(url, inputPin);
-      fetchJigglerStatus(url, inputPin);
+      fetchApps(url, inputPin);
     } else
       Alert.alert("Pairing Failed", "Incorrect Code or Server unreachable.");
     setLoadingAction("");
@@ -991,7 +982,7 @@ function AppMain() {
     setVisibleApps([]);
     setScreenshot(null);
     setActivePin(null);
-    setJigglerActive(false);
+
     setLiveScreenActive(false);
     if (liveScreenRef.current) {
       clearTimeout(liveScreenRef.current);
@@ -1046,7 +1037,7 @@ function AppMain() {
               text: "Yes",
               onPress: () => disconnect(),
             },
-          ]
+          ],
         );
         return true;
       }
@@ -1055,7 +1046,7 @@ function AppMain() {
 
     const backHandler = BackHandler.addEventListener(
       "hardwareBackPress",
-      backAction
+      backAction,
     );
 
     return () => backHandler.remove();
@@ -1218,19 +1209,6 @@ function AppMain() {
     ]);
   };
 
-  // ── Mouse Jiggler ──
-  const handleToggleJiggler = async () => {
-    setJigglerLoading(true);
-    const action = jigglerActive ? "stop" : "start";
-    const r = await sendAction(`/jiggler/${action}`);
-    if (r && !r.error) setJigglerActive(r.active);
-    setJigglerLoading(false);
-  };
-  const fetchJigglerStatus = async (url = null, pin = null) => {
-    const d = await sendAction("/jiggler", "GET", null, url, pin);
-    if (d && d.active !== undefined) setJigglerActive(d.active);
-  };
-
   // ── Keyboard Shortcuts ──
   const sendShortcut = async (shortcut) => {
     await sendAction("/shortcut", "POST", { shortcut });
@@ -1290,7 +1268,6 @@ function AppMain() {
         fetchApps(),
         getStats(),
         captureScreen(),
-        fetchJigglerStatus(),
       ]);
     } catch (e) {
       console.warn("Refresh error", e);
@@ -1309,7 +1286,6 @@ function AppMain() {
         getStats();
         fetchApps();
         fetchVolume();
-        fetchJigglerStatus();
       }, 500);
     }
     if (!isConnected) {
@@ -1524,7 +1500,12 @@ function AppMain() {
         </ScrollView>
 
         {/* Rename Modal */}
-        <Modal visible={renameTarget !== null} transparent animationType="fade" onRequestClose={() => setRenameTarget(null)}>
+        <Modal
+          visible={renameTarget !== null}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setRenameTarget(null)}
+        >
           <KeyboardAvoidingView
             behavior={Platform.OS === "ios" ? "padding" : "height"}
             style={s.modalOverlay}
@@ -1582,7 +1563,12 @@ function AppMain() {
         </Modal>
 
         {/* QR Camera */}
-        <Modal visible={isScanningQR} animationType="slide" transparent={false} onRequestClose={() => setIsScanningQR(false)}>
+        <Modal
+          visible={isScanningQR}
+          animationType="slide"
+          transparent={false}
+          onRequestClose={() => setIsScanningQR(false)}
+        >
           <View style={{ flex: 1, backgroundColor: "#000" }}>
             <CameraView
               style={StyleSheet.absoluteFillObject}
@@ -1614,7 +1600,12 @@ function AppMain() {
         </Modal>
 
         {/* Pairing Modal */}
-        <Modal visible={pairingModalOpen} transparent animationType="fade" onRequestClose={() => setPairingModalOpen(false)}>
+        <Modal
+          visible={pairingModalOpen}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setPairingModalOpen(false)}
+        >
           <KeyboardAvoidingView
             behavior={Platform.OS === "ios" ? "padding" : "height"}
             style={s.modalOverlay}
@@ -1791,11 +1782,11 @@ function AppMain() {
           activeOpacity={0.6}
         >
           <View style={[s.menuRowIcon, { backgroundColor: C.warningDim }]}>
-            <Ionicons name="keypad" size={18} color={C.warning} />
+            <Ionicons name="flash" size={18} color={C.warning} />
           </View>
           <View style={s.menuRowBody}>
             <Text style={s.menuRowTitle}>Keyboard Shortcuts</Text>
-            <Text style={s.menuRowSub}>Alt-Tab, Ctrl-S, Show Desktop</Text>
+            <Text style={s.menuRowSub}>Common shortcuts</Text>
           </View>
           <Ionicons
             name="arrow-forward-outline"
@@ -1803,36 +1794,6 @@ function AppMain() {
             color={C.muted}
             style={{ paddingRight: SP.sm }}
           />
-        </TouchableOpacity>
-        <View style={s.sep} />
-
-        {/* Mouse Jiggler row */}
-        <TouchableOpacity
-          style={s.menuRow}
-          onPress={handleToggleJiggler}
-          disabled={jigglerLoading}
-          activeOpacity={0.6}
-        >
-          <View style={[s.menuRowIcon, { backgroundColor: jigglerActive ? C.successDim : C.elevated }]}>
-            <MaterialCommunityIcons
-              name="cursor-move"
-              size={18}
-              color={jigglerActive ? C.success : C.sub}
-            />
-          </View>
-          <View style={s.menuRowBody}>
-            <Text style={s.menuRowTitle}>Mouse Jiggler</Text>
-            <Text style={[s.menuRowSub, jigglerActive && { color: C.success }]}>
-              {jigglerLoading ? "Loading..." : jigglerActive ? "Active — PC will stay awake" : "Off — tap to keep PC awake"}
-            </Text>
-          </View>
-          {jigglerLoading ? (
-            <ActivityIndicator size="small" color={C.primary} style={{ paddingRight: SP.sm }} />
-          ) : (
-            <View style={[s.jigglerToggle, jigglerActive && s.jigglerToggleActive]}>
-              <View style={[s.jigglerDot, jigglerActive && s.jigglerDotActive]} />
-            </View>
-          )}
         </TouchableOpacity>
         <View style={s.sep} />
 
@@ -2431,8 +2392,10 @@ function AppMain() {
               <Ionicons name="swap-horizontal" size={22} color={C.primary} />
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={s.powerRowTitle}>Next App</Text>
-              <Text style={s.powerRowSub}>Alt + Tab</Text>
+              <Text style={s.powerRowTitle}>Alt + Tab</Text>
+              <Text style={s.powerRowSub}>
+                Next App and Switch Between Apps
+              </Text>
             </View>
           </TouchableOpacity>
 
@@ -2444,11 +2407,16 @@ function AppMain() {
             activeOpacity={0.7}
           >
             <View style={[s.powerRowIcon, { backgroundColor: C.primaryDim }]}>
-              <Ionicons name="swap-horizontal" size={22} color={C.primary} style={{ transform: [{ scaleX: -1 }] }} />
+              <Ionicons
+                name="swap-horizontal"
+                size={22}
+                color={C.primary}
+                style={{ transform: [{ scaleX: -1 }] }}
+              />
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={s.powerRowTitle}>Previous App</Text>
-              <Text style={s.powerRowSub}>Alt + Shift + Tab</Text>
+              <Text style={s.powerRowTitle}>Alt + Shift + Tab</Text>
+              <Text style={s.powerRowSub}>Switch to Previous App</Text>
             </View>
           </TouchableOpacity>
 
@@ -2459,12 +2427,12 @@ function AppMain() {
             onPress={() => sendShortcut("ctrl-s")}
             activeOpacity={0.7}
           >
-            <View style={[s.powerRowIcon, { backgroundColor: C.successDim }]}>
-              <Ionicons name="save" size={22} color={C.success} />
+            <View style={[s.powerRowIcon, { backgroundColor: C.primaryDim }]}>
+              <Ionicons name="cloud-done-outline" size={22} color={C.primary} />
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={s.powerRowTitle}>Save</Text>
-              <Text style={s.powerRowSub}>Ctrl + S</Text>
+              <Text style={s.powerRowTitle}>Ctrl + S</Text>
+              <Text style={s.powerRowSub}>Save Current Progress</Text>
             </View>
           </TouchableOpacity>
 
@@ -2478,12 +2446,12 @@ function AppMain() {
             }}
             activeOpacity={0.7}
           >
-            <View style={[s.powerRowIcon, { backgroundColor: C.dangerDim }]}>
-              <Ionicons name="desktop" size={22} color={C.danger} />
+            <View style={[s.powerRowIcon, { backgroundColor: C.primaryDim }]}>
+              <Ionicons name="desktop-outline" size={22} color={C.primary} />
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={s.powerRowTitle}>Show Desktop</Text>
-              <Text style={s.powerRowSub}>Win + D — Hide all windows</Text>
+              <Text style={s.powerRowTitle}>Windows + D</Text>
+              <Text style={s.powerRowSub}>Show Desktop or Minimize Apps</Text>
             </View>
           </TouchableOpacity>
         </View>
@@ -2533,7 +2501,7 @@ function AppMain() {
                 style={s.imgModalCloseBtn}
                 activeOpacity={0.7}
               >
-                <Ionicons name="close" size={22} color={C.text} />
+                <Ionicons name="close" size={22} color={C.sub} />
               </TouchableOpacity>
               <Text style={s.imgModalTitle}>Desktop Capture</Text>
               <TouchableOpacity
@@ -2545,7 +2513,7 @@ function AppMain() {
                 <SpinningIcon
                   name="sync-outline"
                   size={16}
-                  color={C.text}
+                  color={C.sub}
                   spinning={hiResLoading}
                 />
               </TouchableOpacity>
@@ -2998,7 +2966,7 @@ const s = StyleSheet.create({
     paddingHorizontal: SP.md,
     paddingVertical: SP.sm,
     backgroundColor: "rgba(255,255,255,0.1)",
-    color: C.text,
+    color: C.sub,
   },
   imgModalRefreshBtn: {
     width: 40,
@@ -3066,11 +3034,11 @@ const s = StyleSheet.create({
   },
   activeWinValue: {
     flex: 1,
-    textAlign: "right",
+    textAlign: "left",
     fontSize: F.sm,
     color: C.primary,
     fontWeight: "600",
-    marginLeft: SP.md,
+    marginRight: SP.md,
   },
 
   // ── Usage Cards ──
@@ -3355,33 +3323,6 @@ const s = StyleSheet.create({
     fontWeight: "800",
     color: C.danger,
     letterSpacing: 0.5,
-  },
-
-  // ── Mouse Jiggler Toggle ──
-  jigglerToggle: {
-    width: 44,
-    height: 26,
-    borderRadius: 13,
-    backgroundColor: C.elevated,
-    borderWidth: 1,
-    borderColor: C.border,
-    padding: 2,
-    justifyContent: "center",
-    marginRight: SP.sm,
-  },
-  jigglerToggleActive: {
-    backgroundColor: C.success + "30",
-    borderColor: C.success + "50",
-  },
-  jigglerDot: {
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    backgroundColor: C.muted,
-  },
-  jigglerDotActive: {
-    backgroundColor: C.success,
-    alignSelf: "flex-end",
   },
 
   // ── Live Screen Button ──

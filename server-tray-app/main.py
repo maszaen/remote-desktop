@@ -52,26 +52,7 @@ PAIRING_CODE = str(random.randint(1000, 9999))
 TRUSTED_DEVICES = load_trusted_devices()
 IS_REMOTE_CONNECTED = False
 
-# Mouse Jiggler state
-MOUSE_JIGGLER_ACTIVE = False
-MOUSE_JIGGLER_THREAD = None
 
-def mouse_jiggler_loop():
-    """Background thread: nudge the cursor every 30s to keep PC awake."""
-    global MOUSE_JIGGLER_ACTIVE
-    direction = 1
-    while MOUSE_JIGGLER_ACTIVE:
-        try:
-            pyautogui.moveRel(direction, 0, duration=0.1)
-            direction *= -1  # alternate left/right so cursor stays put
-        except Exception:
-            pass
-        # Sleep in small increments so the thread can stop quickly
-        for _ in range(60):
-            if not MOUSE_JIGGLER_ACTIVE:
-                break
-            time.sleep(0.5)
-    print("[JIGGLER] Stopped")
 
 app = FastAPI(title="Nexus PC Remote")
 
@@ -554,28 +535,6 @@ def get_stats():
         return {"error": str(e)}
 
 
-# ── Mouse Jiggler ──
-@app.get("/jiggler", dependencies=[Depends(verify_pin)])
-def get_jiggler_status():
-    return {"active": MOUSE_JIGGLER_ACTIVE}
-
-
-@app.post("/jiggler/{action}", dependencies=[Depends(verify_pin)])
-def toggle_jiggler(action: str):
-    global MOUSE_JIGGLER_ACTIVE, MOUSE_JIGGLER_THREAD
-    if action == "start":
-        if not MOUSE_JIGGLER_ACTIVE:
-            MOUSE_JIGGLER_ACTIVE = True
-            MOUSE_JIGGLER_THREAD = threading.Thread(target=mouse_jiggler_loop, daemon=True)
-            MOUSE_JIGGLER_THREAD.start()
-            print("[JIGGLER] Started")
-        return {"status": "success", "active": True}
-    elif action == "stop":
-        MOUSE_JIGGLER_ACTIVE = False
-        print("[JIGGLER] Stopping...")
-        return {"status": "success", "active": False}
-    else:
-        return {"error": "unknown action. Use 'start' or 'stop'."}
 
 
 # ── Keyboard Shortcuts ──
