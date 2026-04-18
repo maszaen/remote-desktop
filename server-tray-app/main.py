@@ -27,31 +27,37 @@ except Exception:
     except Exception:
         pass
 
-CONFIG_DIR = os.path.join(os.environ.get('LOCALAPPDATA', os.path.expanduser('~')), 'NexusRemote')
-CONFIG_FILE = os.path.join(CONFIG_DIR, 'nexus_trusted.json')
+CONFIG_DIR = os.path.join(
+    os.environ.get("LOCALAPPDATA", os.path.expanduser("~")), "NexusRemote"
+)
+CONFIG_FILE = os.path.join(CONFIG_DIR, "nexus_trusted.json")
+
 
 def load_trusted_devices():
     if not os.path.exists(CONFIG_DIR):
         os.makedirs(CONFIG_DIR)
     import json
+
     if os.path.exists(CONFIG_FILE):
         try:
-            with open(CONFIG_FILE, 'r') as f:
+            with open(CONFIG_FILE, "r") as f:
                 return set(json.load(f))
         except:
             return set()
     return set()
 
+
 def save_trusted_devices(trusted_set):
     import json
-    with open(CONFIG_FILE, 'w') as f:
+
+    with open(CONFIG_FILE, "w") as f:
         json.dump(list(trusted_set), f)
+
 
 # PAIRING_CODE (OTP) is random EVERY START (As requested - "Ini Pairing Code, bukan PIN")
 PAIRING_CODE = str(random.randint(1000, 9999))
 TRUSTED_DEVICES = load_trusted_devices()
 IS_REMOTE_CONNECTED = False
-
 
 
 app = FastAPI(title="Nexus PC Remote")
@@ -64,10 +70,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
 # Auth Dependency
 def verify_pin(pin: str = Header(None), x_nexus_id: str = Header(None)):
     global PAIRING_CODE, TRUSTED_DEVICES, IS_REMOTE_CONNECTED
-    
+
     # Normalize ID (handle "null" string from JS)
     clean_id = x_nexus_id if (x_nexus_id and x_nexus_id != "null") else None
 
@@ -84,13 +91,13 @@ def verify_pin(pin: str = Header(None), x_nexus_id: str = Header(None)):
             TRUSTED_DEVICES.add(clean_id)
             save_trusted_devices(TRUSTED_DEVICES)
             print(f"New device paired: {clean_id}")
-            # Note: We do NOT rotate PAIRING_CODE here anymore to avoid 401 errors 
+            # Note: We do NOT rotate PAIRING_CODE here anymore to avoid 401 errors
             # on immediate subsequent requests from the same phone.
             # It will rotate naturally on the next server restart.
-        
+
         IS_REMOTE_CONNECTED = True
         return pin
-    
+
     print(f"Auth failed: PIN={pin}, ID={clean_id}")
     raise HTTPException(status_code=401, detail="Invalid Nexus Pairing Code")
 
@@ -201,13 +208,16 @@ def media_control(action: str):
 def capture_screen(quality: str = "low"):
     try:
         import base64
+
         screenshot = pyautogui.screenshot()
         w, h = screenshot.size
         mode = screenshot.mode
         # Sample some pixels to verify real content
         center_px = screenshot.getpixel((w // 2, h // 2))
         corner_px = screenshot.getpixel((10, 10))
-        print(f"[SCREEN] quality={quality}, size={w}x{h}, mode={mode}, center_px={center_px}, corner_px={corner_px}")
+        print(
+            f"[SCREEN] quality={quality}, size={w}x{h}, mode={mode}, center_px={center_px}, corner_px={corner_px}"
+        )
         if quality == "high":
             # Cap at 1920px width for mobile
             if w > 1920:
@@ -222,8 +232,10 @@ def capture_screen(quality: str = "low"):
             screenshot.save(img_byte_arr, format="JPEG", quality=40)
             mime = "image/jpeg"
         size_kb = len(img_byte_arr.getvalue()) / 1024
-        print(f"[SCREEN] output_size={size_kb:.1f}KB, format={'PNG' if quality == 'high' else 'JPEG'}")
-        img_b64 = base64.b64encode(img_byte_arr.getvalue()).decode('utf-8')
+        print(
+            f"[SCREEN] output_size={size_kb:.1f}KB, format={'PNG' if quality == 'high' else 'JPEG'}"
+        )
+        img_b64 = base64.b64encode(img_byte_arr.getvalue()).decode("utf-8")
         return {"status": "success", "image": f"data:{mime};base64,{img_b64}"}
     except Exception as e:
         print(f"[SCREEN] ERROR: {e}")
@@ -239,13 +251,11 @@ def capture_screen_raw(quality: str = "high", token: str = None):
     try:
         screenshot = pyautogui.screenshot()
         w, h = screenshot.size
-        print(f"[SCREEN/RAW] quality={quality}, native={w}x{h}")
         img_byte_arr = io.BytesIO()
         if quality == "high":
             # Cap at 1920 — sweet spot for mobile sharpness
             if w > 1920:
                 screenshot.thumbnail((1920, 1080))
-                print(f"[SCREEN/RAW] resized to {screenshot.size[0]}x{screenshot.size[1]}")
             screenshot.save(img_byte_arr, format="PNG")
             media_type = "image/png"
         else:
@@ -253,11 +263,10 @@ def capture_screen_raw(quality: str = "high", token: str = None):
             screenshot.save(img_byte_arr, format="JPEG", quality=40)
             media_type = "image/jpeg"
         size_kb = len(img_byte_arr.getvalue()) / 1024
-        print(f"[SCREEN/RAW] output={size_kb:.1f}KB")
         return Response(
             content=img_byte_arr.getvalue(),
             media_type=media_type,
-            headers={"Cache-Control": "no-cache"}
+            headers={"Cache-Control": "no-cache"},
         )
     except Exception as e:
         print(f"[SCREEN/RAW] ERROR: {e}")
@@ -337,10 +346,14 @@ def get_visible_apps():
 
         # Blacklist system/shell processes
         system_names = {
-            "explorer.exe", "searchhost.exe", "searchui.exe",
-            "shellexperiencehost.exe", "startmenuexperiencehost.exe",
-            "textinputhost.exe", "lockapp.exe",
-            "applicationframehost.exe"
+            "explorer.exe",
+            "searchhost.exe",
+            "searchui.exe",
+            "shellexperiencehost.exe",
+            "startmenuexperiencehost.exe",
+            "textinputhost.exe",
+            "lockapp.exe",
+            "applicationframehost.exe",
         }
 
         # Build per-process info
@@ -379,7 +392,7 @@ def get_visible_apps():
                 # Clean up process name for display
                 display_name = proc.name().replace(".exe", "")
 
-                is_focused = (pid == foreground_pid)
+                is_focused = pid == foreground_pid
 
                 app_map[pid] = {
                     "pid": pid,
@@ -393,7 +406,9 @@ def get_visible_apps():
                 continue
 
         # Sort: focused first, then by memory descending
-        apps = sorted(app_map.values(), key=lambda a: (-a["is_focused"], -a["memory_mb"]))
+        apps = sorted(
+            app_map.values(), key=lambda a: (-a["is_focused"], -a["memory_mb"])
+        )
 
         return {"apps": apps}
     except Exception as e:
@@ -423,17 +438,26 @@ def kill_process(req: KillRequest):
                 except:
                     pass
             proc.kill()
-            return {"status": "success", "message": f"Killed {proc_name} (PID: {req.pid})"}
+            return {
+                "status": "success",
+                "message": f"Killed {proc_name} (PID: {req.pid})",
+            }
         elif req.name:
             killed = 0
             for proc in psutil.process_iter(["pid", "name"]):
                 try:
-                    if proc.info["name"] and req.name.lower() in proc.info["name"].lower():
+                    if (
+                        proc.info["name"]
+                        and req.name.lower() in proc.info["name"].lower()
+                    ):
                         proc.kill()
                         killed += 1
                 except (psutil.NoSuchProcess, psutil.AccessDenied):
                     pass
-            return {"status": "success", "message": f"Killed {killed} process(es) matching '{req.name}'"}
+            return {
+                "status": "success",
+                "message": f"Killed {killed} process(es) matching '{req.name}'",
+            }
         else:
             return {"error": "Provide pid or name"}
     except psutil.NoSuchProcess:
@@ -448,6 +472,7 @@ def kill_process(req: KillRequest):
 def get_stats():
     try:
         import ctypes
+
         hwnd = ctypes.windll.user32.GetForegroundWindow()
         length = ctypes.windll.user32.GetWindowTextLengthW(hwnd)
         buff = ctypes.create_unicode_buffer(length + 1)
@@ -462,21 +487,27 @@ def get_stats():
         from comtypes import CoInitialize
         import ctypes
         from ctypes import wintypes
+
         CoInitialize()
         sessions = AudioUtilities.GetAllSessions()
-        
+
         playing_pids = set()
         playing_names = set()
         for s in sessions:
             if s.Process and s.State == 1:
                 name = s.Process.name()
-                if name.lower() not in ("explorer.exe", "lightingservice.exe", "msmpeng.exe"):
+                if name.lower() not in (
+                    "explorer.exe",
+                    "lightingservice.exe",
+                    "msmpeng.exe",
+                ):
                     playing_pids.add(s.Process.pid)
                     playing_names.add(name.lower())
 
         media_titles = []
         if playing_pids:
             user32 = ctypes.windll.user32
+
             def enum_windows_proc(hwnd, lParam):
                 if user32.IsWindowVisible(hwnd):
                     pid = ctypes.c_ulong()
@@ -487,17 +518,25 @@ def get_stats():
                             buff = ctypes.create_unicode_buffer(length + 1)
                             user32.GetWindowTextW(hwnd, buff, length + 1)
                             title = buff.value.strip()
-                            if title and title.lower() not in ("spotify premium", "spotify free", "spotify"):
+                            if title and title.lower() not in (
+                                "spotify premium",
+                                "spotify free",
+                                "spotify",
+                            ):
                                 media_titles.append(title)
                 return True
 
-            WNDENUMPROC = ctypes.WINFUNCTYPE(ctypes.c_bool, wintypes.HWND, wintypes.LPARAM)
+            WNDENUMPROC = ctypes.WINFUNCTYPE(
+                ctypes.c_bool, wintypes.HWND, wintypes.LPARAM
+            )
             user32.EnumWindows(WNDENUMPROC(enum_windows_proc), 0)
-            
+
             if media_titles:
                 active_media = " • ".join(set(media_titles))
             else:
-                active_media = " • ".join(set(n.replace(".exe", "").title() for n in playing_names))
+                active_media = " • ".join(
+                    set(n.replace(".exe", "").title() for n in playing_names)
+                )
     except Exception as e:
         active_media = "Unknown"
 
@@ -521,7 +560,9 @@ def get_stats():
                 processes.append(info)
             except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
                 pass
-        processes = sorted(processes, key=lambda p: p["memory_percent"] or 0, reverse=True)[:30]
+        processes = sorted(
+            processes, key=lambda p: p["memory_percent"] or 0, reverse=True
+        )[:30]
         return {
             "cpu_percent": cpu,
             "ram_percent": ram.percent,
@@ -529,30 +570,29 @@ def get_stats():
             "ram_total_gb": round(ram.total / (1024**3), 2),
             "top_processes": processes,
             "active_window": active_window,
-            "active_media": active_media
+            "active_media": active_media,
         }
     except Exception as e:
         return {"error": str(e)}
-
-
 
 
 # ── Keyboard Shortcuts ──
 class ShortcutRequest(BaseModel):
     shortcut: str  # alt-tab, alt-shift-tab, ctrl-s, win-d
 
+
 @app.post("/shortcut", dependencies=[Depends(verify_pin)])
 def send_shortcut(req: ShortcutRequest):
     shortcut = req.shortcut.lower().strip()
     try:
         if shortcut == "alt-tab":
-            pyautogui.hotkey('alt', 'tab')
+            pyautogui.hotkey("alt", "tab")
         elif shortcut == "alt-shift-tab":
-            pyautogui.hotkey('alt', 'shift', 'tab')
+            pyautogui.hotkey("alt", "shift", "tab")
         elif shortcut == "ctrl-s":
-            pyautogui.hotkey('ctrl', 's')
+            pyautogui.hotkey("ctrl", "s")
         elif shortcut == "win-d":
-            pyautogui.hotkey('win', 'd')
+            pyautogui.hotkey("win", "d")
         else:
             return {"error": f"Unknown shortcut: {shortcut}"}
         print(f"[SHORTCUT] Sent: {shortcut}")
@@ -566,12 +606,11 @@ def send_shortcut(req: ShortcutRequest):
 def panic_button():
     """Instantly show desktop (Win+D) — hide everything."""
     try:
-        pyautogui.hotkey('win', 'd')
+        pyautogui.hotkey("win", "d")
         print("[PANIC] Desktop shown")
         return {"status": "success", "message": "Desktop shown"}
     except Exception as e:
         return {"error": str(e)}
-
 
 
 @app.post("/power/{action}", dependencies=[Depends(verify_pin)])

@@ -637,11 +637,11 @@ const MarqueeText = ({
         <>
           <LinearGradient
             colors={[gradientColor, "transparent"]}
-            start={{ x: 0, y: 0 }}
+            start={{ x: 0.2, y: 0 }}
             end={{ x: 1, y: 0 }}
             style={{
               position: "absolute",
-              left: 0,
+              left: -3,
               top: 0,
               bottom: 0,
               width: 30,
@@ -651,10 +651,10 @@ const MarqueeText = ({
           <LinearGradient
             colors={["transparent", gradientColor]}
             start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 0 }}
+            end={{ x: 0.7, y: 0 }}
             style={{
               position: "absolute",
-              right: 0,
+              right: -5,
               top: 0,
               bottom: 0,
               width: 30,
@@ -2005,7 +2005,9 @@ function AppMain() {
                   borderRadius: R.sm,
                   borderWidth: 1,
                   borderColor: C.border,
-                  padding: SP.md,
+                  paddingHorizontal: SP.md,
+                  paddingVertical: SP.sm,
+                  paddingBottom: SP.xs,
                 }}
               >
                 <View style={s.procHeader}>
@@ -3180,7 +3182,7 @@ const s = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     paddingVertical: SP.lg,
-    paddingHorizontal: SP.xl + SP.sm,
+    paddingHorizontal: SP.xl,
   },
   mediaHeroTitle: {
     fontSize: 56,
