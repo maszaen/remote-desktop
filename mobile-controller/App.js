@@ -746,6 +746,7 @@ function AppMain() {
   const [powerSheetOpen, setPowerSheetOpen] = useState(false);
   const [shortcutSheetOpen, setShortcutSheetOpen] = useState(false);
   const [connectivitySheetOpen, setConnectivitySheetOpen] = useState(false);
+  const [clipboardSheetOpen, setClipboardSheetOpen] = useState(false);
 
   const [wifiActive, setWifiActive] = useState(false);
   const [btActive, setBtActive] = useState(false);
@@ -2235,6 +2236,29 @@ function AppMain() {
         </TouchableOpacity>
 
         <View style={s.sep} />
+
+        {/* Clipboard Access row */}
+        <TouchableOpacity
+          style={s.menuRow}
+          onPress={() => setClipboardSheetOpen(true)}
+          activeOpacity={0.6}
+        >
+          <View style={[s.menuRowIcon, { backgroundColor: C.primaryDim }]}>
+            <Ionicons name="clipboard" size={18} color={C.primary} />
+          </View>
+          <View style={s.menuRowBody}>
+            <Text style={s.menuRowTitle}>Clipboard Access</Text>
+            <Text style={s.menuRowSub}>Cross device clipboard</Text>
+          </View>
+          <Ionicons
+            name="arrow-forward-outline"
+            size={20}
+            color={C.muted}
+            style={{ paddingRight: SP.sm }}
+          />
+        </TouchableOpacity>
+
+        <View style={s.sep} />
         {/* Power row */}
         <TouchableOpacity
           style={s.menuRow}
@@ -2695,9 +2719,17 @@ function AppMain() {
               </View>
             )}
           </TouchableOpacity>
+        </View>
+      </BottomSheet>
 
-          <View style={[s.sep, { marginLeft: 56, marginVertical: 0 }]} />
-
+      {/* ═══ CLIPBOARD ACCESS MODAL ═══ */}
+      <BottomSheet
+        visible={clipboardSheetOpen}
+        onClose={() => setClipboardSheetOpen(false)}
+        title="Clipboard Access"
+        subtitle={`Cross device clipboard`}
+      >
+        <View style={s.sheetContent}>
           <TouchableOpacity
             style={s.powerRow}
             activeOpacity={0.7}
