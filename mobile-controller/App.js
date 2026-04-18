@@ -1077,9 +1077,11 @@ function AppMain() {
   };
   const mediaControl = async (a) => {
     // Cooldown guard — prevent spam
-    if (mediaCooldown) return;
-    setMediaCooldown(true);
-    setTimeout(() => setMediaCooldown(false), 4000);
+    if (a !== "prev") {
+      if (mediaCooldown) return;
+      setMediaCooldown(true);
+      setTimeout(() => setMediaCooldown(false), 4000);
+    }
 
     // Cancel any pending server check from a previous press
     if (mediaTimeoutRef.current) clearTimeout(mediaTimeoutRef.current);
@@ -2062,9 +2064,8 @@ function AppMain() {
           </View>
           <View style={s.mediaCluster}>
             <TouchableOpacity
-              style={[s.mediaBtnSm, mediaCooldown && { opacity: 0.4 }]}
+              style={s.mediaBtnSm}
               onPress={() => mediaControl("prev")}
-              disabled={mediaCooldown}
               activeOpacity={0.7}
             >
               <Ionicons name="play-skip-back" size={20} color={C.text} />
