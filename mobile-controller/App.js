@@ -165,40 +165,11 @@ const ZoomableImage = ({ uri }) => {
       let purePinchX = -originX.value * (e.scale - 1);
       let purePinchY = -originY.value * (e.scale - 1);
 
-      // Determine correct boundaries for the CURRENT live scale
-      const scaledW = IMG_W * scale.value;
-      const scaledH = IMG_H * scale.value;
-      const maxX = Math.max(0, (scaledW - SCREEN_WIDTH) / 2);
-      const maxY = Math.max(0, (scaledH - SCREEN_HEIGHT) / 2);
-
-      // Where the image "wants" to be optically
-      const pureVisualX = offsetBaseX.value + panX.value + purePinchX;
-      const pureVisualY = offsetBaseY.value + panY.value + purePinchY;
-
-      // Rubber-band past edges: allow going beyond bounds with resistance,
-      // consistent with how pan allows temporary out-of-bounds movement.
-      // On release, onEnd springs the image back to the edge.
-      let clampedX = pureVisualX;
-      let clampedY = pureVisualY;
-
-      if (scale.value >= 1) {
-        if (pureVisualX > maxX) {
-          clampedX = maxX + (pureVisualX - maxX) * 0.3;
-        } else if (pureVisualX < -maxX) {
-          clampedX = -maxX + (pureVisualX + maxX) * 0.3;
-        }
-        if (pureVisualY > maxY) {
-          clampedY = maxY + (pureVisualY - maxY) * 0.3;
-        } else if (pureVisualY < -maxY) {
-          clampedY = -maxY + (pureVisualY + maxY) * 0.3;
-        }
-      }
-      // When scale < 1, let the image follow the pinch origin freely
-      // (centering is enforced on release via auto zoom-back-to-1)
-
-      // Override pinch translation to respect these bounds
-      pinchX.value = clampedX - offsetBaseX.value - panX.value;
-      pinchY.value = clampedY - offsetBaseY.value - panY.value;
+      // No edge clamping during active pinch — let the image follow the
+      // user's fingers freely (consistent with pan). Edge snap-back is
+      // handled on release in onEnd.
+      pinchX.value = purePinchX;
+      pinchY.value = purePinchY;
     })
     .onEnd(() => {
       // Fold everything into base to capture exact visual state
