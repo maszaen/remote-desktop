@@ -18,6 +18,7 @@ import {
   Animated,
   Easing,
   PanResponder,
+  BackHandler,
 } from "react-native";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -57,7 +58,7 @@ const C = {
   successDim: "#4FCF8E15",
   text: "#F2F2F7",
   sub: "#AEAEB2",
-  muted: "#48484A",
+  muted: "#5c5c5e",
 };
 
 const SP = { xs: 4, sm: 8, md: 16, lg: 24, xl: 32, xxl: 48 };
@@ -981,6 +982,73 @@ function AppMain() {
     setActivePin(null);
   };
 
+  useEffect(() => {
+    const backAction = () => {
+      if (imageModalOpen) {
+        setImageModalOpen(false);
+        return true;
+      }
+      if (mediaSheetOpen) {
+        setMediaSheetOpen(false);
+        return true;
+      }
+      if (volumeSheetOpen) {
+        setVolumeSheetOpen(false);
+        return true;
+      }
+      if (powerSheetOpen) {
+        setPowerSheetOpen(false);
+        return true;
+      }
+      if (isScanningQR) {
+        setIsScanningQR(false);
+        return true;
+      }
+      if (pairingModalOpen) {
+        setPairingModalOpen(false);
+        return true;
+      }
+      if (renameTarget) {
+        setRenameTarget(null);
+        return true;
+      }
+      if (isConnected) {
+        Alert.alert(
+          "Disconnect",
+          "Are you sure you want to close the connection?",
+          [
+            {
+              text: "Cancel",
+              style: "cancel",
+            },
+            {
+              text: "Yes",
+              onPress: () => disconnect(),
+            },
+          ]
+        );
+        return true;
+      }
+      return false;
+    };
+
+    const backHandler = BackHandler.addEventListener(
+      "hardwareBackPress",
+      backAction
+    );
+
+    return () => backHandler.remove();
+  }, [
+    imageModalOpen,
+    mediaSheetOpen,
+    volumeSheetOpen,
+    powerSheetOpen,
+    isScanningQR,
+    pairingModalOpen,
+    renameTarget,
+    isConnected,
+  ]);
+
   // ── Features ─────────────────────────────────────────────────
   const fetchVolume = async (url, pin) => {
     const d = await sendAction("/volume", "GET", null, url, pin);
@@ -1240,7 +1308,7 @@ function AppMain() {
                 name="arrow-forward-outline"
                 size={20}
                 color={C.muted}
-                style={{ paddingLeft: SP.sm }}
+                style={{ paddingRight: SP.sm }}
               />
             </TouchableOpacity>
             <View style={s.sep} />
@@ -1273,12 +1341,17 @@ function AppMain() {
                       <Text style={s.menuRowSub}>{dev.ip}</Text>
                     </View>
                     {loadingAction === `connecting_${dev.ip}` ? (
-                      <ActivityIndicator size="small" color={C.primary} />
+                      <ActivityIndicator
+                        style={{ paddingRight: SP.sm }}
+                        size="small"
+                        color={C.primary}
+                      />
                     ) : (
                       <Ionicons
-                        name="chevron-forward"
-                        size={16}
+                        name="arrow-forward-outline"
+                        size={20}
                         color={C.muted}
+                        style={{ paddingRight: SP.sm }}
                       />
                     )}
                   </TouchableOpacity>
@@ -1313,7 +1386,7 @@ function AppMain() {
                     name="arrow-forward-outline"
                     size={20}
                     color={C.muted}
-                    style={{ paddingLeft: SP.sm }}
+                    style={{ paddingRight: SP.sm }}
                   />
                 </TouchableOpacity>
                 <View style={s.sep} />
@@ -1326,7 +1399,7 @@ function AppMain() {
                     name="globe-outline"
                     size={18}
                     color={C.muted}
-                    style={{ marginRight: SP.sm }}
+                    style={{ paddingLeft: SP.sm, marginRight: SP.sm }}
                   />
                   <TextInput
                     style={s.inputField}
@@ -1360,7 +1433,7 @@ function AppMain() {
         </ScrollView>
 
         {/* Rename Modal */}
-        <Modal visible={renameTarget !== null} transparent animationType="fade">
+        <Modal visible={renameTarget !== null} transparent animationType="fade" onRequestClose={() => setRenameTarget(null)}>
           <KeyboardAvoidingView
             behavior={Platform.OS === "ios" ? "padding" : "height"}
             style={s.modalOverlay}
@@ -1418,7 +1491,7 @@ function AppMain() {
         </Modal>
 
         {/* QR Camera */}
-        <Modal visible={isScanningQR} animationType="slide" transparent={false}>
+        <Modal visible={isScanningQR} animationType="slide" transparent={false} onRequestClose={() => setIsScanningQR(false)}>
           <View style={{ flex: 1, backgroundColor: "#000" }}>
             <CameraView
               style={StyleSheet.absoluteFillObject}
@@ -1450,7 +1523,7 @@ function AppMain() {
         </Modal>
 
         {/* Pairing Modal */}
-        <Modal visible={pairingModalOpen} transparent animationType="fade">
+        <Modal visible={pairingModalOpen} transparent animationType="fade" onRequestClose={() => setPairingModalOpen(false)}>
           <KeyboardAvoidingView
             behavior={Platform.OS === "ios" ? "padding" : "height"}
             style={s.modalOverlay}
@@ -1581,7 +1654,7 @@ function AppMain() {
             name="arrow-forward-outline"
             size={20}
             color={C.muted}
-            style={{ paddingLeft: SP.sm }}
+            style={{ paddingRight: SP.sm }}
           />
         </TouchableOpacity>
         <View style={s.sep} />
@@ -1615,7 +1688,7 @@ function AppMain() {
             name="arrow-forward-outline"
             size={20}
             color={C.muted}
-            style={{ paddingLeft: SP.sm }}
+            style={{ paddingRight: SP.sm }}
           />
         </TouchableOpacity>
         <View style={s.sep} />
@@ -1950,7 +2023,7 @@ function AppMain() {
             name="arrow-forward-outline"
             size={20}
             color={C.muted}
-            style={{ paddingLeft: SP.sm }}
+            style={{ paddingRight: SP.sm }}
           />
         </TouchableOpacity>
 
@@ -2152,7 +2225,12 @@ function AppMain() {
               <Text style={s.powerRowTitle}>Restart</Text>
               <Text style={s.powerRowSub}>Reboot system in 5 seconds</Text>
             </View>
-            <Ionicons name="chevron-forward" size={18} color={C.muted} />
+            <Ionicons
+              name="arrow-forward-outline"
+              size={20}
+              color={C.muted}
+              style={{ paddingRight: SP.sm }}
+            />
           </TouchableOpacity>
 
           <View style={[s.sep, { marginLeft: 56, marginVertical: 0 }]} />
@@ -2174,7 +2252,12 @@ function AppMain() {
               <Text style={s.powerRowTitle}>Shutdown</Text>
               <Text style={s.powerRowSub}>Turn off PC in 5 seconds</Text>
             </View>
-            <Ionicons name="chevron-forward" size={18} color={C.muted} />
+            <Ionicons
+              name="arrow-forward-outline"
+              size={20}
+              color={C.muted}
+              style={{ paddingRight: SP.sm }}
+            />
           </TouchableOpacity>
         </View>
       </BottomSheet>
@@ -2185,6 +2268,7 @@ function AppMain() {
         transparent
         animationType="fade"
         statusBarTranslucent
+        onRequestClose={() => setImageModalOpen(false)}
       >
         <GestureHandlerRootView style={{ flex: 1 }}>
           <View style={s.imgModalRoot}>
@@ -2363,7 +2447,7 @@ const s = StyleSheet.create({
     fontWeight: "800",
     paddingLeft: SP.sm,
     color: C.muted,
-    letterSpacing: 2,
+    letterSpacing: 1,
   },
 
   // ── Section header ──
@@ -2570,9 +2654,9 @@ const s = StyleSheet.create({
   },
   navHost: { fontSize: F.md, fontWeight: "700", color: C.text, marginTop: 1 },
   disconnectBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: R.sm,
+    width: 40,
+    height: 40,
+    borderRadius: R.full,
     backgroundColor: C.dangerDim,
     justifyContent: "center",
     alignItems: "center",
@@ -2631,7 +2715,7 @@ const s = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
     paddingTop: Platform.OS === "ios" ? 54 : StatusBar.currentHeight + 10,
-    paddingHorizontal: SP.md,
+    paddingHorizontal: SP.lg,
     paddingBottom: SP.sm,
     zIndex: 10,
   },
@@ -2646,6 +2730,10 @@ const s = StyleSheet.create({
   imgModalTitle: {
     fontSize: F.lg,
     fontWeight: "800",
+    borderRadius: R.full,
+    paddingHorizontal: SP.md,
+    paddingVertical: SP.sm,
+    backgroundColor: "rgba(255,255,255,0.1)",
     color: C.text,
   },
   imgModalRefreshBtn: {
@@ -2856,7 +2944,7 @@ const s = StyleSheet.create({
     marginTop: 4,
     fontWeight: "500",
   },
-  sheetContent: { paddingHorizontal: SP.xs, paddingTop: SP.xs },
+  sheetContent: { paddingHorizontal: SP.md, paddingTop: SP.xs },
 
   // ── Media Sheet ──
   mediaTitleWrap: {
@@ -2915,19 +3003,21 @@ const s = StyleSheet.create({
     fontWeight: "800",
     color: C.text,
     lineHeight: 60,
+    paddingLeft: 4,
   },
   volBigUnit: {
-    fontSize: F.xl,
+    fontSize: 56,
     fontWeight: "700",
     color: C.muted,
-    marginBottom: 8,
+    lineHeight: 60,
+    paddingRight: 4,
   },
   volBarRow: {
     flexDirection: "row",
     alignItems: "center",
     gap: SP.sm + 2,
     paddingVertical: SP.sm,
-    paddingHorizontal: SP.xl,
+    paddingHorizontal: SP.lg,
   },
   volBarWrap: {
     flex: 1,
