@@ -22,6 +22,7 @@ import {
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { CameraView, useCameraPermissions } from "expo-camera";
+import { LinearGradient } from "expo-linear-gradient";
 import {
   GestureHandlerRootView,
   GestureDetector,
@@ -543,6 +544,88 @@ const SpinningIcon = ({ name, size, color, spinning }) => {
   );
 };
 
+// ── MARQUEE TEXT (auto-scrolling for long text) ──────────────────────────────
+const MARQUEE_H = 64; // height for the marquee container (matches font size 56 + buffer)
+const MarqueeText = ({ children, style, speed = 40, gradientColor = C.surface }) => {
+  const [containerW, setContainerW] = useState(0);
+  const [textW, setTextW] = useState(0);
+  const scrollX = useRef(new Animated.Value(0)).current;
+  const animRef = useRef(null);
+
+  const overflow = textW - containerW;
+  const shouldScroll = containerW > 0 && textW > 0 && overflow > 5;
+
+  useEffect(() => {
+    if (animRef.current) animRef.current.stop();
+    scrollX.setValue(0);
+    if (!shouldScroll) return;
+
+    const duration = (overflow / speed) * 1000;
+    const anim = Animated.loop(
+      Animated.sequence([
+        Animated.delay(2000),
+        Animated.timing(scrollX, {
+          toValue: -overflow - 24,
+          duration,
+          easing: Easing.linear,
+          useNativeDriver: true,
+        }),
+        Animated.delay(2000),
+        Animated.timing(scrollX, {
+          toValue: 0,
+          duration: 300,
+          easing: Easing.out(Easing.quad),
+          useNativeDriver: true,
+        }),
+      ]),
+    );
+    animRef.current = anim;
+    anim.start();
+    return () => anim.stop();
+  }, [shouldScroll, overflow, speed]);
+
+  return (
+    <View
+      style={{ width: "100%", overflow: "hidden", height: MARQUEE_H }}
+      onLayout={(e) => setContainerW(e.nativeEvent.layout.width)}
+    >
+      {/* Hidden off-screen text for measuring true width (never wraps in 10000px row) */}
+      <View style={{ position: "absolute", top: -9999, flexDirection: "row", width: 10000 }} pointerEvents="none">
+        <Text style={style} onLayout={(e) => setTextW(e.nativeEvent.layout.width)}>
+          {children}
+        </Text>
+      </View>
+
+      {/* Visible scrolling text */}
+      <Animated.View style={{ flexDirection: "row", width: 10000, transform: [{ translateX: shouldScroll ? scrollX : 0 }] }}>
+        <Text style={[style, !shouldScroll && { width: containerW, textAlign: "center" }]} numberOfLines={1}>
+          {children}
+        </Text>
+      </Animated.View>
+
+      {/* Fade edges */}
+      {shouldScroll && (
+        <>
+          <LinearGradient
+            colors={[gradientColor, gradientColor + "00"]}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 0 }}
+            style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: 32 }}
+            pointerEvents="none"
+          />
+          <LinearGradient
+            colors={[gradientColor + "00", gradientColor]}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 0 }}
+            style={{ position: "absolute", right: 0, top: 0, bottom: 0, width: 32 }}
+            pointerEvents="none"
+          />
+        </>
+      )}
+    </View>
+  );
+};
+
 const FadeSlideIn = ({ children, delay = 0, style }) => {
   const op = useRef(new Animated.Value(0)).current;
   const ty = useRef(new Animated.Value(18)).current;
@@ -873,7 +956,11 @@ function AppMain() {
       setIsMuted(false);
     }
   };
-  const mediaControl = (a) => sendAction(`/media/${a}`);
+  const mediaControl = async (a) => {
+    await sendAction(`/media/${a}`);
+    // Refresh stats after media action to update now-playing title
+    setTimeout(() => getStats(), 800);
+  };
   const captureScreen = async (url = null, pin = null) => {
     setIsCapturing(true);
     setImgLoading(true);
@@ -1401,7 +1488,7 @@ function AppMain() {
         {/* Media row */}
         <TouchableOpacity
           style={s.menuRow}
-          onPress={() => setMediaSheetOpen(true)}
+          onPress={() => { getStats(); setMediaSheetOpen(true); }}
           activeOpacity={0.6}
         >
           <View style={[s.menuRowIcon, { backgroundColor: C.primaryDim }]}>
@@ -1780,7 +1867,7 @@ function AppMain() {
             <Text style={[s.menuRowTitle, { color: C.danger }]}>
               Power Options
             </Text>
-            <Text style={s.menuRowSub}>Shutdown, restart, or abort</Text>
+            <Text style={s.menuRowSub}>Shutdown or restart</Text>
           </View>
           <Ionicons
             name="arrow-forward-outline"
@@ -1798,16 +1885,25 @@ function AppMain() {
         visible={mediaSheetOpen}
         onClose={() => setMediaSheetOpen(false)}
         title="Media Controls"
-        subtitle={stats?.active_media || "Nothing Playing"}
       >
         <View style={s.sheetContent}>
+          {/* Hero track title with marquee */}
+          <View style={s.mediaTitleWrap}>
+            {stats?.active_media && stats.active_media !== "Not Playing" ? (
+              <MarqueeText style={s.mediaHeroTitle}>
+                {stats.active_media}
+              </MarqueeText>
+            ) : (
+              <Text style={[s.mediaHeroTitle, { color: C.muted, textAlign: "center" }]}>Not Playing</Text>
+            )}
+          </View>
           <View style={s.mediaCluster}>
             <TouchableOpacity
               style={s.mediaBtnSm}
               onPress={() => mediaControl("prev")}
               activeOpacity={0.7}
             >
-              <Ionicons name="play-skip-back" size={22} color={C.text} />
+              <Ionicons name="play-skip-back" size={20} color={C.text} />
             </TouchableOpacity>
             <TouchableOpacity
               style={s.mediaBtnLg}
@@ -1815,16 +1911,9 @@ function AppMain() {
               activeOpacity={0.8}
             >
               <Ionicons
-                name="play"
-                size={22}
+                name={stats?.active_media && stats.active_media !== "Not Playing" ? "pause" : "play"}
+                size={28}
                 color={C.text}
-                style={{ position: "absolute", left: 20 }}
-              />
-              <Ionicons
-                name="pause"
-                size={22}
-                color={C.text}
-                style={{ position: "absolute", right: 20 }}
               />
             </TouchableOpacity>
             <TouchableOpacity
@@ -1832,7 +1921,7 @@ function AppMain() {
               onPress={() => mediaControl("next")}
               activeOpacity={0.7}
             >
-              <Ionicons name="play-skip-forward" size={22} color={C.text} />
+              <Ionicons name="play-skip-forward" size={20} color={C.text} />
             </TouchableOpacity>
           </View>
         </View>
@@ -1852,53 +1941,19 @@ function AppMain() {
         }
       >
         <View style={s.sheetContent}>
-          <TouchableOpacity
-            style={s.muteRow}
-            onPress={handleToggleMute}
-            activeOpacity={0.7}
-          >
-            <View
-              style={[
-                s.menuRowIcon,
-                { backgroundColor: isMuted ? C.dangerDim : C.elevated },
-              ]}
-            >
-              <Ionicons
-                name={
-                  isMuted || currentVolume === 0 ? "volume-mute" : "volume-high"
-                }
-                size={20}
-                color={isMuted ? C.danger : C.sub}
-              />
-            </View>
-            <Text style={[s.menuRowTitle, { flex: 1, marginLeft: SP.md }]}>
-              {isMuted ? "Tap to Unmute" : "Tap to Mute"}
+          {/* Large volume display */}
+          <View style={s.volDisplayCenter}>
+            <Text style={[s.volBigNumber, isMuted && { color: C.danger }]}>
+              {isMuted ? "MUTE" : currentVolume !== undefined ? `${currentVolume}` : "—"}
             </Text>
-            <View
-              style={[
-                s.togglePill,
-                isMuted && {
-                  backgroundColor: C.danger + "40",
-                  borderColor: C.danger + "40",
-                },
-              ]}
-            >
-              <View
-                style={[
-                  s.toggleThumb,
-                  isMuted && {
-                    transform: [{ translateX: 18 }],
-                    backgroundColor: C.danger,
-                  },
-                ]}
-              />
-            </View>
-          </TouchableOpacity>
+            {!isMuted && currentVolume !== undefined && (
+              <Text style={s.volBigUnit}>%</Text>
+            )}
+          </View>
 
-          <View style={[s.sep, { marginLeft: 0, marginVertical: SP.sm }]} />
-
+          {/* Volume bar */}
           <View style={s.volBarRow}>
-            <Ionicons name="volume-low" size={16} color={C.muted} />
+            <Ionicons name="volume-low" size={18} color={C.muted} />
             <View style={s.volBarWrap}>
               <View
                 style={[
@@ -1910,30 +1965,35 @@ function AppMain() {
                 ]}
               />
             </View>
-            <Ionicons name="volume-high" size={16} color={C.muted} />
+            <Ionicons name="volume-high" size={18} color={C.muted} />
           </View>
 
-          <View style={s.volStepRow}>
+          {/* +/- buttons & mute */}
+          <View style={s.volControlRow}>
             <TouchableOpacity
               style={s.volStepBtn}
               onPress={handleVolumeDown}
               activeOpacity={0.7}
             >
-              <Ionicons name="remove" size={22} color={C.text} />
+              <Ionicons name="remove" size={24} color={C.text} />
             </TouchableOpacity>
-            <Text style={s.volStepValue}>
-              {isMuted
-                ? "—"
-                : currentVolume !== undefined
-                  ? `${currentVolume}%`
-                  : "..."}
-            </Text>
+            <TouchableOpacity
+              style={[s.volMuteBtn, isMuted && { backgroundColor: C.danger + "20", borderColor: C.danger + "50" }]}
+              onPress={handleToggleMute}
+              activeOpacity={0.7}
+            >
+              <Ionicons
+                name={isMuted || currentVolume === 0 ? "volume-mute" : "volume-high"}
+                size={22}
+                color={isMuted ? C.danger : C.sub}
+              />
+            </TouchableOpacity>
             <TouchableOpacity
               style={s.volStepBtn}
               onPress={handleVolumeUp}
               activeOpacity={0.7}
             >
-              <Ionicons name="add" size={22} color={C.text} />
+              <Ionicons name="add" size={24} color={C.text} />
             </TouchableOpacity>
           </View>
         </View>
@@ -1947,66 +2007,42 @@ function AppMain() {
         subtitle={`Connected to ${hostname}`}
       >
         <View style={s.sheetContent}>
-          <View style={s.powerBtnRow}>
-            <TouchableOpacity
-              style={s.powerTileWarn}
-              onPress={() => {
-                setPowerSheetOpen(false);
-                handlePower("restart");
-              }}
-              activeOpacity={0.8}
-            >
-              <View
-                style={[
-                  s.powerTileIconPill,
-                  { backgroundColor: C.warning + "25" },
-                ]}
-              >
-                <Ionicons name="refresh" size={24} color={C.warning} />
-              </View>
-              <View>
-                <Text style={s.powerTileTitle}>Restart</Text>
-                <Text style={s.powerTileSub}>Reboot system</Text>
-              </View>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={s.powerTileDanger}
-              onPress={() => {
-                setPowerSheetOpen(false);
-                handlePower("shutdown");
-              }}
-              activeOpacity={0.8}
-            >
-              <View
-                style={[
-                  s.powerTileIconPill,
-                  { backgroundColor: C.danger + "25" },
-                ]}
-              >
-                <Ionicons name="power" size={24} color={C.danger} />
-              </View>
-              <View>
-                <Text style={s.powerTileTitle}>Shutdown</Text>
-                <Text style={s.powerTileSub}>Turn off PC</Text>
-              </View>
-            </TouchableOpacity>
-          </View>
           <TouchableOpacity
-            style={s.powerAbortBtn}
+            style={s.powerRow}
             onPress={() => {
               setPowerSheetOpen(false);
-              cancelShutdown();
+              handlePower("restart");
             }}
             activeOpacity={0.7}
           >
-            <Ionicons
-              name="close-circle"
-              size={20}
-              color={C.sub}
-              style={{ marginRight: 8 }}
-            />
-            <Text style={s.powerAbortText}>Abort Active Action</Text>
+            <View style={[s.powerRowIcon, { backgroundColor: C.warning + "18" }]}>
+              <Ionicons name="refresh" size={22} color={C.warning} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={s.powerRowTitle}>Restart</Text>
+              <Text style={s.powerRowSub}>Reboot system in 5 seconds</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color={C.muted} />
+          </TouchableOpacity>
+
+          <View style={[s.sep, { marginLeft: 56, marginVertical: 0 }]} />
+
+          <TouchableOpacity
+            style={s.powerRow}
+            onPress={() => {
+              setPowerSheetOpen(false);
+              handlePower("shutdown");
+            }}
+            activeOpacity={0.7}
+          >
+            <View style={[s.powerRowIcon, { backgroundColor: C.danger + "18" }]}>
+              <Ionicons name="power" size={22} color={C.danger} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={s.powerRowTitle}>Shutdown</Text>
+              <Text style={s.powerRowSub}>Turn off PC in 5 seconds</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color={C.muted} />
           </TouchableOpacity>
         </View>
       </BottomSheet>
@@ -2691,6 +2727,18 @@ const s = StyleSheet.create({
   sheetContent: { paddingHorizontal: SP.lg, paddingTop: SP.xs },
 
   // ── Media Sheet ──
+  mediaTitleWrap: {
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: SP.lg,
+    paddingHorizontal: SP.xl + SP.sm,
+  },
+  mediaHeroTitle: {
+    fontSize: 56,
+    fontWeight: "800",
+    color: C.text,
+    lineHeight: 60,
+  },
   mediaCluster: {
     flexDirection: "row",
     alignItems: "center",
@@ -2723,50 +2771,49 @@ const s = StyleSheet.create({
   },
 
   // ── Volume Sheet ──
-  muteRow: {
+  volDisplayCenter: {
     flexDirection: "row",
-    alignItems: "center",
-    paddingVertical: SP.sm,
-  },
-  togglePill: {
-    width: 44,
-    height: 26,
-    borderRadius: R.full,
-    backgroundColor: C.elevated,
-    padding: 3,
+    alignItems: "flex-end",
     justifyContent: "center",
-    borderWidth: 1,
-    borderColor: C.border,
+    paddingVertical: SP.lg,
+    gap: 2,
   },
-  toggleThumb: {
-    width: 18,
-    height: 18,
-    borderRadius: 9,
-    backgroundColor: C.sub,
+  volBigNumber: {
+    fontSize: 56,
+    fontWeight: "800",
+    color: C.text,
+    lineHeight: 60,
+  },
+  volBigUnit: {
+    fontSize: F.xl,
+    fontWeight: "700",
+    color: C.muted,
+    marginBottom: 8,
   },
   volBarRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: SP.sm,
+    gap: SP.sm + 2,
     paddingVertical: SP.sm,
   },
   volBarWrap: {
     flex: 1,
-    height: 6,
+    height: 8,
     backgroundColor: C.elevated,
     borderRadius: R.full,
     overflow: "hidden",
   },
   volBarFill: { height: "100%", borderRadius: R.full },
-  volStepRow: {
+  volControlRow: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
-    paddingVertical: SP.md,
+    justifyContent: "center",
+    gap: SP.lg,
+    paddingVertical: SP.lg,
   },
   volStepBtn: {
-    width: 54,
-    height: 54,
+    width: 56,
+    height: 56,
     borderRadius: R.full,
     backgroundColor: C.elevated,
     justifyContent: "center",
@@ -2774,51 +2821,36 @@ const s = StyleSheet.create({
     borderWidth: 1,
     borderColor: C.border,
   },
-  volStepValue: { fontSize: F.xl, fontWeight: "800", color: C.text },
+  volMuteBtn: {
+    width: 56,
+    height: 56,
+    borderRadius: R.full,
+    backgroundColor: C.elevated,
+    justifyContent: "center",
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: C.border,
+  },
 
   // ── Power Sheet ──
-  powerBtnRow: { flexDirection: "row", gap: SP.md, marginBottom: SP.md },
-  powerTileWarn: {
-    flex: 1,
-    backgroundColor: C.surface,
-    padding: SP.md,
-    borderRadius: R.lg,
-    borderWidth: 1,
-    borderColor: C.warning + "40",
+  powerRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: SP.md,
+    gap: SP.md,
   },
-  powerTileDanger: {
-    flex: 1,
-    backgroundColor: C.surface,
-    padding: SP.md,
-    borderRadius: R.lg,
-    borderWidth: 1,
-    borderColor: C.danger + "40",
-  },
-  powerTileIconPill: {
+  powerRowIcon: {
     width: 44,
     height: 44,
     borderRadius: 22,
     justifyContent: "center",
     alignItems: "center",
-    marginBottom: SP.lg,
   },
-  powerTileTitle: {
-    fontSize: F.lg,
-    fontWeight: "800",
+  powerRowTitle: {
+    fontSize: F.md,
+    fontWeight: "700",
     color: C.text,
     marginBottom: 2,
   },
-  powerTileSub: { fontSize: F.xs, fontWeight: "600", color: C.muted },
-
-  powerAbortBtn: {
-    flexDirection: "row",
-    borderWidth: 1,
-    borderColor: C.border,
-    paddingVertical: 16,
-    borderRadius: R.lg,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: C.surface,
-  },
-  powerAbortText: { color: C.sub, fontSize: F.md, fontWeight: "700" },
+  powerRowSub: { fontSize: F.xs, fontWeight: "500", color: C.muted },
 });
