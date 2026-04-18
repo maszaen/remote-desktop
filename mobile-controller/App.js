@@ -22,8 +22,20 @@ import {
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { CameraView, useCameraPermissions } from "expo-camera";
-import { GestureHandlerRootView, GestureDetector, Gesture } from 'react-native-gesture-handler';
-import AnimatedRe, { useSharedValue, useAnimatedStyle, withSpring, withTiming, withDecay, runOnJS, cancelAnimation } from 'react-native-reanimated';
+import {
+  GestureHandlerRootView,
+  GestureDetector,
+  Gesture,
+} from "react-native-gesture-handler";
+import AnimatedRe, {
+  useSharedValue,
+  useAnimatedStyle,
+  withSpring,
+  withTiming,
+  withDecay,
+  runOnJS,
+  cancelAnimation,
+} from "react-native-reanimated";
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
 
@@ -62,7 +74,11 @@ const BottomSheet = ({ visible, onClose, children, title, subtitle }) => {
   useEffect(() => {
     if (visible) {
       setMounted(true);
-      translateY.value = withSpring(0, { damping: 24, stiffness: 220, mass: 0.8 });
+      translateY.value = withSpring(0, {
+        damping: 24,
+        stiffness: 220,
+        mass: 0.8,
+      });
       overlayOpacity.value = withTiming(1, { duration: 250 });
     } else {
       translateY.value = withTiming(SCREEN_HEIGHT, { duration: 250 }, () => {
@@ -85,7 +101,11 @@ const BottomSheet = ({ visible, onClose, children, title, subtitle }) => {
       if (e.translationY > 120 || e.velocityY > 500) {
         runOnJS(onClose)();
       } else {
-        translateY.value = withSpring(0, { damping: 24, stiffness: 220, mass: 0.8 });
+        translateY.value = withSpring(0, {
+          damping: 24,
+          stiffness: 220,
+          mass: 0.8,
+        });
       }
     });
 
@@ -104,11 +124,15 @@ const BottomSheet = ({ visible, onClose, children, title, subtitle }) => {
         style={[
           StyleSheet.absoluteFillObject,
           { backgroundColor: "rgba(0,0,0,0.50)" },
-          overlayStyle
+          overlayStyle,
         ]}
         pointerEvents={visible ? "auto" : "none"}
       >
-        <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={onClose} />
+        <TouchableOpacity
+          style={{ flex: 1 }}
+          activeOpacity={1}
+          onPress={onClose}
+        />
       </AnimatedRe.View>
 
       <AnimatedRe.View style={[s.sheet, sheetStyle]}>
@@ -126,12 +150,17 @@ const BottomSheet = ({ visible, onClose, children, title, subtitle }) => {
 };
 
 // ─── ZOOMABLE IMAGE (ported from ImageViewerModal — momentum + edge snap) ────
-const IMG_W = SCREEN_WIDTH;
-const IMG_H = SCREEN_WIDTH * (9 / 16);
+// Render at 3x layout size so React Native decodes full source resolution.
+// Scale range is shifted: MIN_SCALE = fits screen, MAX_SCALE = 5x visual zoom.
+const RENDER_FACTOR = 3;
+const IMG_W = SCREEN_WIDTH * RENDER_FACTOR;
+const IMG_H = SCREEN_WIDTH * (9 / 16) * RENDER_FACTOR;
+const MIN_SCALE = 1 / RENDER_FACTOR;
+const MAX_SCALE = 5 / RENDER_FACTOR;
 
 const ZoomableImage = ({ uri }) => {
-  const scale = useSharedValue(1);
-  const savedScale = useSharedValue(1);
+  const scale = useSharedValue(MIN_SCALE);
+  const savedScale = useSharedValue(MIN_SCALE);
 
   const offsetBaseX = useSharedValue(0);
   const offsetBaseY = useSharedValue(0);
@@ -144,10 +173,14 @@ const ZoomableImage = ({ uri }) => {
   const pinchActive = useSharedValue(0);
 
   useEffect(() => {
-    scale.value = 1;         savedScale.value = 1;
-    offsetBaseX.value = 0;   offsetBaseY.value = 0;
-    panX.value = 0;          panY.value = 0;
-    pinchX.value = 0;        pinchY.value = 0;
+    scale.value = MIN_SCALE;
+    savedScale.value = MIN_SCALE;
+    offsetBaseX.value = 0;
+    offsetBaseY.value = 0;
+    panX.value = 0;
+    panY.value = 0;
+    pinchX.value = 0;
+    pinchY.value = 0;
   }, [uri]);
 
   const pinchGesture = Gesture.Pinch()
@@ -156,8 +189,8 @@ const ZoomableImage = ({ uri }) => {
       savedScale.value = scale.value;
       // focalX is in view-local coords (GestureDetector wraps absoluteFill = screen)
       // Subtract offsetBase to get distance from visual image center to fingers
-      originX.value = e.focalX - (SCREEN_WIDTH / 2) - offsetBaseX.value;
-      originY.value = e.focalY - (SCREEN_HEIGHT / 2) - offsetBaseY.value;
+      originX.value = e.focalX - SCREEN_WIDTH / 2 - offsetBaseX.value;
+      originY.value = e.focalY - SCREEN_HEIGHT / 2 - offsetBaseY.value;
     })
     .onUpdate((e) => {
       scale.value = savedScale.value * e.scale;
@@ -182,8 +215,8 @@ const ZoomableImage = ({ uri }) => {
       panY.value = 0;
 
       let targetScale = scale.value;
-      if (scale.value < 1) targetScale = 1;
-      else if (scale.value > 5) targetScale = 5;
+      if (scale.value < MIN_SCALE) targetScale = MIN_SCALE;
+      else if (scale.value > MAX_SCALE) targetScale = MAX_SCALE;
 
       if (targetScale !== scale.value) {
         // Viewport-centered zoom: scale the offset proportionally so that
@@ -241,8 +274,11 @@ const ZoomableImage = ({ uri }) => {
       // If pinch just ended and handled the auto-zoom-out, skip pan's own
       // folding/animation — pinch already folded panX/panY and started
       // viewport-centered springs that we must not overwrite.
-      if (panX.value === 0 && panY.value === 0 &&
-          (scale.value < 1 || scale.value > 5)) {
+      if (
+        panX.value === 0 &&
+        panY.value === 0 &&
+        (scale.value < MIN_SCALE || scale.value > MAX_SCALE)
+      ) {
         return;
       }
 
@@ -252,8 +288,8 @@ const ZoomableImage = ({ uri }) => {
       panY.value = 0;
 
       let targetScale = scale.value;
-      if (scale.value < 1) targetScale = 1;
-      else if (scale.value > 5) targetScale = 5;
+      if (scale.value < MIN_SCALE) targetScale = MIN_SCALE;
+      else if (scale.value > MAX_SCALE) targetScale = MAX_SCALE;
 
       const scaledW = IMG_W * targetScale;
       const scaledH = IMG_H * targetScale;
@@ -261,7 +297,7 @@ const ZoomableImage = ({ uri }) => {
       const maxY = Math.max(0, (scaledH - SCREEN_HEIGHT) / 2);
       const clampX = (v) => Math.max(-maxX, Math.min(maxX, v));
       const clampY = (v) => Math.max(-maxY, Math.min(maxY, v));
-      
+
       const cx = offsetBaseX.value;
       const cy = offsetBaseY.value;
 
@@ -279,13 +315,20 @@ const ZoomableImage = ({ uri }) => {
       } else {
         const outOfBoundsX = cx < -maxX || cx > maxX;
         const outOfBoundsY = cy < -maxY || cy > maxY;
-        const lowVelocity = Math.abs(e.velocityX) < 100 && Math.abs(e.velocityY) < 100;
+        const lowVelocity =
+          Math.abs(e.velocityX) < 100 && Math.abs(e.velocityY) < 100;
         if (lowVelocity || outOfBoundsX || outOfBoundsY) {
           offsetBaseX.value = withSpring(clampX(cx));
           offsetBaseY.value = withSpring(clampY(cy));
         } else {
-          offsetBaseX.value = withDecay({ velocity: e.velocityX, clamp: [-maxX, maxX] });
-          offsetBaseY.value = withDecay({ velocity: e.velocityY, clamp: [-maxY, maxY] });
+          offsetBaseX.value = withDecay({
+            velocity: e.velocityX,
+            clamp: [-maxX, maxX],
+          });
+          offsetBaseY.value = withDecay({
+            velocity: e.velocityY,
+            clamp: [-maxY, maxY],
+          });
         }
       }
     });
@@ -293,17 +336,17 @@ const ZoomableImage = ({ uri }) => {
   const doubleTapGesture = Gesture.Tap()
     .numberOfTaps(2)
     .onEnd((e) => {
-      if (scale.value > 1) {
-        scale.value = withSpring(1);
-        savedScale.value = 1;
+      if (scale.value > MIN_SCALE * 1.1) {
+        scale.value = withSpring(MIN_SCALE);
+        savedScale.value = MIN_SCALE;
         offsetBaseX.value = withSpring(0);
         offsetBaseY.value = withSpring(0);
       } else {
-        const targetScale = 2.5;
-        const dx = e.x - (SCREEN_WIDTH / 2);
-        const dy = e.y - (SCREEN_HEIGHT / 2);
-        const offsetX = -dx * (targetScale - 1);
-        const offsetY = -dy * (targetScale - 1);
+        const targetScale = 2.5 / RENDER_FACTOR;
+        const dx = e.x - SCREEN_WIDTH / 2;
+        const dy = e.y - SCREEN_HEIGHT / 2;
+        const offsetX = -dx * (targetScale / MIN_SCALE - 1);
+        const offsetY = -dy * (targetScale / MIN_SCALE - 1);
         const scaledW = IMG_W * targetScale;
         const scaledH = IMG_H * targetScale;
         const maxX = Math.max(0, (scaledW - SCREEN_WIDTH) / 2);
@@ -319,7 +362,7 @@ const ZoomableImage = ({ uri }) => {
 
   const composedGestures = Gesture.Race(
     doubleTapGesture,
-    Gesture.Simultaneous(pinchGesture, panGesture)
+    Gesture.Simultaneous(pinchGesture, panGesture),
   );
 
   const animStyle = useAnimatedStyle(() => ({
@@ -332,7 +375,12 @@ const ZoomableImage = ({ uri }) => {
 
   return (
     <GestureDetector gesture={composedGestures}>
-      <View style={[StyleSheet.absoluteFillObject, { justifyContent: 'center', alignItems: 'center' }]}>
+      <View
+        style={[
+          StyleSheet.absoluteFillObject,
+          { justifyContent: "center", alignItems: "center" },
+        ]}
+      >
         <AnimatedRe.View style={animStyle}>
           <Image
             source={{ uri }}
@@ -471,19 +519,21 @@ const SpinningIcon = ({ name, size, color, spinning }) => {
           duration: 800,
           easing: Easing.linear,
           useNativeDriver: true,
-        })
+        }),
       );
       spinRef.current.start();
     } else {
       if (spinRef.current) spinRef.current.stop();
       spin.setValue(0);
     }
-    return () => { if (spinRef.current) spinRef.current.stop(); };
+    return () => {
+      if (spinRef.current) spinRef.current.stop();
+    };
   }, [spinning]);
 
   const rotate = spin.interpolate({
     inputRange: [0, 1],
-    outputRange: ['0deg', '360deg'],
+    outputRange: ["0deg", "360deg"],
   });
 
   return (
@@ -830,36 +880,35 @@ function AppMain() {
     const d = await sendAction("/screen", "GET", null, url, pin);
     if (d?.image) {
       setScreenshot(d.image);
-      setScreenshotKey(prev => prev + 1);
+      setScreenshotKey((prev) => prev + 1);
     }
     setIsCapturing(false);
     setImgLoading(false);
   };
   const captureHiRes = async () => {
     setHiResLoading(true);
-    const d = await sendAction("/screen?quality=high", "GET");
-    if (d?.image) {
-      setHiResImage(d.image);
-      // Also update thumbnail preview with the hi-res image
-      setScreenshot(d.image);
-      setScreenshotKey(prev => prev + 1);
+    try {
+      const rawUrl = `${serverUrl}/screen/raw?quality=high&token=${deviceId}&t=${Date.now()}`;
+      await Image.prefetch(rawUrl);
+      setHiResImage(rawUrl);
+    } catch (e) {
+      console.warn('Hi-res fetch failed', e);
     }
     setHiResLoading(false);
   };
   const openImageDetail = async () => {
-    // Fetch hi-res BEFORE opening the modal to prevent low→high flickering
     setHiResLoading(true);
-    const d = await sendAction("/screen?quality=high", "GET");
-    if (d?.image) {
-      setHiResImage(d.image);
-      setScreenshot(d.image);
-      setScreenshotKey(prev => prev + 1);
-    } else {
-      // Fallback to current thumbnail if hi-res fails
+    try {
+      const rawUrl = `${serverUrl}/screen/raw?quality=high&token=${deviceId}&t=${Date.now()}`;
+      await Image.prefetch(rawUrl);
+      setHiResImage(rawUrl);
+      setImageModalOpen(true);
+    } catch (e) {
+      // Fallback: open with thumbnail
       setHiResImage(screenshot);
+      setImageModalOpen(true);
     }
     setHiResLoading(false);
-    setImageModalOpen(true);
   };
   const getStats = async (url = null, pin = null) => {
     setLoadingAction("stats");
@@ -894,41 +943,59 @@ function AppMain() {
   };
 
   const handleKillProcess = (app) => {
-    Alert.alert(
-      "End Task",
-      `Force quit ${app.name}?\n\n"${app.title}"`,
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Force Quit",
-          style: "destructive",
-          onPress: async () => {
-            const res = await sendAction("/process/kill", "POST", { pid: app.pid, name: app.name });
-            if (res?.error) {
-              Alert.alert("Failed", res.error);
-            }
-            setTimeout(() => {
-              fetchApps();
-              getStats();
-            }, 500);
-          },
+    Alert.alert("End Task", `Force quit ${app.name}?\n\n"${app.title}"`, [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Force Quit",
+        style: "destructive",
+        onPress: async () => {
+          const res = await sendAction("/process/kill", "POST", {
+            pid: app.pid,
+            name: app.name,
+          });
+          if (res?.error) {
+            Alert.alert("Failed", res.error);
+          }
+          setTimeout(() => {
+            fetchApps();
+            getStats();
+          }, 500);
         },
-      ]
-    );
+      },
+    ]);
   };
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    await fetchVolume();
-    await fetchApps();
-    await getStats();
+    try {
+      await Promise.all([
+        fetchVolume(),
+        fetchApps(),
+        getStats(),
+        captureScreen(),
+      ]);
+    } catch (e) {
+      console.warn('Refresh error', e);
+    }
     setRefreshing(false);
   }, [serverUrl, activePin]);
 
+  // Auto-refresh on first connect (including auto-connect on app start)
+  const hasAutoRefreshed = useRef(false);
   useEffect(() => {
-    if (isConnected && currentVolume === undefined) {
-      fetchVolume();
+    if (isConnected && serverUrl && activePin && !hasAutoRefreshed.current) {
+      hasAutoRefreshed.current = true;
+      // Small delay to ensure state is committed
+      setTimeout(() => {
+        captureScreen();
+        getStats();
+        fetchApps();
+        fetchVolume();
+      }, 500);
     }
-  }, [isConnected, currentVolume]);
+    if (!isConnected) {
+      hasAutoRefreshed.current = false;
+    }
+  }, [isConnected, serverUrl, activePin]);
 
   const cpuColor =
     stats?.cpu_percent > 80
@@ -1008,7 +1075,12 @@ function AppMain() {
                   Open PC tray → "Show QR to Connect"
                 </Text>
               </View>
-              <Ionicons name="arrow-forward-outline" size={20} color={C.muted} style={{ paddingLeft: SP.sm }} />
+              <Ionicons
+                name="arrow-forward-outline"
+                size={20}
+                color={C.muted}
+                style={{ paddingLeft: SP.sm }}
+              />
             </TouchableOpacity>
             <View style={s.sep} />
           </FadeSlideIn>
@@ -1076,7 +1148,12 @@ function AppMain() {
                       Type the PC's local IP address
                     </Text>
                   </View>
-                  <Ionicons name="arrow-forward-outline" size={20} color={C.muted} style={{ paddingLeft: SP.sm }} />
+                  <Ionicons
+                    name="arrow-forward-outline"
+                    size={20}
+                    color={C.muted}
+                    style={{ paddingLeft: SP.sm }}
+                  />
                 </TouchableOpacity>
                 <View style={s.sep} />
               </>
@@ -1295,7 +1372,9 @@ function AppMain() {
       <View style={s.topNav}>
         <View style={s.topNavLeft}>
           <View>
-            <Text style={s.navBadge}><BlinkDot /> CONNECTED</Text>
+            <Text style={s.navBadge}>
+              <BlinkDot /> CONNECTED
+            </Text>
             <Text style={s.navHost}>{hostname}</Text>
           </View>
         </View>
@@ -1334,7 +1413,12 @@ function AppMain() {
               {stats?.active_media || "Nothing Playing"}
             </Text>
           </View>
-          <Ionicons name="arrow-forward-outline" size={20} color={C.muted} style={{ paddingLeft: SP.sm }} />
+          <Ionicons
+            name="arrow-forward-outline"
+            size={20}
+            color={C.muted}
+            style={{ paddingLeft: SP.sm }}
+          />
         </TouchableOpacity>
         <View style={s.sep} />
 
@@ -1356,10 +1440,19 @@ function AppMain() {
           <View style={s.menuRowBody}>
             <Text style={s.menuRowTitle}>System Volume</Text>
             <Text style={s.menuRowSub}>
-              {isMuted ? "Muted" : currentVolume !== undefined ? `${currentVolume}%` : "Loading..."}
+              {isMuted
+                ? "Muted"
+                : currentVolume !== undefined
+                  ? `${currentVolume}%`
+                  : "Loading..."}
             </Text>
           </View>
-          <Ionicons name="arrow-forward-outline" size={20} color={C.muted} style={{ paddingLeft: SP.sm }} />
+          <Ionicons
+            name="arrow-forward-outline"
+            size={20}
+            color={C.muted}
+            style={{ paddingLeft: SP.sm }}
+          />
         </TouchableOpacity>
         <View style={s.sep} />
 
@@ -1376,7 +1469,12 @@ function AppMain() {
               style={s.refreshChip}
               activeOpacity={0.7}
             >
-              <SpinningIcon name="sync-outline" size={13} color={C.sub} spinning={isCapturing} />
+              <SpinningIcon
+                name="sync-outline"
+                size={13}
+                color={C.sub}
+                spinning={isCapturing}
+              />
               <Text style={s.refreshChipText}> Refresh</Text>
             </TouchableOpacity>
           </View>
@@ -1388,7 +1486,11 @@ function AppMain() {
               </View>
             )}
             {screenshot ? (
-              <TouchableOpacity activeOpacity={0.85} onPress={openImageDetail} disabled={hiResLoading}>
+              <TouchableOpacity
+                activeOpacity={0.85}
+                onPress={openImageDetail}
+                disabled={hiResLoading}
+              >
                 <Image
                   key={screenshotKey}
                   source={{ uri: screenshot }}
@@ -1399,29 +1501,49 @@ function AppMain() {
                   {hiResLoading ? (
                     <>
                       <ActivityIndicator size={12} color={C.primary} />
-                      <Text style={{ fontSize: F.xs, color: C.primary, marginLeft: 4, fontWeight: '600' }}>Loading HD…</Text>
+                      <Text
+                        style={{
+                          fontSize: F.xs,
+                          color: C.primary,
+                          marginLeft: 4,
+                          fontWeight: "600",
+                        }}
+                      >
+                        Loading HD…
+                      </Text>
                     </>
                   ) : (
                     <>
                       <Ionicons name="expand-outline" size={14} color={C.sub} />
-                      <Text style={{ fontSize: F.xs, color: C.sub, marginLeft: 4, fontWeight: '600' }}>Tap to zoom</Text>
+                      <Text
+                        style={{
+                          fontSize: F.xs,
+                          color: C.sub,
+                          marginLeft: 4,
+                          fontWeight: "600",
+                        }}
+                      >
+                        Tap to zoom
+                      </Text>
                     </>
                   )}
                 </View>
               </TouchableOpacity>
             ) : (
-              <View style={s.screenPlaceholder}>
+              <View style={[s.screenPlaceholder, { height: "100%" }]}>
                 <Ionicons name="image-outline" size={26} color={C.muted} />
                 <Text style={s.placeholderText}>Tap refresh to capture</Text>
               </View>
             )}
           </View>
-          
+
           {/* ── Active Window Pill ── */}
           {stats?.active_window && (
             <View style={s.activeWinPill}>
               <Text style={s.hwLabel}>Active Window</Text>
-              <Text style={s.activeWinValue} numberOfLines={1}>{stats.active_window}</Text>
+              <Text style={s.activeWinValue} numberOfLines={1}>
+                {stats.active_window}
+              </Text>
             </View>
           )}
         </View>
@@ -1432,12 +1554,20 @@ function AppMain() {
           <View style={s.sectionHeaderRow}>
             <Text style={s.groupLabel}>SYSTEM</Text>
             <TouchableOpacity
-              onPress={() => { getStats(); fetchApps(); }}
+              onPress={() => {
+                getStats();
+                fetchApps();
+              }}
               disabled={loadingAction === "stats"}
               style={s.refreshChip}
               activeOpacity={0.7}
             >
-              <SpinningIcon name="sync-outline" size={13} color={C.sub} spinning={loadingAction === "stats"} />
+              <SpinningIcon
+                name="sync-outline"
+                size={13}
+                color={C.sub}
+                spinning={loadingAction === "stats"}
+              />
               <Text style={s.refreshChipText}> Refresh</Text>
             </TouchableOpacity>
           </View>
@@ -1448,8 +1578,19 @@ function AppMain() {
               <View style={s.usageCardGrid}>
                 {/* CPU */}
                 <View style={s.usageCard}>
-                  <View style={{ flexDirection: "row", alignItems: "center", gap: 5, marginBottom: SP.sm }}>
-                    <Ionicons name="hardware-chip-outline" size={12} color={C.muted} />
+                  <View
+                    style={{
+                      flexDirection: "row",
+                      alignItems: "center",
+                      gap: 5,
+                      marginBottom: SP.sm,
+                    }}
+                  >
+                    <Ionicons
+                      name="hardware-chip-outline"
+                      size={12}
+                      color={C.muted}
+                    />
                     <Text style={s.hwLabel}>CPU</Text>
                   </View>
                   <Text style={[s.usagePct, { color: cpuColor }]}>
@@ -1459,13 +1600,28 @@ function AppMain() {
                     {stats.cpu_name || "Processor"}
                   </Text>
                   <View style={s.hwTrack}>
-                    <View style={[s.hwFill, { width: `${Math.min(100, stats.cpu_percent)}%`, backgroundColor: cpuColor }]} />
+                    <View
+                      style={[
+                        s.hwFill,
+                        {
+                          width: `${Math.min(100, stats.cpu_percent)}%`,
+                          backgroundColor: cpuColor,
+                        },
+                      ]}
+                    />
                   </View>
                 </View>
 
                 {/* RAM */}
                 <View style={s.usageCard}>
-                  <View style={{ flexDirection: "row", alignItems: "center", gap: 5, marginBottom: SP.sm }}>
+                  <View
+                    style={{
+                      flexDirection: "row",
+                      alignItems: "center",
+                      gap: 5,
+                      marginBottom: SP.sm,
+                    }}
+                  >
                     <Ionicons name="server-outline" size={12} color={C.muted} />
                     <Text style={s.hwLabel}>RAM</Text>
                   </View>
@@ -1478,65 +1634,132 @@ function AppMain() {
                       : `${stats.ram_percent.toFixed(0)}% used`}
                   </Text>
                   <View style={s.hwTrack}>
-                    <View style={[s.hwFill, { width: `${Math.min(100, stats.ram_percent)}%`, backgroundColor: ramColor }]} />
+                    <View
+                      style={[
+                        s.hwFill,
+                        {
+                          width: `${Math.min(100, stats.ram_percent)}%`,
+                          backgroundColor: ramColor,
+                        },
+                      ]}
+                    />
                   </View>
                 </View>
               </View>
 
               {/* ── Running Apps ── */}
-              <View style={{ backgroundColor: C.elevated,
+              <View
+                style={{
+                  backgroundColor: C.elevated,
                   borderRadius: R.sm,
                   borderWidth: 1,
                   borderColor: C.border,
-                  padding: SP.md, }}>
+                  padding: SP.md,
+                }}
+              >
                 <View style={s.procHeader}>
                   {visibleApps.length > 5 && (
-                    <TouchableOpacity onPress={() => setShowAllProcesses(!showAllProcesses)} activeOpacity={0.7}>
+                    <TouchableOpacity
+                      onPress={() => setShowAllProcesses(!showAllProcesses)}
+                      activeOpacity={0.7}
+                    >
                       <Text style={s.procToggle}>
-                        {showAllProcesses ? "Show Less" : `View All (${visibleApps.length})`}
+                        {showAllProcesses
+                          ? "Show Less"
+                          : `View All (${visibleApps.length})`}
                       </Text>
                     </TouchableOpacity>
                   )}
                 </View>
                 <View style={s.tableHead}>
                   <Text style={[s.thCell, { flex: 3 }]}>App</Text>
-                  <Text style={[s.thCell, { flex: 1.5, textAlign: "right" }]}>Mem</Text>
+                  <Text style={[s.thCell, { flex: 1.5, textAlign: "right" }]}>
+                    Mem
+                  </Text>
                   <View style={{ width: 26 + SP.sm }} />
                 </View>
-                {(showAllProcesses ? visibleApps : visibleApps.slice(0, 5)).map((app) => (
-                  <View key={app.pid} style={s.tableRow}>
-                    <View style={{ flex: 3, paddingRight: SP.sm, justifyContent: "center" }}>
-                      <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-                        {app.is_focused && (
-                          <View style={{ width: 5, height: 5, borderRadius: 3, backgroundColor: C.success, flexShrink: 0 }} />
-                        )}
-                        <Text style={[s.tdName, { textTransform: "capitalize", flex: 1 }]} numberOfLines={1}>
-                          {app.name}
+                {(showAllProcesses ? visibleApps : visibleApps.slice(0, 5)).map(
+                  (app) => (
+                    <View key={app.pid} style={s.tableRow}>
+                      <View
+                        style={{
+                          flex: 3,
+                          paddingRight: SP.sm,
+                          justifyContent: "center",
+                        }}
+                      >
+                        <View
+                          style={{
+                            flexDirection: "row",
+                            alignItems: "center",
+                            gap: 6,
+                          }}
+                        >
+                          {app.is_focused && (
+                            <View
+                              style={{
+                                width: 5,
+                                height: 5,
+                                borderRadius: 3,
+                                backgroundColor: C.success,
+                                flexShrink: 0,
+                              }}
+                            />
+                          )}
+                          <Text
+                            style={[
+                              s.tdName,
+                              { textTransform: "capitalize", flex: 1 },
+                            ]}
+                            numberOfLines={1}
+                          >
+                            {app.name}
+                          </Text>
+                        </View>
+                        <Text
+                          style={{
+                            fontSize: F.xs - 1,
+                            color: C.muted,
+                            marginTop: 2,
+                          }}
+                          numberOfLines={1}
+                        >
+                          {app.title}
                         </Text>
                       </View>
-                      <Text style={{ fontSize: F.xs - 1, color: C.muted, marginTop: 2 }} numberOfLines={1}>
-                        {app.title}
+                      <Text
+                        style={[s.tdVal, { flex: 1.5, textAlign: "right" }]}
+                      >
+                        {app.memory_mb >= 1024
+                          ? `${(app.memory_mb / 1024).toFixed(1)} GB`
+                          : `${app.memory_mb} MB`}
                       </Text>
+                      <TouchableOpacity
+                        onPress={() => handleKillProcess(app)}
+                        style={s.killBtn}
+                        activeOpacity={0.6}
+                      >
+                        <Ionicons name="close" size={14} color={C.danger} />
+                      </TouchableOpacity>
                     </View>
-                    <Text style={[s.tdVal, { flex: 1.5, textAlign: "right" }]}>
-                      {app.memory_mb >= 1024
-                        ? `${(app.memory_mb / 1024).toFixed(1)} GB`
-                        : `${app.memory_mb} MB`}
-                    </Text>
-                    <TouchableOpacity onPress={() => handleKillProcess(app)} style={s.killBtn} activeOpacity={0.6}>
-                      <Ionicons name="close" size={14} color={C.danger} />
-                    </TouchableOpacity>
-                  </View>
-                ))}
+                  ),
+                )}
                 {visibleApps.length === 0 && (
-                  <View style={[s.screenPlaceholder, { paddingVertical: SP.lg }]}>
+                  <View
+                    style={[s.screenPlaceholder, { paddingVertical: SP.lg }]}
+                  >
                     <Text style={s.placeholderText}>No visible apps</Text>
                   </View>
                 )}
               </View>
             </>
           ) : (
-            <View style={s.screenPlaceholder}>
+            <View
+              style={[
+                s.screenPlaceholder,
+                { borderWidth: 1, borderColor: C.border, borderRadius: R.sm },
+              ]}
+            >
               <Ionicons name="pie-chart-outline" size={26} color={C.muted} />
               <Text style={s.placeholderText}>Pull down to refresh</Text>
             </View>
@@ -1559,7 +1782,12 @@ function AppMain() {
             </Text>
             <Text style={s.menuRowSub}>Shutdown, restart, or abort</Text>
           </View>
-          <Ionicons name="arrow-forward-outline" size={20} color={C.muted} style={{ paddingLeft: SP.sm }} />
+          <Ionicons
+            name="arrow-forward-outline"
+            size={20}
+            color={C.muted}
+            style={{ paddingLeft: SP.sm }}
+          />
         </TouchableOpacity>
 
         <View style={{ height: 60 }} />
@@ -1615,7 +1843,13 @@ function AppMain() {
         visible={volumeSheetOpen}
         onClose={() => setVolumeSheetOpen(false)}
         title="System Volume"
-        subtitle={isMuted ? "Muted" : currentVolume !== undefined ? `${currentVolume}%` : "Loading..."}
+        subtitle={
+          isMuted
+            ? "Muted"
+            : currentVolume !== undefined
+              ? `${currentVolume}%`
+              : "Loading..."
+        }
       >
         <View style={s.sheetContent}>
           <TouchableOpacity
@@ -1670,7 +1904,7 @@ function AppMain() {
                 style={[
                   s.volBarFill,
                   {
-                    width: `${isMuted ? 0 : (currentVolume || 0)}%`,
+                    width: `${isMuted ? 0 : currentVolume || 0}%`,
                     backgroundColor: isMuted ? C.danger : C.primary,
                   },
                 ]}
@@ -1688,7 +1922,11 @@ function AppMain() {
               <Ionicons name="remove" size={22} color={C.text} />
             </TouchableOpacity>
             <Text style={s.volStepValue}>
-              {isMuted ? "—" : currentVolume !== undefined ? `${currentVolume}%` : "..."}
+              {isMuted
+                ? "—"
+                : currentVolume !== undefined
+                  ? `${currentVolume}%`
+                  : "..."}
             </Text>
             <TouchableOpacity
               style={s.volStepBtn}
@@ -1718,7 +1956,12 @@ function AppMain() {
               }}
               activeOpacity={0.8}
             >
-              <View style={[s.powerTileIconPill, { backgroundColor: C.warning + '25' }]}>
+              <View
+                style={[
+                  s.powerTileIconPill,
+                  { backgroundColor: C.warning + "25" },
+                ]}
+              >
                 <Ionicons name="refresh" size={24} color={C.warning} />
               </View>
               <View>
@@ -1735,7 +1978,12 @@ function AppMain() {
               }}
               activeOpacity={0.8}
             >
-              <View style={[s.powerTileIconPill, { backgroundColor: C.danger + '25' }]}>
+              <View
+                style={[
+                  s.powerTileIconPill,
+                  { backgroundColor: C.danger + "25" },
+                ]}
+              >
                 <Ionicons name="power" size={24} color={C.danger} />
               </View>
               <View>
@@ -1752,25 +2000,38 @@ function AppMain() {
             }}
             activeOpacity={0.7}
           >
-            <Ionicons name="close-circle" size={20} color={C.sub} style={{ marginRight: 8 }} />
+            <Ionicons
+              name="close-circle"
+              size={20}
+              color={C.sub}
+              style={{ marginRight: 8 }}
+            />
             <Text style={s.powerAbortText}>Abort Active Action</Text>
           </TouchableOpacity>
         </View>
       </BottomSheet>
 
       {/* ═══ IMAGE DETAIL MODAL ═══ */}
-      <Modal visible={imageModalOpen} transparent animationType="fade" statusBarTranslucent>
+      <Modal
+        visible={imageModalOpen}
+        transparent
+        animationType="fade"
+        statusBarTranslucent
+      >
         <GestureHandlerRootView style={{ flex: 1 }}>
           <View style={s.imgModalRoot}>
             {/* Zoomable image — takes full screen, centered */}
-            <View style={[
-              StyleSheet.absoluteFillObject, 
-              { 
-                justifyContent: 'center', 
-                alignItems: 'center',
-                paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 0
-              }
-            ]}>
+            <View
+              style={[
+                StyleSheet.absoluteFillObject,
+                {
+                  justifyContent: "center",
+                  alignItems: "center",
+                  paddingTop:
+                    Platform.OS === "android" ? StatusBar.currentHeight : 0,
+                },
+              ]}
+            >
               {hiResImage ? (
                 <ZoomableImage uri={hiResImage} />
               ) : (
@@ -1796,15 +2057,28 @@ function AppMain() {
                 style={s.imgModalRefreshBtn}
                 activeOpacity={0.7}
               >
-                <SpinningIcon name="sync-outline" size={16} color={C.text} spinning={hiResLoading} />
+                <SpinningIcon
+                  name="sync-outline"
+                  size={16}
+                  color={C.text}
+                  spinning={hiResLoading}
+                />
               </TouchableOpacity>
             </View>
 
             {/* Hi-res loading indicator */}
             {hiResLoading && (
               <View style={s.imgModalLoadingPill}>
-                <ActivityIndicator size="small" color={C.primary} style={{ marginRight: 8 }} />
-                <Text style={{ color: C.sub, fontSize: F.xs, fontWeight: '600' }}>Loading high resolution…</Text>
+                <ActivityIndicator
+                  size="small"
+                  color={C.primary}
+                  style={{ marginRight: 8 }}
+                />
+                <Text
+                  style={{ color: C.sub, fontSize: F.xs, fontWeight: "600" }}
+                >
+                  Loading high resolution…
+                </Text>
               </View>
             )}
           </View>
@@ -2159,8 +2433,6 @@ const s = StyleSheet.create({
   screenPlaceholder: {
     justifyContent: "center",
     alignItems: "center",
-    borderWidth: 1,
-    borderColor: C.border,
     paddingVertical: SP.xxl,
   },
   placeholderText: {
@@ -2351,10 +2623,14 @@ const s = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     paddingVertical: 9,
-
   },
   tdName: { fontSize: F.md, fontWeight: "600", color: C.text },
-  tdVal: { fontSize: F.sm, color: C.muted, fontWeight: "500", alignSelf: "center" },
+  tdVal: {
+    fontSize: F.sm,
+    color: C.muted,
+    fontWeight: "500",
+    alignSelf: "center",
+  },
   killBtn: {
     width: 26,
     height: 26,
@@ -2526,9 +2802,14 @@ const s = StyleSheet.create({
     alignItems: "center",
     marginBottom: SP.lg,
   },
-  powerTileTitle: { fontSize: F.lg, fontWeight: "800", color: C.text, marginBottom: 2 },
+  powerTileTitle: {
+    fontSize: F.lg,
+    fontWeight: "800",
+    color: C.text,
+    marginBottom: 2,
+  },
   powerTileSub: { fontSize: F.xs, fontWeight: "600", color: C.muted },
-  
+
   powerAbortBtn: {
     flexDirection: "row",
     borderWidth: 1,

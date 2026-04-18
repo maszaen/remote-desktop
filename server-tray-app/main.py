@@ -206,12 +206,9 @@ def capture_screen(quality: str = "low"):
         corner_px = screenshot.getpixel((10, 10))
         print(f"[SCREEN] quality={quality}, size={w}x{h}, mode={mode}, center_px={center_px}, corner_px={corner_px}")
         if quality == "high":
-            # Save debug copy to disk for inspection
-            debug_path = os.path.join(os.path.dirname(__file__), "debug_screenshot.png")
-            screenshot.save(debug_path, format="PNG")
-            debug_size = os.path.getsize(debug_path) / 1024
-            print(f"[SCREEN] debug saved to {debug_path} ({debug_size:.1f}KB)")
-            # Full native resolution, lossless PNG for sharp text/details
+            # Cap at 1920px width for mobile
+            if w > 1920:
+                screenshot.thumbnail((1920, 1080))
             img_byte_arr = io.BytesIO()
             screenshot.save(img_byte_arr, format="PNG")
             mime = "image/png"
@@ -228,6 +225,40 @@ def capture_screen(quality: str = "low"):
     except Exception as e:
         print(f"[SCREEN] ERROR: {e}")
         return {"error": str(e)}
+
+
+@app.get("/screen/raw")
+def capture_screen_raw(quality: str = "high", token: str = None):
+    """Serve screenshot as raw binary image. Auth via query param for Image component."""
+    # Auth via query param (device ID)
+    if not token or (token not in TRUSTED_DEVICES and token != PAIRING_CODE):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    try:
+        screenshot = pyautogui.screenshot()
+        w, h = screenshot.size
+        print(f"[SCREEN/RAW] quality={quality}, native={w}x{h}")
+        img_byte_arr = io.BytesIO()
+        if quality == "high":
+            # Cap at 1920 — sweet spot for mobile sharpness
+            if w > 1920:
+                screenshot.thumbnail((1920, 1080))
+                print(f"[SCREEN/RAW] resized to {screenshot.size[0]}x{screenshot.size[1]}")
+            screenshot.save(img_byte_arr, format="PNG")
+            media_type = "image/png"
+        else:
+            screenshot.thumbnail((1280, 720))
+            screenshot.save(img_byte_arr, format="JPEG", quality=40)
+            media_type = "image/jpeg"
+        size_kb = len(img_byte_arr.getvalue()) / 1024
+        print(f"[SCREEN/RAW] output={size_kb:.1f}KB")
+        return Response(
+            content=img_byte_arr.getvalue(),
+            media_type=media_type,
+            headers={"Cache-Control": "no-cache"}
+        )
+    except Exception as e:
+        print(f"[SCREEN/RAW] ERROR: {e}")
+        return Response(content=str(e), status_code=500)
 
 
 @app.get("/apps", dependencies=[Depends(verify_pin)])
