@@ -141,6 +141,7 @@ const ZoomableImage = ({ uri }) => {
   const pinchY = useSharedValue(0);
   const originX = useSharedValue(0);
   const originY = useSharedValue(0);
+  const pinchActive = useSharedValue(0);
 
   useEffect(() => {
     scale.value = 1;         savedScale.value = 1;
@@ -151,6 +152,7 @@ const ZoomableImage = ({ uri }) => {
 
   const pinchGesture = Gesture.Pinch()
     .onStart((e) => {
+      pinchActive.value = 1;
       savedScale.value = scale.value;
       // focalX is in view-local coords (GestureDetector wraps absoluteFill = screen)
       // Subtract offsetBase to get distance from visual image center to fingers
@@ -238,6 +240,7 @@ const ZoomableImage = ({ uri }) => {
       pinchX.value = 0;
       pinchY.value = 0;
       savedScale.value = targetScale;
+      pinchActive.value = 0;
     });
 
   const panGesture = Gesture.Pan()
@@ -255,6 +258,14 @@ const ZoomableImage = ({ uri }) => {
       panY.value = e.translationY;
     })
     .onEnd((e) => {
+      // If pinch just ended and handled the auto-zoom-out, skip pan's own
+      // folding/animation — pinch already folded panX/panY and started
+      // viewport-centered springs that we must not overwrite.
+      if (panX.value === 0 && panY.value === 0 &&
+          (scale.value < 1 || scale.value > 5)) {
+        return;
+      }
+
       offsetBaseX.value += panX.value;
       offsetBaseY.value += panY.value;
       panX.value = 0;
@@ -277,9 +288,14 @@ const ZoomableImage = ({ uri }) => {
       if (targetScale !== scale.value) {
         // If scale is out of bounds, Pan must ensure scale and positions bounce back properly.
         // This handles cases where the user interrupted a scale bounce with a drag, then released.
+        const ratio = targetScale / scale.value;
+        let targetX = cx * ratio;
+        let targetY = cy * ratio;
+        targetX = Math.max(-maxX, Math.min(maxX, targetX));
+        targetY = Math.max(-maxY, Math.min(maxY, targetY));
         scale.value = withSpring(targetScale);
-        offsetBaseX.value = withSpring(clampX(cx));
-        offsetBaseY.value = withSpring(clampY(cy));
+        offsetBaseX.value = withSpring(targetX);
+        offsetBaseY.value = withSpring(targetY);
       } else {
         const outOfBoundsX = cx < -maxX || cx > maxX;
         const outOfBoundsY = cy < -maxY || cy > maxY;
