@@ -652,6 +652,29 @@ def start_server():
 
 
 if __name__ == "__main__":
+    import socket
+    import ctypes
+    import sys
+
+    # Check if port is already in use to prevent duplicate instances
+    def check_port_free(port):
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            s.bind(("0.0.0.0", port))
+            s.close()
+            return True
+        except OSError:
+            return False
+
+    if not check_port_free(8000):
+        ctypes.windll.user32.MessageBoxW(
+            0,
+            "Port 8000 is already in use.\nAnother instance of Nexus PC Remote is likely already running.",
+            "Nexus PC Remote - Error",
+            0x10,  # OK button, Error icon
+        )
+        sys.exit(1)
+
     server_thread = threading.Thread(target=start_server, daemon=True)
     server_thread.start()
 

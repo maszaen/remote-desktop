@@ -132,15 +132,13 @@ const IMG_H = SCREEN_WIDTH * (9 / 16);
 const ZoomableImage = ({ uri }) => {
   const scale = useSharedValue(1);
   const savedScale = useSharedValue(1);
-  
+
   const offsetBaseX = useSharedValue(0);
   const offsetBaseY = useSharedValue(0);
-  
   const panX = useSharedValue(0);
   const panY = useSharedValue(0);
   const pinchX = useSharedValue(0);
   const pinchY = useSharedValue(0);
-
   const originX = useSharedValue(0);
   const originY = useSharedValue(0);
 
@@ -154,41 +152,103 @@ const ZoomableImage = ({ uri }) => {
   const pinchGesture = Gesture.Pinch()
     .onStart((e) => {
       savedScale.value = scale.value;
-      // Because we moved GestureDetector to absolute screen container,
-      // focalX is screen coordinate! We just need distance from screen center.
-      // BUT since the image might be PANNED, the true origin relative to the image's visual center
-      // must account for where the image currently is!
+      // focalX is in view-local coords (GestureDetector wraps absoluteFill = screen)
+      // Subtract offsetBase to get distance from visual image center to fingers
       originX.value = e.focalX - (SCREEN_WIDTH / 2) - offsetBaseX.value;
       originY.value = e.focalY - (SCREEN_HEIGHT / 2) - offsetBaseY.value;
     })
     .onUpdate((e) => {
       scale.value = savedScale.value * e.scale;
-      // The expansion pushes originX further out by (scale - 1)
-      pinchX.value = -originX.value * (e.scale - 1);
-      pinchY.value = -originY.value * (e.scale - 1);
+      // Ideal shift to keep the finger focal-point fixed
+      let purePinchX = -originX.value * (e.scale - 1);
+      let purePinchY = -originY.value * (e.scale - 1);
+
+      // Determine correct boundaries for the CURRENT live scale
+      const scaledW = IMG_W * scale.value;
+      const scaledH = IMG_H * scale.value;
+      const maxX = Math.max(0, (scaledW - SCREEN_WIDTH) / 2);
+      const maxY = Math.max(0, (scaledH - SCREEN_HEIGHT) / 2);
+
+      // Where the image "wants" to be optically
+      const pureVisualX = offsetBaseX.value + panX.value + purePinchX;
+      const pureVisualY = offsetBaseY.value + panY.value + purePinchY;
+
+      // Soft clamp: If the user zooms out at an edge, we slide the image
+      // along the wall to prevent pulling empty whitespace into the viewport.
+      let clampedX = pureVisualX;
+      let clampedY = pureVisualY;
+      
+      if (scale.value >= 1) {
+        clampedX = Math.max(-maxX, Math.min(maxX, pureVisualX));
+        clampedY = Math.max(-maxY, Math.min(maxY, pureVisualY));
+      }
+      // When scale < 1, let the image follow the pinch origin freely
+      // (centering is enforced on release via auto zoom-back-to-1)
+
+      // Override pinch translation to respect these bounds
+      pinchX.value = clampedX - offsetBaseX.value - panX.value;
+      pinchY.value = clampedY - offsetBaseY.value - panY.value;
     })
     .onEnd(() => {
-      offsetBaseX.value += pinchX.value;
-      offsetBaseY.value += pinchY.value;
+      // Fold everything into base to capture exact visual state
+      offsetBaseX.value += pinchX.value + panX.value;
+      offsetBaseY.value += pinchY.value + panY.value;
+
       pinchX.value = 0;
       pinchY.value = 0;
-      savedScale.value = scale.value;
+      panX.value = 0;
+      panY.value = 0;
 
-      if (scale.value < 1) {
-        scale.value = withSpring(1);
-        savedScale.value = 1;
-        offsetBaseX.value = withSpring(0);
-        offsetBaseY.value = withSpring(0);
-      } else if (scale.value > 5) {
-        scale.value = withSpring(5);
-        savedScale.value = 5;
+      let targetScale = scale.value;
+      if (scale.value < 1) targetScale = 1;
+      else if (scale.value > 5) targetScale = 5;
+
+      if (targetScale !== scale.value) {
+        // Viewport-centered zoom: scale the offset proportionally so that
+        // the point currently at the viewport center stays fixed.
+        const ratio = targetScale / scale.value;
+        let targetX = offsetBaseX.value * ratio;
+        let targetY = offsetBaseY.value * ratio;
+
+        const scaledW = IMG_W * targetScale;
+        const scaledH = IMG_H * targetScale;
+        const maxX = Math.max(0, (scaledW - SCREEN_WIDTH) / 2);
+        const maxY = Math.max(0, (scaledH - SCREEN_HEIGHT) / 2);
+        targetX = Math.max(-maxX, Math.min(maxX, targetX));
+        targetY = Math.max(-maxY, Math.min(maxY, targetY));
+
+        offsetBaseX.value = withSpring(targetX);
+        offsetBaseY.value = withSpring(targetY);
+        scale.value = withSpring(targetScale);
+      } else {
+        const scaledW = IMG_W * targetScale;
+        const scaledH = IMG_H * targetScale;
+        const maxX = Math.max(0, (scaledW - SCREEN_WIDTH) / 2);
+        const maxY = Math.max(0, (scaledH - SCREEN_HEIGHT) / 2);
+        const cx = offsetBaseX.value;
+        const cy = offsetBaseY.value;
+        const clampedX = Math.max(-maxX, Math.min(maxX, cx));
+        const clampedY = Math.max(-maxY, Math.min(maxY, cy));
+        if (cx !== clampedX || cy !== clampedY) {
+          offsetBaseX.value = withSpring(clampedX);
+          offsetBaseY.value = withSpring(clampedY);
+        }
       }
+
+      pinchX.value = 0;
+      pinchY.value = 0;
+      savedScale.value = targetScale;
     });
 
   const panGesture = Gesture.Pan()
-    .onStart(() => {
+    .averageTouches(true)
+    .onStart((e) => {
       cancelAnimation(offsetBaseX);
       cancelAnimation(offsetBaseY);
+      offsetBaseX.value += panX.value;
+      offsetBaseY.value += panY.value;
+      panX.value = 0;
+      panY.value = 0;
     })
     .onUpdate((e) => {
       panX.value = e.translationX;
@@ -200,25 +260,30 @@ const ZoomableImage = ({ uri }) => {
       panX.value = 0;
       panY.value = 0;
 
-      if (scale.value <= 1) {
-        offsetBaseX.value = withSpring(0);
-        offsetBaseY.value = withSpring(0);
+      let targetScale = scale.value;
+      if (scale.value < 1) targetScale = 1;
+      else if (scale.value > 5) targetScale = 5;
+
+      const scaledW = IMG_W * targetScale;
+      const scaledH = IMG_H * targetScale;
+      const maxX = Math.max(0, (scaledW - SCREEN_WIDTH) / 2);
+      const maxY = Math.max(0, (scaledH - SCREEN_HEIGHT) / 2);
+      const clampX = (v) => Math.max(-maxX, Math.min(maxX, v));
+      const clampY = (v) => Math.max(-maxY, Math.min(maxY, v));
+      
+      const cx = offsetBaseX.value;
+      const cy = offsetBaseY.value;
+
+      if (targetScale !== scale.value) {
+        // If scale is out of bounds, Pan must ensure scale and positions bounce back properly.
+        // This handles cases where the user interrupted a scale bounce with a drag, then released.
+        scale.value = withSpring(targetScale);
+        offsetBaseX.value = withSpring(clampX(cx));
+        offsetBaseY.value = withSpring(clampY(cy));
       } else {
-        const scaledW = IMG_W * scale.value;
-        const scaledH = IMG_H * scale.value;
-        const maxX = Math.max(0, (scaledW - SCREEN_WIDTH) / 2);
-        const maxY = Math.max(0, (scaledH - SCREEN_HEIGHT) / 2);
-
-        const clampX = (v) => Math.max(-maxX, Math.min(maxX, v));
-        const clampY = (v) => Math.max(-maxY, Math.min(maxY, v));
-
-        const cx = offsetBaseX.value;
-        const cy = offsetBaseY.value;
-
         const outOfBoundsX = cx < -maxX || cx > maxX;
         const outOfBoundsY = cy < -maxY || cy > maxY;
         const lowVelocity = Math.abs(e.velocityX) < 100 && Math.abs(e.velocityY) < 100;
-
         if (lowVelocity || outOfBoundsX || outOfBoundsY) {
           offsetBaseX.value = withSpring(clampX(cx));
           offsetBaseY.value = withSpring(clampY(cy));
@@ -239,21 +304,16 @@ const ZoomableImage = ({ uri }) => {
         offsetBaseY.value = withSpring(0);
       } else {
         const targetScale = 2.5;
-        // Since container is screen size, e.x is absolute screen position
         const dx = e.x - (SCREEN_WIDTH / 2);
         const dy = e.y - (SCREEN_HEIGHT / 2);
-
         const offsetX = -dx * (targetScale - 1);
         const offsetY = -dy * (targetScale - 1);
-
         const scaledW = IMG_W * targetScale;
         const scaledH = IMG_H * targetScale;
         const maxX = Math.max(0, (scaledW - SCREEN_WIDTH) / 2);
         const maxY = Math.max(0, (scaledH - SCREEN_HEIGHT) / 2);
-
         const clampedX = Math.max(-maxX, Math.min(maxX, offsetX));
         const clampedY = Math.max(-maxY, Math.min(maxY, offsetY));
-
         scale.value = withSpring(targetScale);
         savedScale.value = targetScale;
         offsetBaseX.value = withSpring(clampedX);
@@ -1415,7 +1475,6 @@ function AppMain() {
                   borderColor: C.border,
                   padding: SP.md, }}>
                 <View style={s.procHeader}>
-                  <Text style={s.procTitle}>Running Apps</Text>
                   {visibleApps.length > 5 && (
                     <TouchableOpacity onPress={() => setShowAllProcesses(!showAllProcesses)} activeOpacity={0.7}>
                       <Text style={s.procToggle}>
