@@ -747,6 +747,15 @@ function AppMain() {
   const [mediaSheetOpen, setMediaSheetOpen] = useState(false);
   const [volumeSheetOpen, setVolumeSheetOpen] = useState(false);
   const [powerSheetOpen, setPowerSheetOpen] = useState(false);
+  const [shortcutSheetOpen, setShortcutSheetOpen] = useState(false);
+
+  // Mouse Jiggler
+  const [jigglerActive, setJigglerActive] = useState(false);
+  const [jigglerLoading, setJigglerLoading] = useState(false);
+
+  // Live Screen (auto-refresh 1fps in image modal)
+  const [liveScreenActive, setLiveScreenActive] = useState(false);
+  const liveScreenRef = useRef(null);
 
   useEffect(() => {
     const init = async () => {
@@ -915,6 +924,7 @@ function AppMain() {
       getStats(url, savedPin);
       captureScreen(url, savedPin);
       fetchApps(url, savedPin);
+      fetchJigglerStatus(url, savedPin);
     } catch (e) {
     } finally {
       setLoadingAction("");
@@ -938,6 +948,7 @@ function AppMain() {
       getStats(url, inputPin);
       captureScreen(url, inputPin);
       fetchApps(url, inputPin);
+      fetchJigglerStatus(url, inputPin);
     } else
       Alert.alert("Pairing Failed", "Incorrect Code or Server unreachable.");
     setLoadingAction("");
@@ -980,6 +991,12 @@ function AppMain() {
     setVisibleApps([]);
     setScreenshot(null);
     setActivePin(null);
+    setJigglerActive(false);
+    setLiveScreenActive(false);
+    if (liveScreenRef.current) {
+      clearTimeout(liveScreenRef.current);
+      liveScreenRef.current = null;
+    }
   };
 
   useEffect(() => {
@@ -998,6 +1015,10 @@ function AppMain() {
       }
       if (powerSheetOpen) {
         setPowerSheetOpen(false);
+        return true;
+      }
+      if (shortcutSheetOpen) {
+        setShortcutSheetOpen(false);
         return true;
       }
       if (isScanningQR) {
@@ -1043,6 +1064,7 @@ function AppMain() {
     mediaSheetOpen,
     volumeSheetOpen,
     powerSheetOpen,
+    shortcutSheetOpen,
     isScanningQR,
     pairingModalOpen,
     renameTarget,
@@ -1195,6 +1217,71 @@ function AppMain() {
       },
     ]);
   };
+
+  // ── Mouse Jiggler ──
+  const handleToggleJiggler = async () => {
+    setJigglerLoading(true);
+    const action = jigglerActive ? "stop" : "start";
+    const r = await sendAction(`/jiggler/${action}`);
+    if (r && !r.error) setJigglerActive(r.active);
+    setJigglerLoading(false);
+  };
+  const fetchJigglerStatus = async (url = null, pin = null) => {
+    const d = await sendAction("/jiggler", "GET", null, url, pin);
+    if (d && d.active !== undefined) setJigglerActive(d.active);
+  };
+
+  // ── Keyboard Shortcuts ──
+  const sendShortcut = async (shortcut) => {
+    await sendAction("/shortcut", "POST", { shortcut });
+  };
+
+  // ── Panic Button ──
+  const handlePanic = async () => {
+    await sendAction("/panic");
+  };
+
+  // ── Live Screen ──
+  const startLiveScreen = () => {
+    setLiveScreenActive(true);
+  };
+  const stopLiveScreen = () => {
+    setLiveScreenActive(false);
+    if (liveScreenRef.current) {
+      clearTimeout(liveScreenRef.current);
+      liveScreenRef.current = null;
+    }
+  };
+
+  useEffect(() => {
+    if (liveScreenActive && imageModalOpen) {
+      const tick = async () => {
+        try {
+          const rawUrl = `${serverUrl}/screen/raw?quality=low&token=${deviceId}&t=${Date.now()}`;
+          await Image.prefetch(rawUrl);
+          setHiResImage(rawUrl);
+        } catch (e) {
+          console.warn("Live screen fetch failed", e);
+        }
+        if (liveScreenActive) {
+          liveScreenRef.current = setTimeout(tick, 1200); // ~1fps with network latency
+        }
+      };
+      tick();
+    } else {
+      if (liveScreenRef.current) {
+        clearTimeout(liveScreenRef.current);
+        liveScreenRef.current = null;
+      }
+    }
+    return () => {
+      if (liveScreenRef.current) {
+        clearTimeout(liveScreenRef.current);
+        liveScreenRef.current = null;
+      }
+    };
+  }, [liveScreenActive, imageModalOpen]);
+
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     try {
@@ -1203,6 +1290,7 @@ function AppMain() {
         fetchApps(),
         getStats(),
         captureScreen(),
+        fetchJigglerStatus(),
       ]);
     } catch (e) {
       console.warn("Refresh error", e);
@@ -1221,6 +1309,7 @@ function AppMain() {
         getStats();
         fetchApps();
         fetchVolume();
+        fetchJigglerStatus();
       }, 500);
     }
     if (!isConnected) {
@@ -1695,6 +1784,58 @@ function AppMain() {
         </TouchableOpacity>
         <View style={s.sep} />
 
+        {/* Keyboard Shortcuts row */}
+        <TouchableOpacity
+          style={s.menuRow}
+          onPress={() => setShortcutSheetOpen(true)}
+          activeOpacity={0.6}
+        >
+          <View style={[s.menuRowIcon, { backgroundColor: C.warningDim }]}>
+            <Ionicons name="keypad" size={18} color={C.warning} />
+          </View>
+          <View style={s.menuRowBody}>
+            <Text style={s.menuRowTitle}>Keyboard Shortcuts</Text>
+            <Text style={s.menuRowSub}>Alt-Tab, Ctrl-S, Show Desktop</Text>
+          </View>
+          <Ionicons
+            name="arrow-forward-outline"
+            size={20}
+            color={C.muted}
+            style={{ paddingRight: SP.sm }}
+          />
+        </TouchableOpacity>
+        <View style={s.sep} />
+
+        {/* Mouse Jiggler row */}
+        <TouchableOpacity
+          style={s.menuRow}
+          onPress={handleToggleJiggler}
+          disabled={jigglerLoading}
+          activeOpacity={0.6}
+        >
+          <View style={[s.menuRowIcon, { backgroundColor: jigglerActive ? C.successDim : C.elevated }]}>
+            <MaterialCommunityIcons
+              name="cursor-move"
+              size={18}
+              color={jigglerActive ? C.success : C.sub}
+            />
+          </View>
+          <View style={s.menuRowBody}>
+            <Text style={s.menuRowTitle}>Mouse Jiggler</Text>
+            <Text style={[s.menuRowSub, jigglerActive && { color: C.success }]}>
+              {jigglerLoading ? "Loading..." : jigglerActive ? "Active — PC will stay awake" : "Off — tap to keep PC awake"}
+            </Text>
+          </View>
+          {jigglerLoading ? (
+            <ActivityIndicator size="small" color={C.primary} style={{ paddingRight: SP.sm }} />
+          ) : (
+            <View style={[s.jigglerToggle, jigglerActive && s.jigglerToggleActive]}>
+              <View style={[s.jigglerDot, jigglerActive && s.jigglerDotActive]} />
+            </View>
+          )}
+        </TouchableOpacity>
+        <View style={s.sep} />
+
         {/* Live Desktop */}
         <View style={{ paddingTop: SP.lg }}>
           <View style={s.sectionHeaderRow}>
@@ -1776,13 +1917,23 @@ function AppMain() {
             )}
           </View>
 
-          {/* ── Active Window Pill ── */}
+          {/* ── Active Window Pill with Panic ── */}
           {stats?.active_window && (
             <View style={s.activeWinPill}>
-              <Text style={s.hwLabel}>Active Window</Text>
-              <Text style={s.activeWinValue} numberOfLines={1}>
-                {stats.active_window}
-              </Text>
+              <View style={{ flex: 1 }}>
+                <Text style={s.hwLabel}>Active Window</Text>
+                <Text style={s.activeWinValue} numberOfLines={1}>
+                  {stats.active_window}
+                </Text>
+              </View>
+              <TouchableOpacity
+                style={s.panicBtn}
+                onPress={handlePanic}
+                activeOpacity={0.7}
+              >
+                <Ionicons name="eye-off" size={14} color={C.danger} />
+                <Text style={s.panicBtnText}>HIDE</Text>
+              </TouchableOpacity>
             </View>
           )}
         </View>
@@ -2263,13 +2414,91 @@ function AppMain() {
         </View>
       </BottomSheet>
 
+      {/* ═══ KEYBOARD SHORTCUTS SHEET ═══ */}
+      <BottomSheet
+        visible={shortcutSheetOpen}
+        onClose={() => setShortcutSheetOpen(false)}
+        title="Keyboard Shortcuts"
+        subtitle="Quick actions for your PC"
+      >
+        <View style={s.sheetContent}>
+          <TouchableOpacity
+            style={s.powerRow}
+            onPress={() => sendShortcut("alt-tab")}
+            activeOpacity={0.7}
+          >
+            <View style={[s.powerRowIcon, { backgroundColor: C.primaryDim }]}>
+              <Ionicons name="swap-horizontal" size={22} color={C.primary} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={s.powerRowTitle}>Next App</Text>
+              <Text style={s.powerRowSub}>Alt + Tab</Text>
+            </View>
+          </TouchableOpacity>
+
+          <View style={[s.sep, { marginLeft: 56, marginVertical: 0 }]} />
+
+          <TouchableOpacity
+            style={s.powerRow}
+            onPress={() => sendShortcut("alt-shift-tab")}
+            activeOpacity={0.7}
+          >
+            <View style={[s.powerRowIcon, { backgroundColor: C.primaryDim }]}>
+              <Ionicons name="swap-horizontal" size={22} color={C.primary} style={{ transform: [{ scaleX: -1 }] }} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={s.powerRowTitle}>Previous App</Text>
+              <Text style={s.powerRowSub}>Alt + Shift + Tab</Text>
+            </View>
+          </TouchableOpacity>
+
+          <View style={[s.sep, { marginLeft: 56, marginVertical: 0 }]} />
+
+          <TouchableOpacity
+            style={s.powerRow}
+            onPress={() => sendShortcut("ctrl-s")}
+            activeOpacity={0.7}
+          >
+            <View style={[s.powerRowIcon, { backgroundColor: C.successDim }]}>
+              <Ionicons name="save" size={22} color={C.success} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={s.powerRowTitle}>Save</Text>
+              <Text style={s.powerRowSub}>Ctrl + S</Text>
+            </View>
+          </TouchableOpacity>
+
+          <View style={[s.sep, { marginLeft: 56, marginVertical: 0 }]} />
+
+          <TouchableOpacity
+            style={s.powerRow}
+            onPress={() => {
+              sendShortcut("win-d");
+              setShortcutSheetOpen(false);
+            }}
+            activeOpacity={0.7}
+          >
+            <View style={[s.powerRowIcon, { backgroundColor: C.dangerDim }]}>
+              <Ionicons name="desktop" size={22} color={C.danger} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={s.powerRowTitle}>Show Desktop</Text>
+              <Text style={s.powerRowSub}>Win + D — Hide all windows</Text>
+            </View>
+          </TouchableOpacity>
+        </View>
+      </BottomSheet>
+
       {/* ═══ IMAGE DETAIL MODAL ═══ */}
       <Modal
         visible={imageModalOpen}
         transparent
         animationType="fade"
         statusBarTranslucent
-        onRequestClose={() => setImageModalOpen(false)}
+        onRequestClose={() => {
+          setImageModalOpen(false);
+          stopLiveScreen();
+        }}
       >
         <GestureHandlerRootView style={{ flex: 1 }}>
           <View style={s.imgModalRoot}>
@@ -2297,7 +2526,10 @@ function AppMain() {
             {/* Floating top bar — overlays the image */}
             <View style={s.imgModalTopBar}>
               <TouchableOpacity
-                onPress={() => setImageModalOpen(false)}
+                onPress={() => {
+                  setImageModalOpen(false);
+                  stopLiveScreen();
+                }}
                 style={s.imgModalCloseBtn}
                 activeOpacity={0.7}
               >
@@ -2319,21 +2551,52 @@ function AppMain() {
               </TouchableOpacity>
             </View>
 
-            {/* Hi-res loading indicator */}
-            {hiResLoading && (
-              <View style={s.imgModalLoadingPill}>
-                <ActivityIndicator
-                  size="small"
-                  color={C.primary}
-                  style={{ marginRight: 8 }}
+            {/* Bottom floating bar — live screen toggle + loading */}
+            <View style={s.imgModalBottomBar}>
+              {hiResLoading && (
+                <View style={s.imgModalLoadingPill}>
+                  <ActivityIndicator
+                    size="small"
+                    color={C.primary}
+                    style={{ marginRight: 8 }}
+                  />
+                  <Text
+                    style={{ color: C.sub, fontSize: F.xs, fontWeight: "600" }}
+                  >
+                    Loading high resolution…
+                  </Text>
+                </View>
+              )}
+              <TouchableOpacity
+                style={[
+                  s.liveScreenBtn,
+                  liveScreenActive && s.liveScreenBtnActive,
+                ]}
+                onPress={() => {
+                  if (liveScreenActive) {
+                    stopLiveScreen();
+                  } else {
+                    startLiveScreen();
+                  }
+                }}
+                activeOpacity={0.7}
+              >
+                {liveScreenActive && <BlinkDot color={C.danger} />}
+                <Ionicons
+                  name={liveScreenActive ? "videocam" : "videocam-outline"}
+                  size={16}
+                  color={liveScreenActive ? C.danger : C.sub}
                 />
                 <Text
-                  style={{ color: C.sub, fontSize: F.xs, fontWeight: "600" }}
+                  style={[
+                    s.liveScreenBtnText,
+                    liveScreenActive && { color: C.danger },
+                  ]}
                 >
-                  Loading high resolution…
+                  {liveScreenActive ? "LIVE" : "Go Live"}
                 </Text>
-              </View>
-            )}
+              </TouchableOpacity>
+            </View>
           </View>
         </GestureHandlerRootView>
       </Modal>
@@ -2755,9 +3018,6 @@ const s = StyleSheet.create({
     height: SCREEN_WIDTH * (9 / 16),
   },
   imgModalLoadingPill: {
-    position: "absolute",
-    bottom: Platform.OS === "ios" ? 40 : 24,
-    alignSelf: "center",
     flexDirection: "row",
     alignItems: "center",
     backgroundColor: "rgba(255,255,255,0.08)",
@@ -3077,4 +3337,81 @@ const s = StyleSheet.create({
     marginBottom: 2,
   },
   powerRowSub: { fontSize: F.xs, fontWeight: "500", color: C.muted },
+
+  // ── Panic Button ──
+  panicBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    backgroundColor: C.dangerDim,
+    paddingHorizontal: SP.sm + 4,
+    paddingVertical: SP.xs + 2,
+    borderRadius: R.full,
+    borderWidth: 1,
+    borderColor: C.danger + "30",
+  },
+  panicBtnText: {
+    fontSize: F.xs,
+    fontWeight: "800",
+    color: C.danger,
+    letterSpacing: 0.5,
+  },
+
+  // ── Mouse Jiggler Toggle ──
+  jigglerToggle: {
+    width: 44,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: C.elevated,
+    borderWidth: 1,
+    borderColor: C.border,
+    padding: 2,
+    justifyContent: "center",
+    marginRight: SP.sm,
+  },
+  jigglerToggleActive: {
+    backgroundColor: C.success + "30",
+    borderColor: C.success + "50",
+  },
+  jigglerDot: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: C.muted,
+  },
+  jigglerDotActive: {
+    backgroundColor: C.success,
+    alignSelf: "flex-end",
+  },
+
+  // ── Live Screen Button ──
+  imgModalBottomBar: {
+    position: "absolute",
+    bottom: Platform.OS === "ios" ? 40 : 24,
+    alignSelf: "center",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: SP.sm,
+  },
+  liveScreenBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: "rgba(255,255,255,0.08)",
+    paddingHorizontal: SP.md,
+    paddingVertical: SP.sm,
+    borderRadius: R.full,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.06)",
+  },
+  liveScreenBtnActive: {
+    backgroundColor: C.danger + "18",
+    borderColor: C.danger + "40",
+  },
+  liveScreenBtnText: {
+    fontSize: F.xs,
+    fontWeight: "700",
+    color: C.sub,
+    letterSpacing: 0.5,
+  },
 });

@@ -10,6 +10,7 @@ import subprocess
 import random
 import ctypes
 from fastapi import FastAPI, Response, HTTPException, Depends, Header
+import time
 from pydantic import BaseModel
 from pystray import Icon, Menu, MenuItem
 from PIL import Image, ImageDraw
@@ -50,6 +51,27 @@ def save_trusted_devices(trusted_set):
 PAIRING_CODE = str(random.randint(1000, 9999))
 TRUSTED_DEVICES = load_trusted_devices()
 IS_REMOTE_CONNECTED = False
+
+# Mouse Jiggler state
+MOUSE_JIGGLER_ACTIVE = False
+MOUSE_JIGGLER_THREAD = None
+
+def mouse_jiggler_loop():
+    """Background thread: nudge the cursor every 30s to keep PC awake."""
+    global MOUSE_JIGGLER_ACTIVE
+    direction = 1
+    while MOUSE_JIGGLER_ACTIVE:
+        try:
+            pyautogui.moveRel(direction, 0, duration=0.1)
+            direction *= -1  # alternate left/right so cursor stays put
+        except Exception:
+            pass
+        # Sleep in small increments so the thread can stop quickly
+        for _ in range(60):
+            if not MOUSE_JIGGLER_ACTIVE:
+                break
+            time.sleep(0.5)
+    print("[JIGGLER] Stopped")
 
 app = FastAPI(title="Nexus PC Remote")
 
@@ -530,6 +552,67 @@ def get_stats():
         }
     except Exception as e:
         return {"error": str(e)}
+
+
+# ── Mouse Jiggler ──
+@app.get("/jiggler", dependencies=[Depends(verify_pin)])
+def get_jiggler_status():
+    return {"active": MOUSE_JIGGLER_ACTIVE}
+
+
+@app.post("/jiggler/{action}", dependencies=[Depends(verify_pin)])
+def toggle_jiggler(action: str):
+    global MOUSE_JIGGLER_ACTIVE, MOUSE_JIGGLER_THREAD
+    if action == "start":
+        if not MOUSE_JIGGLER_ACTIVE:
+            MOUSE_JIGGLER_ACTIVE = True
+            MOUSE_JIGGLER_THREAD = threading.Thread(target=mouse_jiggler_loop, daemon=True)
+            MOUSE_JIGGLER_THREAD.start()
+            print("[JIGGLER] Started")
+        return {"status": "success", "active": True}
+    elif action == "stop":
+        MOUSE_JIGGLER_ACTIVE = False
+        print("[JIGGLER] Stopping...")
+        return {"status": "success", "active": False}
+    else:
+        return {"error": "unknown action. Use 'start' or 'stop'."}
+
+
+# ── Keyboard Shortcuts ──
+class ShortcutRequest(BaseModel):
+    shortcut: str  # alt-tab, alt-shift-tab, ctrl-s, win-d
+
+@app.post("/shortcut", dependencies=[Depends(verify_pin)])
+def send_shortcut(req: ShortcutRequest):
+    shortcut = req.shortcut.lower().strip()
+    try:
+        if shortcut == "alt-tab":
+            pyautogui.hotkey('alt', 'tab')
+        elif shortcut == "alt-shift-tab":
+            pyautogui.hotkey('alt', 'shift', 'tab')
+        elif shortcut == "ctrl-s":
+            pyautogui.hotkey('ctrl', 's')
+        elif shortcut == "win-d":
+            pyautogui.hotkey('win', 'd')
+        else:
+            return {"error": f"Unknown shortcut: {shortcut}"}
+        print(f"[SHORTCUT] Sent: {shortcut}")
+        return {"status": "success", "shortcut": shortcut}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+# ── Panic Button (Show Desktop) ──
+@app.post("/panic", dependencies=[Depends(verify_pin)])
+def panic_button():
+    """Instantly show desktop (Win+D) — hide everything."""
+    try:
+        pyautogui.hotkey('win', 'd')
+        print("[PANIC] Desktop shown")
+        return {"status": "success", "message": "Desktop shown"}
+    except Exception as e:
+        return {"error": str(e)}
+
 
 
 @app.post("/power/{action}", dependencies=[Depends(verify_pin)])
