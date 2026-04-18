@@ -175,14 +175,23 @@ const ZoomableImage = ({ uri }) => {
       const pureVisualX = offsetBaseX.value + panX.value + purePinchX;
       const pureVisualY = offsetBaseY.value + panY.value + purePinchY;
 
-      // Soft clamp: If the user zooms out at an edge, we slide the image
-      // along the wall to prevent pulling empty whitespace into the viewport.
+      // Rubber-band past edges: allow going beyond bounds with resistance,
+      // consistent with how pan allows temporary out-of-bounds movement.
+      // On release, onEnd springs the image back to the edge.
       let clampedX = pureVisualX;
       let clampedY = pureVisualY;
-      
+
       if (scale.value >= 1) {
-        clampedX = Math.max(-maxX, Math.min(maxX, pureVisualX));
-        clampedY = Math.max(-maxY, Math.min(maxY, pureVisualY));
+        if (pureVisualX > maxX) {
+          clampedX = maxX + (pureVisualX - maxX) * 0.3;
+        } else if (pureVisualX < -maxX) {
+          clampedX = -maxX + (pureVisualX + maxX) * 0.3;
+        }
+        if (pureVisualY > maxY) {
+          clampedY = maxY + (pureVisualY - maxY) * 0.3;
+        } else if (pureVisualY < -maxY) {
+          clampedY = -maxY + (pureVisualY + maxY) * 0.3;
+        }
       }
       // When scale < 1, let the image follow the pinch origin freely
       // (centering is enforced on release via auto zoom-back-to-1)
