@@ -5,7 +5,7 @@ a = Analysis(
     ['d:\\Maszaen\\server-tray-app\\main.py'],
     pathex=[],
     binaries=[],
-    datas=[],
+    datas=[('d:\\Maszaen\\server-tray-app\\favicon.png', '.')],
     hiddenimports=['uvicorn.logging', 'uvicorn.loops', 'uvicorn.loops.auto', 'uvicorn.protocols', 'uvicorn.protocols.http', 'uvicorn.protocols.http.auto', 'uvicorn.protocols.websockets', 'uvicorn.protocols.websockets.auto', 'uvicorn.lifespan', 'uvicorn.lifespan.on', 'uvicorn.lifespan.off', 'qrcode', 'qrcode.image.pil'],
     hookspath=[],
     hooksconfig={},

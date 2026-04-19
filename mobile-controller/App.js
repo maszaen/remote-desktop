@@ -847,6 +847,31 @@ function AppMain() {
   };
 
   // ── Network ──────────────────────────────────────────────────
+  const formatConnectionError = (title, data, fallbackUrl = "") => {
+    const statusLine =
+      data?.status || data?.statusText
+        ? `HTTP: ${data?.status || "-"} ${data?.statusText || ""}`.trim()
+        : "HTTP: -";
+    const phase = data?.phase || data?._requestError?.phase || "unknown";
+    const endpoint = data?.endpoint || data?._requestError?.endpoint || "-";
+    const requestUrl =
+      data?.url || data?._requestError?.url || fallbackUrl || "-";
+    const message =
+      data?.message ||
+      data?.detail ||
+      data?._requestError?.message ||
+      data?.error ||
+      "Unknown connection error";
+    return (
+      `${title}\n\n` +
+      `Phase: ${phase}\n` +
+      `${statusLine}\n` +
+      `Endpoint: ${endpoint}\n` +
+      `URL: ${requestUrl}\n\n` +
+      `Error: ${message}`
+    );
+  };
+
   const sendAction = async (
     endpoint,
     method = "POST",
@@ -859,6 +884,7 @@ function AppMain() {
     const pin = pinOverride || activePin;
     const id = idOverride || deviceId;
     if (!url || !pin) return null;
+    const requestUrl = `${url}${endpoint}`;
     try {
       const ctrl = new AbortController();
       const tid = setTimeout(() => ctrl.abort(), 8000);
@@ -868,11 +894,59 @@ function AppMain() {
         signal: ctrl.signal,
       };
       if (body) opts.body = JSON.stringify(body);
-      const res = await fetch(`${url}${endpoint}`, opts);
+      const res = await fetch(requestUrl, opts);
       clearTimeout(tid);
-      return await res.json();
+
+      const contentType = res.headers.get("content-type") || "";
+      let payload = null;
+      let rawText = "";
+
+      if (contentType.includes("application/json")) {
+        payload = await res.json();
+      } else {
+        rawText = await res.text();
+        try {
+          payload = rawText ? JSON.parse(rawText) : null;
+        } catch {
+          payload = null;
+        }
+      }
+
+      if (!res.ok) {
+        const requestError = {
+          phase: "http",
+          status: res.status,
+          statusText: res.statusText,
+          endpoint,
+          url: requestUrl,
+          message:
+            payload?.detail ||
+            payload?.message ||
+            rawText ||
+            res.statusText ||
+            "Request failed",
+        };
+
+        if (payload && typeof payload === "object") {
+          return { ...payload, _requestError: requestError };
+        }
+
+        return { error: `HTTP ${res.status}`, ...requestError };
+      }
+
+      if (payload && typeof payload === "object") {
+        return payload;
+      }
+
+      return { ok: true, data: rawText || "" };
     } catch (e) {
-      return { error: "Network request failed", message: e.toString() };
+      return {
+        error: "Network request failed",
+        phase: e?.name === "AbortError" ? "timeout" : "network",
+        message: e?.message || e?.toString?.() || "Unknown error",
+        endpoint,
+        url: requestUrl,
+      };
     }
   };
 
@@ -905,7 +979,7 @@ function AppMain() {
         if (!isAuto)
           Alert.alert(
             "Connection Failed",
-            `Could not reach ${cleanIp}\n\n${data.message || data.error}`,
+            formatConnectionError(`Could not reach ${cleanIp}`, data, url),
           );
         return;
       }
@@ -950,7 +1024,14 @@ function AppMain() {
       fetchApps(url, inputPin);
       fetchConnectivity(url, inputPin);
     } else
-      Alert.alert("Pairing Failed", "Incorrect Code or Server unreachable.");
+      Alert.alert(
+        "Pairing Failed",
+        formatConnectionError(
+          "Incorrect code or server unreachable",
+          res,
+          url,
+        ),
+      );
     setLoadingAction("");
   };
 

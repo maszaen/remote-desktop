@@ -39,15 +39,14 @@
         "backgroundColor": "#000000"
       },
       "edgeToEdgeEnabled": true,
-      "package": "com.zaen.clustrix.mobile",
-      "usesCleartextTraffic": true
+      "package": "com.maszaen.nexus"
     },
     "web": {
       "favicon": "./assets/favicon.png"
     },
     "extra": {
       "eas": {
-        "projectId": "f5e20bec-9ae0-41f0-b3cb-abf118a366a8"
+        "projectId": "a6704cc7-27bd-4a79-ac9f-733c1bf3fb7c"
       }
     }
   }

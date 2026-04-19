@@ -34,6 +34,12 @@ CONFIG_DIR = os.path.join(
 CONFIG_FILE = os.path.join(CONFIG_DIR, "nexus_trusted.json")
 
 
+def get_resource_path(relative_path: str) -> str:
+    # PyInstaller extracts bundled files to _MEIPASS at runtime.
+    base_path = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
+    return os.path.join(base_path, relative_path)
+
+
 def load_trusted_devices():
     if not os.path.exists(CONFIG_DIR):
         os.makedirs(CONFIG_DIR)
@@ -760,6 +766,13 @@ async def toggle_connectivity(radio_type: str, action: str):
 
 # --- Tray Icon ---
 def create_image():
+    icon_path = get_resource_path("favicon.png")
+    try:
+        with Image.open(icon_path) as img:
+            return img.convert("RGBA")
+    except Exception as e:
+        print(f"Failed to load tray icon from {icon_path}: {e}")
+
     image = Image.new("RGB", (64, 64), color=(0, 122, 204))
     dc = ImageDraw.Draw(image)
     dc.rectangle((16, 16, 48, 48), fill=(255, 255, 255))
