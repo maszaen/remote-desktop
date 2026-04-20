@@ -1,8 +1,32 @@
-.venv/
-__pycache__/
-*.pyc
+# General
 .env
-node_modules/
-.expo/
+.env.*
+.DS_Store
 *.log
 Workspaces/portfolio/
+
+# Python
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+*.spec
+.pytest_cache/
+
+# Node & React Native (Expo)
+node_modules/
+.expo/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+android/
+ios/
+web-build/
+.tsbuildinfo

@@ -4,7 +4,6 @@
     "slug": "nexus-controller",
     "version": "1.0.0",
     "orientation": "portrait",
-    "owner": "zaeniahmad",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
@@ -46,7 +45,7 @@
     },
     "extra": {
       "eas": {
-        "projectId": "a6704cc7-27bd-4a79-ac9f-733c1bf3fb7c"
+        "projectId": "103327aa-7152-4669-99dc-f77beddfc550"
       }
     }
   }
