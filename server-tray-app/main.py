@@ -128,6 +128,11 @@ def discover():
     return {"status": "ok", "hostname": socket.gethostname()}
 
 
+@app.get("/auth-check", dependencies=[Depends(verify_pin)])
+def auth_check():
+    return {"status": "ok", "hostname": socket.gethostname()}
+
+
 # Protected Endpoints begin
 @app.get("/network", dependencies=[Depends(verify_pin)])
 def get_network_info():

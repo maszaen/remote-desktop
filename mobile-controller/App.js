@@ -705,7 +705,7 @@ function AppMain() {
   const [serverUrl, setServerUrl] = useState("");
   const [ipAddress, setIpAddress] = useState("");
   const [savedDevices, setSavedDevices] = useState([]);
-  const [headerName, setHeaderName] = useState("Nexus");
+  const [connectedHost, setConnectedHost] = useState("Nexus");
   const [activePin, setActivePin] = useState(null);
   const [deviceId, setDeviceId] = useState(null);
 
@@ -887,7 +887,7 @@ function AppMain() {
     const requestUrl = `${url}${endpoint}`;
     try {
       const ctrl = new AbortController();
-      const tid = setTimeout(() => ctrl.abort(), 8000);
+      const tid = setTimeout(() => ctrl.abort(), 12000);
       const opts = {
         method,
         headers: { "Content-Type": "application/json", pin, "x-nexus-id": id },
@@ -968,7 +968,7 @@ function AppMain() {
     setLoadingAction(`connecting_${cleanIp}`);
     try {
       const data = await sendAction(
-        "/volume",
+        "/auth-check",
         "GET",
         null,
         url,
@@ -993,6 +993,7 @@ function AppMain() {
       if (savedPin) await saveDevice(cleanIp, hostname, savedPin);
       setActivePin(savedPin);
       setServerUrl(url);
+      setConnectedHost(hostname || data?.hostname || cleanIp);
       setIsConnected(true);
       fetchVolume(url, savedPin);
       getStats(url, savedPin);
@@ -1010,11 +1011,12 @@ function AppMain() {
       return Alert.alert("Invalid PIN", "Enter the 4-digit Code.");
     setLoadingAction("pairing");
     const url = `http://${pairingIp}:8000`;
-    const res = await sendAction("/volume", "GET", null, url, inputPin);
-    if (res && !res.error && res.volume !== undefined) {
+    const res = await sendAction("/auth-check", "GET", null, url, inputPin);
+    if (res && !res.error && res.status === "ok") {
       await saveDevice(pairingIp, pairingHostname, inputPin);
       setActivePin(inputPin);
       setServerUrl(url);
+      setConnectedHost(pairingHostname || res?.hostname || pairingIp);
       setIsConnected(true);
       setPairingModalOpen(false);
       setInputPin("");
@@ -1068,6 +1070,7 @@ function AppMain() {
   const disconnect = () => {
     setIsConnected(false);
     setServerUrl("");
+    setConnectedHost("Nexus");
     setStats(null);
     setVisibleApps([]);
     setScreenshot(null);
@@ -1854,7 +1857,7 @@ function AppMain() {
   // ════════════════════════════════════════════════════════════════
   // CONNECTED SCREEN
   // ════════════════════════════════════════════════════════════════
-  const hostname = savedDevices.map((device) => device.hostname)[0];
+  const hostname = connectedHost;
 
   return (
     <View style={s.root}>
