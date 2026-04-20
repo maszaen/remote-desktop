@@ -10,6 +10,7 @@ import socket
 import subprocess
 import random
 import ctypes
+from typing import Optional, List
 from fastapi import FastAPI, Response, HTTPException, Depends, Header
 import time
 from pydantic import BaseModel
@@ -67,6 +68,56 @@ TRUSTED_DEVICES = load_trusted_devices()
 IS_REMOTE_CONNECTED = False
 
 
+# App launcher presets (easy to edit/extend)
+APP_LAUNCH_TARGETS = {
+    "steam": {
+        "label": "Steam",
+        "target": "steam://open/main",
+    },
+    "epic_games": {
+        "label": "Epic Games",
+        "target": "com.epicgames.launcher://apps",
+    },
+    "gta_v": {
+        "label": "GTA V (Steam)",
+        "target": "steam://rungameid/271590",
+    },
+    "spotify": {
+        "label": "Spotify",
+        "target": "spotify:",
+    },
+    "vscode": {
+        "label": "VS Code",
+        "target": "code",
+    },
+    "chrome": {
+        "label": "Google Chrome",
+        "target": "chrome",
+    },
+}
+
+
+# Keyboard queue runtime state
+KEYBOARD_QUEUE_LOCK = threading.Lock()
+KEYBOARD_QUEUE_STOP = threading.Event()
+KEYBOARD_QUEUE_PAUSE = threading.Event()
+KEYBOARD_QUEUE_THREAD = None
+KEYBOARD_QUEUE_STATE = {
+    "running": False,
+    "paused": False,
+    "total": 0,
+    "sent_count": 0,
+    "current_index": -1,
+    "current_key": None,
+    "current_mode": None,
+    "step_end_ts": None,
+    "last_sent_key": None,
+    "last_sent_at": None,
+    "error": None,
+    "items": [],
+}
+
+
 app = FastAPI(title="Nexus PC Remote")
 
 app.add_middleware(
@@ -120,6 +171,165 @@ class VolumeControl(BaseModel):
 
 class ClipboardRequest(BaseModel):
     content: str
+
+
+class LaunchAppRequest(BaseModel):
+    app_key: Optional[str] = None
+    target: Optional[str] = None
+
+
+class RealtimeKeyboardRequest(BaseModel):
+    key: Optional[str] = None
+    mode: str = "tap"  # tap | down | up
+    hold_ms: int = 30
+    text: Optional[str] = None
+
+
+class KeyboardQueueItem(BaseModel):
+    key: str
+    action: str = "tap"  # tap | hold
+    hold_ms: Optional[int] = None
+    delay_ms: Optional[int] = None
+
+
+class KeyboardQueueStartRequest(BaseModel):
+    items: List[KeyboardQueueItem]
+    default_delay_ms: int = 10
+    default_hold_ms: int = 1000
+
+
+def clamp_ms(value: int, min_ms: int = 10, max_ms: int = 120000) -> int:
+    return max(min_ms, min(max_ms, int(value)))
+
+
+def normalize_key(key: str) -> str:
+    if not key:
+        return ""
+    aliases = {
+        " ": "space",
+        "esc": "escape",
+        "return": "enter",
+        "del": "delete",
+        "pgup": "pageup",
+        "pgdn": "pagedown",
+    }
+    k = key.strip().lower()
+    return aliases.get(k, k)
+
+
+def tap_key(key: str, hold_ms: int = 30):
+    k = normalize_key(key)
+    if not k:
+        return
+    pyautogui.keyDown(k)
+    time.sleep(clamp_ms(hold_ms) / 1000.0)
+    pyautogui.keyUp(k)
+
+
+def set_queue_state(**updates):
+    with KEYBOARD_QUEUE_LOCK:
+        KEYBOARD_QUEUE_STATE.update(updates)
+
+
+def get_queue_status_payload():
+    with KEYBOARD_QUEUE_LOCK:
+        payload = dict(KEYBOARD_QUEUE_STATE)
+
+    remaining_ms = 0
+    if payload.get("step_end_ts"):
+        remaining_ms = max(0, int((payload["step_end_ts"] - time.time()) * 1000))
+
+    payload["remaining_ms"] = remaining_ms
+    payload.pop("step_end_ts", None)
+    return payload
+
+
+def run_keyboard_queue(items: List[dict], default_delay_ms: int, default_hold_ms: int):
+    try:
+        set_queue_state(
+            running=True,
+            paused=False,
+            total=len(items),
+            sent_count=0,
+            current_index=-1,
+            current_key=None,
+            current_mode=None,
+            step_end_ts=None,
+            error=None,
+            items=items,
+        )
+
+        for idx, item in enumerate(items):
+            if KEYBOARD_QUEUE_STOP.is_set():
+                break
+
+            while KEYBOARD_QUEUE_PAUSE.is_set() and not KEYBOARD_QUEUE_STOP.is_set():
+                set_queue_state(paused=True, step_end_ts=None)
+                time.sleep(0.05)
+
+            if KEYBOARD_QUEUE_STOP.is_set():
+                break
+
+            mode = (item.get("action") or "tap").lower().strip()
+            key = item.get("key")
+            hold_ms = clamp_ms(item.get("hold_ms") or default_hold_ms)
+            delay_ms = clamp_ms(item.get("delay_ms") or default_delay_ms)
+
+            set_queue_state(
+                paused=False,
+                current_index=idx,
+                current_key=key,
+                current_mode=mode,
+            )
+
+            if mode == "hold":
+                k = normalize_key(key)
+                pyautogui.keyDown(k)
+                set_queue_state(step_end_ts=time.time() + (hold_ms / 1000.0))
+                end_ts = time.time() + (hold_ms / 1000.0)
+                while time.time() < end_ts and not KEYBOARD_QUEUE_STOP.is_set():
+                    time.sleep(0.01)
+                pyautogui.keyUp(k)
+            else:
+                tap_key(key)
+
+            sent_count = idx + 1
+            set_queue_state(
+                sent_count=sent_count,
+                last_sent_key=key,
+                last_sent_at=time.time(),
+            )
+
+            if KEYBOARD_QUEUE_STOP.is_set():
+                break
+
+            set_queue_state(step_end_ts=time.time() + (delay_ms / 1000.0))
+            end_ts = time.time() + (delay_ms / 1000.0)
+            while time.time() < end_ts and not KEYBOARD_QUEUE_STOP.is_set():
+                while KEYBOARD_QUEUE_PAUSE.is_set() and not KEYBOARD_QUEUE_STOP.is_set():
+                    set_queue_state(paused=True, step_end_ts=None)
+                    time.sleep(0.05)
+                    end_ts += 0.05
+                time.sleep(0.01)
+
+        set_queue_state(
+            running=False,
+            paused=False,
+            current_index=-1,
+            current_key=None,
+            current_mode=None,
+            step_end_ts=None,
+        )
+    except Exception as e:
+        set_queue_state(
+            running=False,
+            paused=False,
+            current_index=-1,
+            current_key=None,
+            current_mode=None,
+            step_end_ts=None,
+            error=str(e),
+        )
 
 
 # Public Endpoint for Discovery
@@ -423,6 +633,129 @@ def get_visible_apps():
         return {"apps": apps}
     except Exception as e:
         return {"error": str(e)}
+
+
+@app.get("/apps/launchables", dependencies=[Depends(verify_pin)])
+def get_launchable_apps():
+    apps = [
+        {"key": k, "label": v.get("label", k), "target": v.get("target", "")}
+        for k, v in APP_LAUNCH_TARGETS.items()
+    ]
+    return {"status": "success", "apps": apps}
+
+
+@app.post("/apps/launch", dependencies=[Depends(verify_pin)])
+def launch_app(req: LaunchAppRequest):
+    try:
+        target = None
+        source = None
+
+        if req.app_key:
+            profile = APP_LAUNCH_TARGETS.get(req.app_key)
+            if not profile:
+                return {"error": f"Unknown app_key: {req.app_key}"}
+            target = profile.get("target")
+            source = req.app_key
+        elif req.target:
+            target = req.target.strip()
+            source = "custom"
+
+        if not target:
+            return {"error": "Provide app_key or target"}
+
+        subprocess.Popen(["cmd", "/c", "start", "", target])
+        return {"status": "success", "launched": source, "target": target}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.post("/keyboard/realtime", dependencies=[Depends(verify_pin)])
+def keyboard_realtime(req: RealtimeKeyboardRequest):
+    try:
+        if req.text is not None:
+            pyautogui.write(req.text, interval=0)
+            return {"status": "success", "mode": "text", "length": len(req.text)}
+
+        if not req.key:
+            return {"error": "Provide key or text"}
+
+        mode = req.mode.lower().strip()
+        key = normalize_key(req.key)
+
+        if mode == "down":
+            pyautogui.keyDown(key)
+        elif mode == "up":
+            pyautogui.keyUp(key)
+        else:
+            tap_key(key, hold_ms=req.hold_ms)
+
+        return {"status": "success", "mode": mode, "key": key}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.post("/keyboard/queue/start", dependencies=[Depends(verify_pin)])
+def keyboard_queue_start(req: KeyboardQueueStartRequest):
+    global KEYBOARD_QUEUE_THREAD
+
+    items = [i.dict() for i in req.items if i.key and i.key.strip()]
+    if not items:
+        return {"error": "Queue is empty"}
+
+    with KEYBOARD_QUEUE_LOCK:
+        if KEYBOARD_QUEUE_STATE.get("running"):
+            return {"error": "Queue already running"}
+
+    KEYBOARD_QUEUE_STOP.clear()
+    KEYBOARD_QUEUE_PAUSE.clear()
+    KEYBOARD_QUEUE_THREAD = threading.Thread(
+        target=run_keyboard_queue,
+        args=(items, clamp_ms(req.default_delay_ms), clamp_ms(req.default_hold_ms)),
+        daemon=True,
+    )
+    KEYBOARD_QUEUE_THREAD.start()
+
+    return {"status": "success", "queued": len(items)}
+
+
+@app.post("/keyboard/queue/pause", dependencies=[Depends(verify_pin)])
+def keyboard_queue_pause():
+    with KEYBOARD_QUEUE_LOCK:
+        if not KEYBOARD_QUEUE_STATE.get("running"):
+            return {"error": "Queue is not running"}
+    KEYBOARD_QUEUE_PAUSE.set()
+    set_queue_state(paused=True)
+    return {"status": "success", "action": "pause"}
+
+
+@app.post("/keyboard/queue/resume", dependencies=[Depends(verify_pin)])
+def keyboard_queue_resume():
+    with KEYBOARD_QUEUE_LOCK:
+        if not KEYBOARD_QUEUE_STATE.get("running"):
+            return {"error": "Queue is not running"}
+    KEYBOARD_QUEUE_PAUSE.clear()
+    set_queue_state(paused=False)
+    return {"status": "success", "action": "resume"}
+
+
+@app.post("/keyboard/queue/stop", dependencies=[Depends(verify_pin)])
+def keyboard_queue_stop():
+    KEYBOARD_QUEUE_STOP.set()
+    KEYBOARD_QUEUE_PAUSE.clear()
+    set_queue_state(
+        running=False,
+        paused=False,
+        current_index=-1,
+        current_key=None,
+        current_mode=None,
+        step_end_ts=None,
+    )
+    return {"status": "success", "action": "stop"}
+
+
+@app.get("/keyboard/queue/status", dependencies=[Depends(verify_pin)])
+def keyboard_queue_status():
+    return {"status": "success", **get_queue_status_payload()}
 
 
 class KillRequest(BaseModel):

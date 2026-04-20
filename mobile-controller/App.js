@@ -745,8 +745,34 @@ function AppMain() {
   const [volumeSheetOpen, setVolumeSheetOpen] = useState(false);
   const [powerSheetOpen, setPowerSheetOpen] = useState(false);
   const [shortcutSheetOpen, setShortcutSheetOpen] = useState(false);
+  const [launcherSheetOpen, setLauncherSheetOpen] = useState(false);
+  const [keyboardSheetOpen, setKeyboardSheetOpen] = useState(false);
   const [connectivitySheetOpen, setConnectivitySheetOpen] = useState(false);
   const [clipboardSheetOpen, setClipboardSheetOpen] = useState(false);
+
+  const [launchableApps, setLaunchableApps] = useState([]);
+  const [launchingKey, setLaunchingKey] = useState("");
+
+  const [keyboardMode, setKeyboardMode] = useState("queue"); // queue | realtime
+  const [realtimeValue, setRealtimeValue] = useState("");
+  const realtimePrevRef = useRef("");
+
+  const [queueInput, setQueueInput] = useState("w,a,a,s,d");
+  const [queueDelayMs, setQueueDelayMs] = useState("10");
+  const [queueHoldMs, setQueueHoldMs] = useState("2000");
+  const [queueDefaultAction, setQueueDefaultAction] = useState("tap"); // tap | hold
+  const [queueDraft, setQueueDraft] = useState([]);
+  const [queueStatus, setQueueStatus] = useState({
+    running: false,
+    paused: false,
+    total: 0,
+    sent_count: 0,
+    current_index: -1,
+    current_key: null,
+    remaining_ms: 0,
+    items: [],
+  });
+  const queuePollRef = useRef(null);
 
   const [wifiActive, setWifiActive] = useState(false);
   const [btActive, setBtActive] = useState(false);
@@ -1108,6 +1134,14 @@ function AppMain() {
         setShortcutSheetOpen(false);
         return true;
       }
+      if (launcherSheetOpen) {
+        setLauncherSheetOpen(false);
+        return true;
+      }
+      if (keyboardSheetOpen) {
+        setKeyboardSheetOpen(false);
+        return true;
+      }
       if (connectivitySheetOpen) {
         setConnectivitySheetOpen(false);
         return true;
@@ -1160,6 +1194,8 @@ function AppMain() {
     volumeSheetOpen,
     powerSheetOpen,
     shortcutSheetOpen,
+    launcherSheetOpen,
+    keyboardSheetOpen,
     connectivitySheetOpen,
     clipboardSheetOpen,
     isScanningQR,
@@ -1320,6 +1356,146 @@ function AppMain() {
     await sendAction("/shortcut", "POST", { shortcut });
   };
 
+  // ── App Launcher ──
+  const fetchLaunchableApps = async () => {
+    const r = await sendAction("/apps/launchables", "GET");
+    if (r && !r.error && Array.isArray(r.apps)) {
+      setLaunchableApps(r.apps);
+    }
+  };
+
+  const launchPresetApp = async (appKey) => {
+    setLaunchingKey(appKey);
+    const r = await sendAction("/apps/launch", "POST", { app_key: appKey });
+    if (r?.error) {
+      Alert.alert("Launch Failed", r.error);
+    }
+    setLaunchingKey("");
+  };
+
+  // ── Remote Keyboard ──
+  const sendRealtimeKey = async (key, mode = "tap") => {
+    await sendAction("/keyboard/realtime", "POST", { key, mode, hold_ms: 30 });
+  };
+
+  const onRealtimeTextChange = async (value) => {
+    const prev = realtimePrevRef.current;
+
+    if (value.length > prev.length && value.startsWith(prev)) {
+      const added = value.slice(prev.length);
+      if (added) {
+        await sendAction("/keyboard/realtime", "POST", { text: added });
+      }
+    } else if (value.length < prev.length && prev.startsWith(value)) {
+      const backspaces = prev.length - value.length;
+      for (let i = 0; i < backspaces; i += 1) {
+        await sendAction("/keyboard/realtime", "POST", {
+          key: "backspace",
+          mode: "tap",
+        });
+      }
+    } else if (value) {
+      // Fallback for auto-correct/IME composition changes.
+      await sendAction("/keyboard/realtime", "POST", { text: value });
+      value = "";
+    }
+
+    realtimePrevRef.current = value;
+    setRealtimeValue(value);
+  };
+
+  const parseQueueInput = (raw) =>
+    raw
+      .split(",")
+      .map((x) => x.trim())
+      .filter(Boolean)
+      .map((key, idx) => ({
+        id: `${Date.now()}_${idx}_${key}`,
+        key,
+        action: queueDefaultAction,
+        holdMs: Number(queueHoldMs) || 2000,
+      }));
+
+  const buildQueueDraft = () => {
+    const parsed = parseQueueInput(queueInput);
+    setQueueDraft(parsed);
+  };
+
+  const toggleQueueItemAction = (id) => {
+    setQueueDraft((prev) =>
+      prev.map((it) =>
+        it.id === id
+          ? { ...it, action: it.action === "hold" ? "tap" : "hold" }
+          : it,
+      ),
+    );
+  };
+
+  const fetchQueueStatus = async () => {
+    const r = await sendAction("/keyboard/queue/status", "GET");
+    if (r && !r.error) {
+      setQueueStatus({
+        running: !!r.running,
+        paused: !!r.paused,
+        total: r.total || 0,
+        sent_count: r.sent_count || 0,
+        current_index:
+          typeof r.current_index === "number" ? r.current_index : -1,
+        current_key: r.current_key || null,
+        remaining_ms: r.remaining_ms || 0,
+        items: Array.isArray(r.items) ? r.items : [],
+      });
+    }
+  };
+
+  const startKeyboardQueue = async () => {
+    if (queueDraft.length === 0) {
+      const parsed = parseQueueInput(queueInput);
+      if (parsed.length === 0) {
+        Alert.alert("Queue Empty", "Masukkan pola dulu. Contoh: w,a,a,s,d");
+        return;
+      }
+      setQueueDraft(parsed);
+    }
+
+    const payloadItems = (queueDraft.length ? queueDraft : parseQueueInput(queueInput)).map(
+      (it) => ({
+        key: it.key,
+        action: it.action,
+        hold_ms: Number(it.holdMs) || Number(queueHoldMs) || 2000,
+        delay_ms: Number(queueDelayMs) || 10,
+      }),
+    );
+
+    const r = await sendAction("/keyboard/queue/start", "POST", {
+      items: payloadItems,
+      default_delay_ms: Number(queueDelayMs) || 10,
+      default_hold_ms: Number(queueHoldMs) || 2000,
+    });
+
+    if (r?.error) {
+      Alert.alert("Queue Error", r.error);
+      return;
+    }
+
+    fetchQueueStatus();
+  };
+
+  const pauseKeyboardQueue = async () => {
+    await sendAction("/keyboard/queue/pause", "POST");
+    fetchQueueStatus();
+  };
+
+  const resumeKeyboardQueue = async () => {
+    await sendAction("/keyboard/queue/resume", "POST");
+    fetchQueueStatus();
+  };
+
+  const stopKeyboardQueue = async () => {
+    await sendAction("/keyboard/queue/stop", "POST");
+    fetchQueueStatus();
+  };
+
   // ── Connectivity ──
   const fetchConnectivity = async (url = null, pin = null) => {
     const d = await sendAction("/connectivity", "GET", null, url, pin);
@@ -1441,6 +1617,29 @@ function AppMain() {
     };
   }, [liveScreenActive, imageModalOpen]);
 
+  useEffect(() => {
+    if (launcherSheetOpen) {
+      fetchLaunchableApps();
+    }
+  }, [launcherSheetOpen]);
+
+  useEffect(() => {
+    if (keyboardSheetOpen && keyboardMode === "queue") {
+      fetchQueueStatus();
+      queuePollRef.current = setInterval(fetchQueueStatus, 250);
+    } else if (queuePollRef.current) {
+      clearInterval(queuePollRef.current);
+      queuePollRef.current = null;
+    }
+
+    return () => {
+      if (queuePollRef.current) {
+        clearInterval(queuePollRef.current);
+        queuePollRef.current = null;
+      }
+    };
+  }, [keyboardSheetOpen, keyboardMode]);
+
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     try {
@@ -1488,6 +1687,29 @@ function AppMain() {
       : stats?.ram_percent > 60
         ? C.warning
         : C.primary;
+
+  // Easy-to-edit display name mapping for active window title.
+  const ACTIVE_WINDOW_LABEL_MAP = {
+    "System tray overflow window.": "System tray",
+    "Program Manager": "Desktop",
+  };
+
+  // Easy-to-edit display name mapping for process/app names.
+  const APP_NAME_LABEL_MAP = {
+    "Code": "VSCode",
+    "WINWORD.EXE": "Microsoft Word",
+    "EXCEL.EXE": "Microsoft Excel",
+    "Chrome": "Google Chrome",
+    "Taskmgr": "Task Manager",
+    "Antigravity": "Google Antigravity",
+    "POWERPOINT.EXE": "Microsoft Powerpoint",
+    "ONENOTE.EXE": "Microsoft OneNote",
+    "Msedge": "Microsoft Edge",
+  };
+
+  const displayActiveWindow = stats?.active_window
+    ? ACTIVE_WINDOW_LABEL_MAP[stats.active_window] || stats.active_window
+    : "";
 
   // ════════════════════════════════════════════════════════════════
   // UNCONNECTED SCREEN
@@ -2045,7 +2267,7 @@ function AppMain() {
               <View style={{ flex: 1 }}>
                 <Text style={s.hwLabel}>Active Window</Text>
                 <Text style={s.activeWinValue} numberOfLines={1}>
-                  {stats.active_window}
+                  {displayActiveWindow}
                 </Text>
               </View>
               <TouchableOpacity
@@ -2193,7 +2415,15 @@ function AppMain() {
                   <View style={{ width: 26 + SP.sm }} />
                 </View>
                 {(showAllProcesses ? visibleApps : visibleApps.slice(0, 5)).map(
-                  (app) => (
+                  (app) => {
+                    const hasCustomAppName = Object.prototype.hasOwnProperty.call(
+                      APP_NAME_LABEL_MAP,
+                      app.name,
+                    );
+                    const displayAppName =
+                      APP_NAME_LABEL_MAP[app.name] || app.name;
+
+                    return (
                     <View key={app.pid} style={s.tableRow}>
                       <View
                         style={{
@@ -2223,11 +2453,16 @@ function AppMain() {
                           <Text
                             style={[
                               s.tdName,
-                              { textTransform: "capitalize", flex: 1 },
+                              {
+                                textTransform: hasCustomAppName
+                                  ? "none"
+                                  : "capitalize",
+                                flex: 1,
+                              },
                             ]}
                             numberOfLines={1}
                           >
-                            {app.name}
+                            {displayAppName}
                           </Text>
                         </View>
                         <Text
@@ -2256,7 +2491,8 @@ function AppMain() {
                         <Ionicons name="close" size={14} color={C.danger} />
                       </TouchableOpacity>
                     </View>
-                  ),
+                    );
+                  },
                 )}
                 {visibleApps.length === 0 && (
                   <View
@@ -2293,6 +2529,52 @@ function AppMain() {
           <View style={s.menuRowBody}>
             <Text style={s.menuRowTitle}>Keyboard Shortcuts</Text>
             <Text style={s.menuRowSub}>Common shortcuts</Text>
+          </View>
+          <Ionicons
+            name="arrow-forward-outline"
+            size={20}
+            color={C.muted}
+            style={{ paddingRight: SP.sm }}
+          />
+        </TouchableOpacity>
+
+        <View style={s.sep} />
+
+        {/* Launch Apps row */}
+        <TouchableOpacity
+          style={s.menuRow}
+          onPress={() => setLauncherSheetOpen(true)}
+          activeOpacity={0.6}
+        >
+          <View style={[s.menuRowIcon, { backgroundColor: C.primaryDim }]}>
+            <Ionicons name="rocket-outline" size={18} color={C.primary} />
+          </View>
+          <View style={s.menuRowBody}>
+            <Text style={s.menuRowTitle}>Launch Apps</Text>
+            <Text style={s.menuRowSub}>Preload game/music before entering room</Text>
+          </View>
+          <Ionicons
+            name="arrow-forward-outline"
+            size={20}
+            color={C.muted}
+            style={{ paddingRight: SP.sm }}
+          />
+        </TouchableOpacity>
+
+        <View style={s.sep} />
+
+        {/* Remote Keyboard row */}
+        <TouchableOpacity
+          style={s.menuRow}
+          onPress={() => setKeyboardSheetOpen(true)}
+          activeOpacity={0.6}
+        >
+          <View style={[s.menuRowIcon, { backgroundColor: C.warningDim }]}>
+            <Ionicons name="keypad-outline" size={18} color={C.warning} />
+          </View>
+          <View style={s.menuRowBody}>
+            <Text style={s.menuRowTitle}>Remote Keyboard</Text>
+            <Text style={s.menuRowSub}>Realtime typing + queue mode</Text>
           </View>
           <Ionicons
             name="arrow-forward-outline"
@@ -2719,6 +3001,325 @@ function AppMain() {
               <Text style={s.powerRowSub}>Show Desktop or Minimize Apps</Text>
             </View>
           </TouchableOpacity>
+        </View>
+      </BottomSheet>
+
+      {/* ═══ LAUNCH APPS SHEET ═══ */}
+      <BottomSheet
+        visible={launcherSheetOpen}
+        onClose={() => setLauncherSheetOpen(false)}
+        title="Launch Apps"
+        subtitle="Start heavy apps before entering your room"
+      >
+        <View style={s.sheetContent}>
+          {launchableApps.length === 0 ? (
+            <View style={[s.screenPlaceholder, { paddingVertical: SP.lg }]}>
+              <ActivityIndicator color={C.primary} size="small" />
+              <Text style={s.placeholderText}>Loading launch presets...</Text>
+            </View>
+          ) : (
+            launchableApps.map((app, idx) => (
+              <View key={app.key}>
+                <TouchableOpacity
+                  style={s.powerRow}
+                  onPress={() => launchPresetApp(app.key)}
+                  activeOpacity={0.7}
+                  disabled={launchingKey === app.key}
+                >
+                  <View
+                    style={[s.powerRowIcon, { backgroundColor: C.primaryDim }]}
+                  >
+                    {launchingKey === app.key ? (
+                      <ActivityIndicator color={C.primary} size="small" />
+                    ) : (
+                      <Ionicons
+                        name="rocket-outline"
+                        size={20}
+                        color={C.primary}
+                      />
+                    )}
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={s.powerRowTitle}>{app.label}</Text>
+                    <Text style={s.powerRowSub} numberOfLines={1}>
+                      {app.target}
+                    </Text>
+                  </View>
+                </TouchableOpacity>
+                {idx < launchableApps.length - 1 && (
+                  <View style={[s.sep, { marginLeft: 56, marginVertical: 0 }]} />
+                )}
+              </View>
+            ))
+          )}
+        </View>
+      </BottomSheet>
+
+      {/* ═══ REMOTE KEYBOARD SHEET ═══ */}
+      <BottomSheet
+        visible={keyboardSheetOpen}
+        onClose={() => setKeyboardSheetOpen(false)}
+        title="Remote Keyboard"
+        subtitle="Realtime and queue typing modes"
+      >
+        <View style={s.sheetContent}>
+          <View style={s.keyboardModeRow}>
+            <TouchableOpacity
+              style={[
+                s.keyboardModeBtn,
+                keyboardMode === "queue" && s.keyboardModeBtnActive,
+              ]}
+              onPress={() => setKeyboardMode("queue")}
+              activeOpacity={0.7}
+            >
+              <Text
+                style={[
+                  s.keyboardModeText,
+                  keyboardMode === "queue" && s.keyboardModeTextActive,
+                ]}
+              >
+                Queue Mode
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[
+                s.keyboardModeBtn,
+                keyboardMode === "realtime" && s.keyboardModeBtnActive,
+              ]}
+              onPress={() => setKeyboardMode("realtime")}
+              activeOpacity={0.7}
+            >
+              <Text
+                style={[
+                  s.keyboardModeText,
+                  keyboardMode === "realtime" && s.keyboardModeTextActive,
+                ]}
+              >
+                Realtime
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          {keyboardMode === "realtime" ? (
+            <>
+              <Text style={s.groupLabel}>REALTIME INPUT</Text>
+              <View style={s.keyboardInputWrap}>
+                <TextInput
+                  style={s.keyboardInput}
+                  value={realtimeValue}
+                  onChangeText={onRealtimeTextChange}
+                  placeholder="Type here..."
+                  placeholderTextColor={C.muted}
+                  autoCorrect={false}
+                  autoCapitalize="none"
+                />
+              </View>
+
+              <View style={s.keyboardQuickRow}>
+                {[
+                  { label: "Space", key: "space" },
+                  { label: "Enter", key: "enter" },
+                  { label: "Tab", key: "tab" },
+                  { label: "Esc", key: "escape" },
+                  { label: "Back", key: "backspace" },
+                ].map((item) => (
+                  <TouchableOpacity
+                    key={item.key}
+                    style={s.keyboardQuickBtn}
+                    onPress={() => sendRealtimeKey(item.key)}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={s.keyboardQuickText}>{item.label}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </>
+          ) : (
+            <>
+              <Text style={s.groupLabel}>QUEUE PATTERN</Text>
+              <View style={s.keyboardInputWrap}>
+                <TextInput
+                  style={s.keyboardInput}
+                  value={queueInput}
+                  onChangeText={setQueueInput}
+                  placeholder="w,a,a,s,d"
+                  placeholderTextColor={C.muted}
+                  autoCorrect={false}
+                  autoCapitalize="none"
+                />
+              </View>
+
+              <View style={s.queueSettingsRow}>
+                <View style={s.queueSettingBox}>
+                  <Text style={s.queueSettingLabel}>Delay (ms)</Text>
+                  <TextInput
+                    style={s.queueSettingInput}
+                    value={queueDelayMs}
+                    onChangeText={setQueueDelayMs}
+                    keyboardType="number-pad"
+                    placeholder="10"
+                    placeholderTextColor={C.muted}
+                  />
+                </View>
+                <View style={s.queueSettingBox}>
+                  <Text style={s.queueSettingLabel}>Hold (ms)</Text>
+                  <TextInput
+                    style={s.queueSettingInput}
+                    value={queueHoldMs}
+                    onChangeText={setQueueHoldMs}
+                    keyboardType="number-pad"
+                    placeholder="2000"
+                    placeholderTextColor={C.muted}
+                  />
+                </View>
+              </View>
+
+              <View style={s.keyboardQuickRow}>
+                <TouchableOpacity
+                  style={[
+                    s.keyboardQuickBtn,
+                    queueDefaultAction === "tap" && s.keyboardQuickBtnActive,
+                  ]}
+                  onPress={() => setQueueDefaultAction("tap")}
+                  activeOpacity={0.7}
+                >
+                  <Text
+                    style={[
+                      s.keyboardQuickText,
+                      queueDefaultAction === "tap" && {
+                        color: C.primary,
+                        fontWeight: "700",
+                      },
+                    ]}
+                  >
+                    Default: Tap
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[
+                    s.keyboardQuickBtn,
+                    queueDefaultAction === "hold" && s.keyboardQuickBtnActive,
+                  ]}
+                  onPress={() => setQueueDefaultAction("hold")}
+                  activeOpacity={0.7}
+                >
+                  <Text
+                    style={[
+                      s.keyboardQuickText,
+                      queueDefaultAction === "hold" && {
+                        color: C.primary,
+                        fontWeight: "700",
+                      },
+                    ]}
+                  >
+                    Default: Hold
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={s.keyboardQuickBtn}
+                  onPress={buildQueueDraft}
+                  activeOpacity={0.7}
+                >
+                  <Text style={s.keyboardQuickText}>Build Queue</Text>
+                </TouchableOpacity>
+              </View>
+
+              {queueDraft.length > 0 && (
+                <View style={s.queueDraftWrap}>
+                  {queueDraft.map((it) => (
+                    <TouchableOpacity
+                      key={it.id}
+                      style={[
+                        s.queueToken,
+                        it.action === "hold" && s.queueTokenHold,
+                      ]}
+                      onPress={() => toggleQueueItemAction(it.id)}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={s.queueTokenText}>
+                        {it.key} ({it.action})
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              )}
+
+              <View style={s.queueStatusBox}>
+                <Text style={s.queueStatusTitle}>
+                  Queue Status: {queueStatus.sent_count}/{queueStatus.total}
+                </Text>
+                <Text style={s.queueStatusSub}>
+                  {queueStatus.running
+                    ? queueStatus.paused
+                      ? "Paused"
+                      : "Running"
+                    : "Idle"}
+                  {queueStatus.current_key
+                    ? ` • Current: ${queueStatus.current_key}`
+                    : ""}
+                  {queueStatus.remaining_ms > 0
+                    ? ` • ${queueStatus.remaining_ms}ms`
+                    : ""}
+                </Text>
+                <View style={s.queueIndicatorWrap}>
+                  {(queueStatus.items || []).map((it, idx) => {
+                    const isCurrent = idx === queueStatus.current_index;
+                    const isSent = idx < queueStatus.sent_count;
+                    return (
+                      <View
+                        key={`${it.key}_${idx}`}
+                        style={[
+                          s.queueIndicatorToken,
+                          isSent && s.queueIndicatorSent,
+                          isCurrent && s.queueIndicatorCurrent,
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            s.queueIndicatorText,
+                            isCurrent && { color: C.bg, fontWeight: "800" },
+                          ]}
+                        >
+                          {it.key}
+                        </Text>
+                      </View>
+                    );
+                  })}
+                </View>
+              </View>
+
+              <View style={s.keyboardQuickRow}>
+                <TouchableOpacity
+                  style={s.keyboardControlBtn}
+                  onPress={startKeyboardQueue}
+                  activeOpacity={0.7}
+                >
+                  <Text style={s.keyboardControlText}>Start</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={s.keyboardControlBtn}
+                  onPress={pauseKeyboardQueue}
+                  activeOpacity={0.7}
+                >
+                  <Text style={s.keyboardControlText}>Pause</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={s.keyboardControlBtn}
+                  onPress={resumeKeyboardQueue}
+                  activeOpacity={0.7}
+                >
+                  <Text style={s.keyboardControlText}>Resume</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[s.keyboardControlBtn, { borderColor: C.danger + "55" }]}
+                  onPress={stopKeyboardQueue}
+                  activeOpacity={0.7}
+                >
+                  <Text style={[s.keyboardControlText, { color: C.danger }]}>Stop</Text>
+                </TouchableOpacity>
+              </View>
+            </>
+          )}
         </View>
       </BottomSheet>
 
@@ -3725,6 +4326,176 @@ const s = StyleSheet.create({
     width: 24,
     height: 24,
     borderRadius: 12,
+  },
+
+  // ── Remote Keyboard ──
+  keyboardModeRow: {
+    flexDirection: "row",
+    gap: SP.sm,
+    marginBottom: SP.md,
+  },
+  keyboardModeBtn: {
+    flex: 1,
+    paddingVertical: SP.sm,
+    borderRadius: R.md,
+    backgroundColor: C.elevated,
+    borderWidth: 1,
+    borderColor: C.border,
+    alignItems: "center",
+  },
+  keyboardModeBtnActive: {
+    borderColor: C.primary + "55",
+    backgroundColor: C.primaryDim,
+  },
+  keyboardModeText: {
+    color: C.sub,
+    fontSize: F.sm,
+    fontWeight: "600",
+  },
+  keyboardModeTextActive: {
+    color: C.primary,
+  },
+  keyboardInputWrap: {
+    backgroundColor: C.elevated,
+    borderWidth: 1,
+    borderColor: C.border,
+    borderRadius: R.md,
+    paddingHorizontal: SP.sm,
+    marginBottom: SP.sm,
+  },
+  keyboardInput: {
+    color: C.text,
+    fontSize: F.md,
+    paddingVertical: Platform.OS === "ios" ? 10 : 8,
+  },
+  keyboardQuickRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: SP.sm,
+    marginTop: SP.sm,
+  },
+  keyboardQuickBtn: {
+    backgroundColor: C.elevated,
+    borderWidth: 1,
+    borderColor: C.border,
+    borderRadius: R.full,
+    paddingHorizontal: SP.md,
+    paddingVertical: SP.xs + 3,
+  },
+  keyboardQuickBtnActive: {
+    borderColor: C.primary + "55",
+    backgroundColor: C.primaryDim,
+  },
+  keyboardQuickText: {
+    fontSize: F.xs,
+    color: C.sub,
+    fontWeight: "600",
+  },
+  queueSettingsRow: {
+    flexDirection: "row",
+    gap: SP.sm,
+    marginTop: SP.sm,
+  },
+  queueSettingBox: {
+    flex: 1,
+    backgroundColor: C.elevated,
+    borderWidth: 1,
+    borderColor: C.border,
+    borderRadius: R.md,
+    paddingHorizontal: SP.sm,
+    paddingVertical: SP.xs,
+  },
+  queueSettingLabel: {
+    fontSize: F.xs,
+    color: C.muted,
+    marginBottom: 3,
+    fontWeight: "600",
+  },
+  queueSettingInput: {
+    color: C.text,
+    fontSize: F.md,
+    paddingVertical: 0,
+  },
+  queueDraftWrap: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: SP.sm,
+    marginTop: SP.sm,
+  },
+  queueToken: {
+    backgroundColor: C.elevated,
+    borderWidth: 1,
+    borderColor: C.border,
+    borderRadius: R.full,
+    paddingHorizontal: SP.sm + 2,
+    paddingVertical: SP.xs + 1,
+  },
+  queueTokenHold: {
+    borderColor: C.warning + "55",
+    backgroundColor: C.warningDim,
+  },
+  queueTokenText: {
+    fontSize: F.xs,
+    color: C.sub,
+    fontWeight: "600",
+  },
+  queueStatusBox: {
+    marginTop: SP.md,
+    backgroundColor: C.elevated,
+    borderWidth: 1,
+    borderColor: C.border,
+    borderRadius: R.md,
+    padding: SP.sm,
+  },
+  queueStatusTitle: {
+    fontSize: F.sm,
+    fontWeight: "700",
+    color: C.text,
+  },
+  queueStatusSub: {
+    fontSize: F.xs,
+    color: C.muted,
+    marginTop: 2,
+    marginBottom: SP.sm,
+  },
+  queueIndicatorWrap: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: SP.xs,
+  },
+  queueIndicatorToken: {
+    borderRadius: R.full,
+    borderWidth: 1,
+    borderColor: C.border,
+    backgroundColor: C.bg,
+    paddingHorizontal: SP.sm,
+    paddingVertical: 4,
+  },
+  queueIndicatorSent: {
+    borderColor: C.success + "55",
+    backgroundColor: C.successDim,
+  },
+  queueIndicatorCurrent: {
+    borderColor: C.primary,
+    backgroundColor: C.primary,
+  },
+  queueIndicatorText: {
+    fontSize: F.xs,
+    color: C.sub,
+    fontWeight: "600",
+  },
+  keyboardControlBtn: {
+    backgroundColor: C.elevated,
+    borderWidth: 1,
+    borderColor: C.border,
+    borderRadius: R.full,
+    paddingHorizontal: SP.md,
+    paddingVertical: SP.xs + 3,
+  },
+  keyboardControlText: {
+    color: C.text,
+    fontSize: F.xs,
+    fontWeight: "700",
   },
 
   // ── Panic Button ──
