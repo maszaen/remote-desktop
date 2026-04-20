@@ -20,6 +20,11 @@ from pycaw.pycaw import AudioUtilities
 from comtypes import CoInitialize
 from fastapi.middleware.cors import CORSMiddleware
 
+# Remove implicit 100ms delay inside pyautogui
+pyautogui.PAUSE = 0
+# Prevent failsafe exceptions if cursor goes to corner during typing
+pyautogui.FAILSAFE = False
+
 # Enable Per-Monitor DPI Awareness so screenshots capture at native resolution
 try:
     ctypes.windll.shcore.SetProcessDpiAwareness(2)  # PROCESS_PER_MONITOR_DPI_AWARE
@@ -221,9 +226,15 @@ def tap_key(key: str, hold_ms: int = 30):
     k = normalize_key(key)
     if not k:
         return
-    pyautogui.keyDown(k)
-    time.sleep(clamp_ms(hold_ms) / 1000.0)
-    pyautogui.keyUp(k)
+        
+    # If the original key was uppercase or special symbol and length is 1, write handles it better
+    # Note: write doesn't support holding, but it's the only reliable way to send symbols/uppercase via pyautogui simply
+    if len(key) == 1 and key != k:
+        pyautogui.write(key, interval=0)
+    else:
+        pyautogui.keyDown(k)
+        time.sleep(clamp_ms(hold_ms) / 1000.0)
+        pyautogui.keyUp(k)
 
 
 def set_queue_state(**updates):
@@ -295,7 +306,7 @@ def run_keyboard_queue(
                     time.sleep(0.01)
                 pyautogui.keyUp(k)
             else:
-                tap_key(key)
+                tap_key(key, hold_ms=hold_ms)
 
             sent_count = idx + 1
             set_queue_state(
@@ -702,7 +713,7 @@ def keyboard_realtime(req: RealtimeKeyboardRequest):
 def keyboard_queue_start(req: KeyboardQueueStartRequest):
     global KEYBOARD_QUEUE_THREAD
 
-    items = [i.dict() for i in req.items if i.key and i.key.strip()]
+    items = [i.model_dump() for i in req.items if i.key and i.key.strip()]
     if not items:
         return {"error": "Queue is empty"}
 
@@ -943,6 +954,11 @@ VK_MAP = {
     "c": (0x43, 0x2E, 0),
     "s": (0x53, 0x1F, 0),
     "d": (0x44, 0x20, 0),
+    "l": (0x4C, 0x26, 0),
+    "a": (0x41, 0x1E, 0),
+    "t": (0x54, 0x14, 0),
+    "enter": (0x0D, 0x1C, 0),
+    "backspace": (0x08, 0x0E, 0),
 }
 KEYEVENTF_KEYUP = 0x0002
 KEYEVENTF_EXTENDEDKEY = 0x0001
@@ -990,6 +1006,18 @@ def send_shortcut(req: ShortcutRequest):
             execute_hotkey("ctrlleft", "s")
         elif shortcut == "win-d":
             execute_hotkey("winleft", "d")
+        elif shortcut == "enter":
+            execute_hotkey("enter")
+        elif shortcut == "backspace":
+            execute_hotkey("backspace")
+        elif shortcut == "ctrl-l":
+            execute_hotkey("ctrlleft", "l")
+        elif shortcut == "ctrl-a":
+            execute_hotkey("ctrlleft", "a")
+        elif shortcut == "ctrl-t":
+            execute_hotkey("ctrlleft", "t")
+        elif shortcut == "ctrl-shift-t":
+            execute_hotkey("ctrlleft", "shiftleft", "t")
         else:
             return {"error": f"Unknown shortcut: {shortcut}"}
         print(f"[SHORTCUT] Sent: {shortcut}")
