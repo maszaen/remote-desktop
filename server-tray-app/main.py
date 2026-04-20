@@ -244,7 +244,11 @@ def get_queue_status_payload():
     return payload
 
 
-def run_keyboard_queue(items: List[dict], default_delay_ms: int, default_hold_ms: int):
+def run_keyboard_queue(
+    items: List[dict],
+    default_delay_ms: int,
+    default_hold_ms: int,
+):
     try:
         set_queue_state(
             running=True,
@@ -710,7 +714,11 @@ def keyboard_queue_start(req: KeyboardQueueStartRequest):
     KEYBOARD_QUEUE_PAUSE.clear()
     KEYBOARD_QUEUE_THREAD = threading.Thread(
         target=run_keyboard_queue,
-        args=(items, clamp_ms(req.default_delay_ms), clamp_ms(req.default_hold_ms)),
+        args=(
+            items,
+            clamp_ms(req.default_delay_ms),
+            clamp_ms(req.default_hold_ms),
+        ),
         daemon=True,
     )
     KEYBOARD_QUEUE_THREAD.start()

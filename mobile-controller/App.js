@@ -15,6 +15,7 @@ import {
   ActivityIndicator,
   Switch,
   Modal,
+  Keyboard,
   KeyboardAvoidingView,
   Animated,
   Easing,
@@ -149,6 +150,66 @@ const BottomSheet = ({ visible, onClose, children, title, subtitle }) => {
         </GestureDetector>
         {children}
       </AnimatedRe.View>
+    </View>
+  );
+};
+
+// ─── SLIDE-LEFT FULLSCREEN MODAL ─────────────────────────────────────────────
+const SlideLeftModal = ({ visible, onClose, children, contentInsetTop = 0 }) => {
+  const [mounted, setMounted] = useState(false);
+  const slideX = useRef(new Animated.Value(SCREEN_WIDTH)).current;
+  const overlayOpacity = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (visible) {
+      setMounted(true);
+    }
+  }, [visible]);
+
+  useEffect(() => {
+    if (!mounted) return;
+
+    Animated.parallel([
+      Animated.spring(slideX, {
+        toValue: visible ? 0 : SCREEN_WIDTH,
+        tension: 135,
+        friction: 19,
+        useNativeDriver: true,
+      }),
+      Animated.timing(overlayOpacity, {
+        toValue: visible ? 1 : 0,
+        duration: visible ? 140 : 125,
+        useNativeDriver: true,
+      }),
+    ]).start(({ finished }) => {
+      if (finished && !visible) {
+        setMounted(false);
+      }
+    });
+  }, [visible, mounted, slideX, overlayOpacity]);
+
+  useEffect(() => {
+    if (!visible) return;
+    const backSub = BackHandler.addEventListener("hardwareBackPress", () => {
+      onClose?.();
+      return true;
+    });
+    return () => backSub.remove();
+  }, [visible, onClose]);
+
+  if (!mounted) return null;
+
+  return (
+    <View style={s.slideLeftWrapper} pointerEvents="box-none">
+      <Animated.View style={[s.slideLeftOverlay, { opacity: overlayOpacity }]} />
+      <Animated.View
+        style={[
+          s.slideLeftContainer,
+          { paddingTop: contentInsetTop, transform: [{ translateX: slideX }] },
+        ]}
+      >
+        {children}
+      </Animated.View>
     </View>
   );
 };
@@ -752,15 +813,17 @@ function AppMain() {
 
   const [launchableApps, setLaunchableApps] = useState([]);
   const [launchingKey, setLaunchingKey] = useState("");
+  const [topNavHeight, setTopNavHeight] = useState(0);
 
   const [keyboardMode, setKeyboardMode] = useState("queue"); // queue | realtime
   const [realtimeValue, setRealtimeValue] = useState("");
   const realtimePrevRef = useRef("");
+  const realtimeInputRef = useRef(null);
+  const [nativeKeyboardOpen, setNativeKeyboardOpen] = useState(false);
 
-  const [queueInput, setQueueInput] = useState("w,a,a,s,d");
+  const [queueInput, setQueueInput] = useState("waasd");
   const [queueDelayMs, setQueueDelayMs] = useState("10");
   const [queueHoldMs, setQueueHoldMs] = useState("2000");
-  const [queueDefaultAction, setQueueDefaultAction] = useState("tap"); // tap | hold
   const [queueDraft, setQueueDraft] = useState([]);
   const [queueStatus, setQueueStatus] = useState({
     running: false,
@@ -773,6 +836,12 @@ function AppMain() {
     items: [],
   });
   const queuePollRef = useRef(null);
+  const [queuePlaybackChars, setQueuePlaybackChars] = useState([]);
+  const queuePlaybackSentRef = useRef(0);
+  const queueHeadOpacity = useRef(new Animated.Value(1)).current;
+  const queueHeadScale = useRef(new Animated.Value(1)).current;
+  const queueRowShift = useRef(new Animated.Value(0)).current;
+  const queueConsumeAnimatingRef = useRef(false);
 
   const [wifiActive, setWifiActive] = useState(false);
   const [btActive, setBtActive] = useState(false);
@@ -1378,6 +1447,14 @@ function AppMain() {
     await sendAction("/keyboard/realtime", "POST", { key, mode, hold_ms: 30 });
   };
 
+  const toggleNativeKeyboard = () => {
+    if (nativeKeyboardOpen) {
+      Keyboard.dismiss();
+    } else {
+      realtimeInputRef.current?.focus();
+    }
+  };
+
   const onRealtimeTextChange = async (value) => {
     const prev = realtimePrevRef.current;
 
@@ -1404,31 +1481,32 @@ function AppMain() {
     setRealtimeValue(value);
   };
 
-  const parseQueueInput = (raw) =>
-    raw
-      .split(",")
-      .map((x) => x.trim())
-      .filter(Boolean)
-      .map((key, idx) => ({
-        id: `${Date.now()}_${idx}_${key}`,
-        key,
-        action: queueDefaultAction,
-        holdMs: Number(queueHoldMs) || 2000,
-      }));
-
-  const buildQueueDraft = () => {
-    const parsed = parseQueueInput(queueInput);
-    setQueueDraft(parsed);
+  const normalizeQueueCharToKey = (char) => {
+    if (char === "\n") return "enter";
+    if (char === "\t") return "tab";
+    if (char === " ") return "space";
+    return char;
   };
 
-  const toggleQueueItemAction = (id) => {
-    setQueueDraft((prev) =>
-      prev.map((it) =>
-        it.id === id
-          ? { ...it, action: it.action === "hold" ? "tap" : "hold" }
-          : it,
-      ),
-    );
+  const queueDisplayLabel = (key) => {
+    if (key === "space") return "SPACE";
+    if (key === "enter") return "ENTER";
+    if (key === "tab") return "TAB";
+    return key;
+  };
+
+  const parseQueueInput = (raw) =>
+    Array.from((raw || "").replace(/\r/g, "")).map((char, idx) => {
+      const key = normalizeQueueCharToKey(char);
+      return {
+        id: `${idx}_${char.charCodeAt(0)}`,
+        key,
+      };
+    });
+
+  const handleQueueInputChange = (value) => {
+    setQueueInput(value);
+    setQueueDraft(parseQueueInput(value));
   };
 
   const fetchQueueStatus = async () => {
@@ -1452,20 +1530,20 @@ function AppMain() {
     if (queueDraft.length === 0) {
       const parsed = parseQueueInput(queueInput);
       if (parsed.length === 0) {
-        Alert.alert("Queue Empty", "Masukkan pola dulu. Contoh: w,a,a,s,d");
+        Alert.alert("Queue Empty", "Masukkan teks atau pola dulu.");
         return;
       }
       setQueueDraft(parsed);
     }
 
-    const payloadItems = (queueDraft.length ? queueDraft : parseQueueInput(queueInput)).map(
-      (it) => ({
-        key: it.key,
-        action: it.action,
-        hold_ms: Number(it.holdMs) || Number(queueHoldMs) || 2000,
-        delay_ms: Number(queueDelayMs) || 10,
-      }),
-    );
+    const payloadItems = (
+      queueDraft.length ? queueDraft : parseQueueInput(queueInput)
+    ).map((it) => ({
+      key: it.key,
+      action: "hold",
+      hold_ms: Number(queueHoldMs) || 2000,
+      delay_ms: Number(queueDelayMs) || 10,
+    }));
 
     const r = await sendAction("/keyboard/queue/start", "POST", {
       items: payloadItems,
@@ -1477,6 +1555,8 @@ function AppMain() {
       Alert.alert("Queue Error", r.error);
       return;
     }
+
+    setQueueInput("");
 
     fetchQueueStatus();
   };
@@ -1624,6 +1704,107 @@ function AppMain() {
   }, [launcherSheetOpen]);
 
   useEffect(() => {
+    const showSub = Keyboard.addListener("keyboardDidShow", () => {
+      setNativeKeyboardOpen(true);
+    });
+    const hideSub = Keyboard.addListener("keyboardDidHide", () => {
+      setNativeKeyboardOpen(false);
+    });
+
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!keyboardSheetOpen) {
+      Keyboard.dismiss();
+      setNativeKeyboardOpen(false);
+      realtimePrevRef.current = "";
+      setRealtimeValue("");
+    }
+  }, [keyboardSheetOpen]);
+
+  useEffect(() => {
+    setQueueDraft(parseQueueInput(queueInput));
+  }, [queueInput]);
+
+  useEffect(() => {
+    const queueIsActive = queueStatus.running || queueStatus.paused;
+    const labels = (queueStatus.items || []).map((it) => {
+      if (it.key === "space") return " ";
+      if (it.key === "enter") return "↵";
+      if (it.key === "tab") return "⇥";
+      return String(it.key || "");
+    });
+    const sent = Math.max(0, queueStatus.sent_count || 0);
+    const remaining = labels.slice(sent);
+
+    if (!queueIsActive) {
+      setQueuePlaybackChars([]);
+      queuePlaybackSentRef.current = 0;
+      queueConsumeAnimatingRef.current = false;
+      queueHeadOpacity.setValue(1);
+      queueHeadScale.setValue(1);
+      queueRowShift.setValue(0);
+      return;
+    }
+
+    const prevSent = queuePlaybackSentRef.current;
+    const diff = sent - prevSent;
+
+    if (
+      diff === 1 &&
+      queuePlaybackChars.length > 0 &&
+      !queueConsumeAnimatingRef.current
+    ) {
+      queueConsumeAnimatingRef.current = true;
+      queueHeadOpacity.setValue(1);
+      queueHeadScale.setValue(1);
+      queueRowShift.setValue(0);
+
+      Animated.parallel([
+        Animated.timing(queueHeadOpacity, {
+          toValue: 0,
+          duration: 170,
+          useNativeDriver: true,
+        }),
+        Animated.timing(queueHeadScale, {
+          toValue: 0.65,
+          duration: 170,
+          useNativeDriver: true,
+        }),
+        Animated.timing(queueRowShift, {
+          toValue: -30,
+          duration: 210,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: true,
+        }),
+      ]).start(() => {
+        setQueuePlaybackChars(remaining);
+        queueHeadOpacity.setValue(1);
+        queueHeadScale.setValue(1);
+        queueRowShift.setValue(0);
+        queueConsumeAnimatingRef.current = false;
+      });
+    } else if (!queueConsumeAnimatingRef.current) {
+      setQueuePlaybackChars(remaining);
+      queueHeadOpacity.setValue(1);
+      queueHeadScale.setValue(1);
+      queueRowShift.setValue(0);
+    }
+
+    queuePlaybackSentRef.current = sent;
+  }, [
+    queueStatus.running,
+    queueStatus.paused,
+    queueStatus.sent_count,
+    queueStatus.items,
+    queuePlaybackChars.length,
+  ]);
+
+  useEffect(() => {
     if (keyboardSheetOpen && keyboardMode === "queue") {
       fetchQueueStatus();
       queuePollRef.current = setInterval(fetchQueueStatus, 250);
@@ -1687,6 +1868,13 @@ function AppMain() {
       : stats?.ram_percent > 60
         ? C.warning
         : C.primary;
+
+  const keyboardModalTopInset =
+    topNavHeight +
+    (Platform.OS === "android" ? StatusBar.currentHeight || 0 : 0) +
+    SP.md;
+
+  const queueIsActive = queueStatus.running || queueStatus.paused;
 
   // Easy-to-edit display name mapping for active window title.
   const ACTIVE_WINDOW_LABEL_MAP = {
@@ -1773,7 +1961,7 @@ function AppMain() {
               <View style={s.menuRowBody}>
                 <Text style={s.menuRowTitle}>Scan QR Code</Text>
                 <Text style={s.menuRowSub}>
-                  Open PC tray → "Show QR to Connect"
+                  Open PC tray and "Show QR to Connect"
                 </Text>
               </View>
               <Ionicons
@@ -2090,7 +2278,10 @@ function AppMain() {
       />
 
       {/* Top Nav */}
-      <View style={s.topNav}>
+      <View
+        style={s.topNav}
+        onLayout={(e) => setTopNavHeight(e.nativeEvent.layout.height)}
+      >
         <View style={s.topNavLeft}>
           <View>
             <Text style={s.navBadge}>
@@ -2101,10 +2292,14 @@ function AppMain() {
         </View>
         <TouchableOpacity
           style={s.disconnectBtn}
-          onPress={disconnect}
+          onPress={keyboardSheetOpen ? () => setKeyboardSheetOpen(false) : disconnect}
           activeOpacity={0.7}
         >
-          <Ionicons name="power" size={17} color={C.danger} />
+          <Ionicons
+            name={keyboardSheetOpen ? "arrow-back" : "power"}
+            size={17}
+            color={keyboardSheetOpen ? C.sub : C.danger}
+          />
         </TouchableOpacity>
       </View>
 
@@ -3055,273 +3250,268 @@ function AppMain() {
         </View>
       </BottomSheet>
 
-      {/* ═══ REMOTE KEYBOARD SHEET ═══ */}
-      <BottomSheet
+      {/* ═══ REMOTE KEYBOARD SLIDE-LEFT MODAL ═══ */}
+      <SlideLeftModal
         visible={keyboardSheetOpen}
         onClose={() => setKeyboardSheetOpen(false)}
-        title="Remote Keyboard"
-        subtitle="Realtime and queue typing modes"
+        contentInsetTop={keyboardModalTopInset}
       >
-        <View style={s.sheetContent}>
-          <View style={s.keyboardModeRow}>
-            <TouchableOpacity
-              style={[
-                s.keyboardModeBtn,
-                keyboardMode === "queue" && s.keyboardModeBtnActive,
-              ]}
-              onPress={() => setKeyboardMode("queue")}
-              activeOpacity={0.7}
-            >
-              <Text
-                style={[
-                  s.keyboardModeText,
-                  keyboardMode === "queue" && s.keyboardModeTextActive,
-                ]}
-              >
-                Queue Mode
+        <View style={s.keyboardModalRoot}>
+          <ScrollView
+            style={s.keyboardModalScroll}
+            contentContainerStyle={s.keyboardModalScrollContent}
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+          >
+            <View style={s.keyboardHeroCard}>
+              <Text style={s.keyboardHeroTitle}>Remote Keyboard</Text>
+              <Text style={s.keyboardHeroSub}>
+                Kontrol keyboard PC dari HP. Realtime untuk jarak dekat, queue
+                untuk automation santai.
               </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[
-                s.keyboardModeBtn,
-                keyboardMode === "realtime" && s.keyboardModeBtnActive,
-              ]}
-              onPress={() => setKeyboardMode("realtime")}
-              activeOpacity={0.7}
-            >
-              <Text
-                style={[
-                  s.keyboardModeText,
-                  keyboardMode === "realtime" && s.keyboardModeTextActive,
-                ]}
-              >
-                Realtime
-              </Text>
-            </TouchableOpacity>
-          </View>
 
-          {keyboardMode === "realtime" ? (
-            <>
-              <Text style={s.groupLabel}>REALTIME INPUT</Text>
-              <View style={s.keyboardInputWrap}>
-                <TextInput
-                  style={s.keyboardInput}
-                  value={realtimeValue}
-                  onChangeText={onRealtimeTextChange}
-                  placeholder="Type here..."
-                  placeholderTextColor={C.muted}
-                  autoCorrect={false}
-                  autoCapitalize="none"
-                />
-              </View>
-
-              <View style={s.keyboardQuickRow}>
-                {[
-                  { label: "Space", key: "space" },
-                  { label: "Enter", key: "enter" },
-                  { label: "Tab", key: "tab" },
-                  { label: "Esc", key: "escape" },
-                  { label: "Back", key: "backspace" },
-                ].map((item) => (
-                  <TouchableOpacity
-                    key={item.key}
-                    style={s.keyboardQuickBtn}
-                    onPress={() => sendRealtimeKey(item.key)}
-                    activeOpacity={0.7}
-                  >
-                    <Text style={s.keyboardQuickText}>{item.label}</Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            </>
-          ) : (
-            <>
-              <Text style={s.groupLabel}>QUEUE PATTERN</Text>
-              <View style={s.keyboardInputWrap}>
-                <TextInput
-                  style={s.keyboardInput}
-                  value={queueInput}
-                  onChangeText={setQueueInput}
-                  placeholder="w,a,a,s,d"
-                  placeholderTextColor={C.muted}
-                  autoCorrect={false}
-                  autoCapitalize="none"
-                />
-              </View>
-
-              <View style={s.queueSettingsRow}>
-                <View style={s.queueSettingBox}>
-                  <Text style={s.queueSettingLabel}>Delay (ms)</Text>
-                  <TextInput
-                    style={s.queueSettingInput}
-                    value={queueDelayMs}
-                    onChangeText={setQueueDelayMs}
-                    keyboardType="number-pad"
-                    placeholder="10"
-                    placeholderTextColor={C.muted}
-                  />
-                </View>
-                <View style={s.queueSettingBox}>
-                  <Text style={s.queueSettingLabel}>Hold (ms)</Text>
-                  <TextInput
-                    style={s.queueSettingInput}
-                    value={queueHoldMs}
-                    onChangeText={setQueueHoldMs}
-                    keyboardType="number-pad"
-                    placeholder="2000"
-                    placeholderTextColor={C.muted}
-                  />
-                </View>
-              </View>
-
-              <View style={s.keyboardQuickRow}>
+              <View style={s.keyboardModeRow}>
                 <TouchableOpacity
                   style={[
-                    s.keyboardQuickBtn,
-                    queueDefaultAction === "tap" && s.keyboardQuickBtnActive,
+                    s.keyboardModeBtn,
+                    keyboardMode === "queue" && s.keyboardModeBtnActive,
                   ]}
-                  onPress={() => setQueueDefaultAction("tap")}
+                  onPress={() => setKeyboardMode("queue")}
                   activeOpacity={0.7}
                 >
                   <Text
                     style={[
-                      s.keyboardQuickText,
-                      queueDefaultAction === "tap" && {
-                        color: C.primary,
-                        fontWeight: "700",
-                      },
+                      s.keyboardModeText,
+                      keyboardMode === "queue" && s.keyboardModeTextActive,
                     ]}
                   >
-                    Default: Tap
+                    Queue Mode
                   </Text>
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={[
-                    s.keyboardQuickBtn,
-                    queueDefaultAction === "hold" && s.keyboardQuickBtnActive,
+                    s.keyboardModeBtn,
+                    keyboardMode === "realtime" && s.keyboardModeBtnActive,
                   ]}
-                  onPress={() => setQueueDefaultAction("hold")}
+                  onPress={() => setKeyboardMode("realtime")}
                   activeOpacity={0.7}
                 >
                   <Text
                     style={[
-                      s.keyboardQuickText,
-                      queueDefaultAction === "hold" && {
-                        color: C.primary,
-                        fontWeight: "700",
-                      },
+                      s.keyboardModeText,
+                      keyboardMode === "realtime" && s.keyboardModeTextActive,
                     ]}
                   >
-                    Default: Hold
+                    Realtime
                   </Text>
                 </TouchableOpacity>
-                <TouchableOpacity
-                  style={s.keyboardQuickBtn}
-                  onPress={buildQueueDraft}
-                  activeOpacity={0.7}
-                >
-                  <Text style={s.keyboardQuickText}>Build Queue</Text>
-                </TouchableOpacity>
               </View>
+            </View>
 
-              {queueDraft.length > 0 && (
-                <View style={s.queueDraftWrap}>
-                  {queueDraft.map((it) => (
+            <TextInput
+              ref={realtimeInputRef}
+              style={s.hiddenRealtimeInput}
+              value={realtimeValue}
+              onChangeText={onRealtimeTextChange}
+              autoCorrect={false}
+              autoCapitalize="none"
+              blurOnSubmit={false}
+              multiline
+            />
+
+            {keyboardMode === "realtime" ? (
+              <View style={s.keyboardPanel}>
+                <Text style={s.groupLabel}>REALTIME MODE</Text>
+                <Text style={s.queueStatusSub}>
+                  Gunakan keyboard native Android + tombol cepat posisi tetap.
+                </Text>
+
+                <TouchableOpacity
+                  style={[
+                    s.keyboardNativeToggleBtn,
+                    nativeKeyboardOpen && s.keyboardNativeToggleBtnActive,
+                  ]}
+                  onPress={toggleNativeKeyboard}
+                  activeOpacity={0.8}
+                >
+                  <Ionicons
+                    name={nativeKeyboardOpen ? "chevron-down" : "chevron-up"}
+                    size={16}
+                    color={nativeKeyboardOpen ? C.primary : C.sub}
+                  />
+                  <Text
+                    style={[
+                      s.keyboardNativeToggleText,
+                      nativeKeyboardOpen && { color: C.primary },
+                    ]}
+                  >
+                    {nativeKeyboardOpen ? "Close Keyboard" : "Open Keyboard"}
+                  </Text>
+                </TouchableOpacity>
+
+                <View style={s.keyboardRealtimeGrid}>
+                  {[
+                    { label: "Space", key: "space" },
+                    { label: "Enter", key: "enter" },
+                    { label: "Tab", key: "tab" },
+                    { label: "Esc", key: "escape" },
+                    { label: "Back", key: "backspace" },
+                    { label: "Up", key: "up" },
+                    { label: "Left", key: "left" },
+                    { label: "Down", key: "down" },
+                    { label: "Right", key: "right" },
+                  ].map((item) => (
                     <TouchableOpacity
-                      key={it.id}
-                      style={[
-                        s.queueToken,
-                        it.action === "hold" && s.queueTokenHold,
-                      ]}
-                      onPress={() => toggleQueueItemAction(it.id)}
+                      key={item.key}
+                      style={s.keyboardRealtimeBtn}
+                      onPress={() => sendRealtimeKey(item.key)}
                       activeOpacity={0.7}
                     >
-                      <Text style={s.queueTokenText}>
-                        {it.key} ({it.action})
-                      </Text>
+                      <Text style={s.keyboardRealtimeBtnText}>{item.label}</Text>
                     </TouchableOpacity>
                   ))}
                 </View>
-              )}
+              </View>
+            ) : (
+              <View style={s.keyboardPanel}>
+                <Text style={s.groupLabel}>QUEUE PATTERN</Text>
 
-              <View style={s.queueStatusBox}>
-                <Text style={s.queueStatusTitle}>
-                  Queue Status: {queueStatus.sent_count}/{queueStatus.total}
-                </Text>
-                <Text style={s.queueStatusSub}>
-                  {queueStatus.running
-                    ? queueStatus.paused
-                      ? "Paused"
-                      : "Running"
-                    : "Idle"}
-                  {queueStatus.current_key
-                    ? ` • Current: ${queueStatus.current_key}`
-                    : ""}
-                  {queueStatus.remaining_ms > 0
-                    ? ` • ${queueStatus.remaining_ms}ms`
-                    : ""}
-                </Text>
-                <View style={s.queueIndicatorWrap}>
-                  {(queueStatus.items || []).map((it, idx) => {
-                    const isCurrent = idx === queueStatus.current_index;
-                    const isSent = idx < queueStatus.sent_count;
-                    return (
-                      <View
-                        key={`${it.key}_${idx}`}
-                        style={[
-                          s.queueIndicatorToken,
-                          isSent && s.queueIndicatorSent,
-                          isCurrent && s.queueIndicatorCurrent,
-                        ]}
-                      >
-                        <Text
-                          style={[
-                            s.queueIndicatorText,
-                            isCurrent && { color: C.bg, fontWeight: "800" },
-                          ]}
-                        >
-                          {it.key}
-                        </Text>
+                {queueIsActive ? (
+                  <View style={s.queueIndicatorHero}>
+                    <Animated.View
+                      style={[
+                        s.queuePlaybackRow,
+                        { transform: [{ translateX: queueRowShift }] },
+                      ]}
+                    >
+                      {queuePlaybackChars.map((char, idx) => {
+                        if (idx === 0) {
+                          return (
+                            <Animated.Text
+                              key={`play_${idx}_${char}`}
+                              style={[
+                                s.mediaHeroTitle,
+                                s.queuePlaybackText,
+                                s.queuePlaybackTextCurrent,
+                                {
+                                  opacity: queueHeadOpacity,
+                                  transform: [{ scale: queueHeadScale }],
+                                },
+                              ]}
+                              numberOfLines={1}
+                            >
+                              {char || " "}
+                            </Animated.Text>
+                          );
+                        }
+                        return (
+                          <Text
+                            key={`play_${idx}_${char}`}
+                            style={[s.mediaHeroTitle, s.queuePlaybackText]}
+                            numberOfLines={1}
+                          >
+                            {char || " "}
+                          </Text>
+                        );
+                      })}
+                    </Animated.View>
+                  </View>
+                ) : (
+                  <>
+                    <Text style={s.queueStatusSub}>
+                      Tulis bebas di bawah. Sistem pecah otomatis jadi antrian
+                      karakter, termasuk koma dan spasi.
+                    </Text>
+                    <View style={s.keyboardTextareaWrap}>
+                      <TextInput
+                        style={[s.keyboardInput, s.keyboardTextarea]}
+                        value={queueInput}
+                        onChangeText={handleQueueInputChange}
+                        placeholder="Tulis teks/pattern di sini..."
+                        placeholderTextColor={C.muted}
+                        autoCorrect={false}
+                        autoCapitalize="none"
+                        multiline
+                        textAlignVertical="top"
+                      />
+                    </View>
+
+                    <View style={s.queueSettingsRow}>
+                      <View style={s.queueSettingBox}>
+                        <Text style={s.queueSettingLabel}>Delay (ms)</Text>
+                        <TextInput
+                          style={s.queueSettingInput}
+                          value={queueDelayMs}
+                          onChangeText={setQueueDelayMs}
+                          keyboardType="number-pad"
+                          placeholder="10"
+                          placeholderTextColor={C.muted}
+                        />
                       </View>
-                    );
-                  })}
+                      <View style={s.queueSettingBox}>
+                        <Text style={s.queueSettingLabel}>Hold (ms)</Text>
+                        <TextInput
+                          style={s.queueSettingInput}
+                          value={queueHoldMs}
+                          onChangeText={setQueueHoldMs}
+                          keyboardType="number-pad"
+                          placeholder="2000"
+                          placeholderTextColor={C.muted}
+                        />
+                      </View>
+                    </View>
+                    <Text style={s.queueExplainText}>
+                      Hold = tombol ditekan terus selama durasi hold. Delay = jeda
+                      setelah tombol dilepas sebelum karakter berikutnya.
+                    </Text>
+                    <TouchableOpacity
+                      style={s.keyboardQueueClearBtn}
+                      onPress={() => {
+                        setQueueInput("");
+                        setQueueDraft([]);
+                      }}
+                      activeOpacity={0.75}
+                    >
+                      <Text style={s.keyboardQueueClearText}>Clear Queue</Text>
+                    </TouchableOpacity>
+                  </>
+                )}
+
+                <View style={s.keyboardControlRow}>
+                  <TouchableOpacity
+                    style={s.keyboardControlBtnPrimary}
+                    onPress={startKeyboardQueue}
+                    activeOpacity={0.75}
+                  >
+                    <Text style={s.keyboardControlPrimaryText}>Start</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={s.keyboardControlBtn}
+                    onPress={pauseKeyboardQueue}
+                    activeOpacity={0.75}
+                  >
+                    <Text style={s.keyboardControlText}>Pause</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={s.keyboardControlBtn}
+                    onPress={resumeKeyboardQueue}
+                    activeOpacity={0.75}
+                  >
+                    <Text style={s.keyboardControlText}>Resume</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[s.keyboardControlBtn, { borderColor: C.danger + "55" }]}
+                    onPress={stopKeyboardQueue}
+                    activeOpacity={0.75}
+                  >
+                    <Text style={[s.keyboardControlText, { color: C.danger }]}>Stop</Text>
+                  </TouchableOpacity>
                 </View>
               </View>
-
-              <View style={s.keyboardQuickRow}>
-                <TouchableOpacity
-                  style={s.keyboardControlBtn}
-                  onPress={startKeyboardQueue}
-                  activeOpacity={0.7}
-                >
-                  <Text style={s.keyboardControlText}>Start</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={s.keyboardControlBtn}
-                  onPress={pauseKeyboardQueue}
-                  activeOpacity={0.7}
-                >
-                  <Text style={s.keyboardControlText}>Pause</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={s.keyboardControlBtn}
-                  onPress={resumeKeyboardQueue}
-                  activeOpacity={0.7}
-                >
-                  <Text style={s.keyboardControlText}>Resume</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[s.keyboardControlBtn, { borderColor: C.danger + "55" }]}
-                  onPress={stopKeyboardQueue}
-                  activeOpacity={0.7}
-                >
-                  <Text style={[s.keyboardControlText, { color: C.danger }]}>Stop</Text>
-                </TouchableOpacity>
-              </View>
-            </>
-          )}
+            )}
+          </ScrollView>
         </View>
-      </BottomSheet>
+      </SlideLeftModal>
 
       {/* ═══ CONNECTIVITY MODAL ═══ */}
       <BottomSheet
@@ -3880,6 +4070,9 @@ const s = StyleSheet.create({
     paddingVertical: SP.sm + 4,
     borderBottomWidth: 1,
     borderBottomColor: C.separator,
+    backgroundColor: C.bg,
+    zIndex: 80,
+    elevation: 12,
   },
   topNavLeft: { flexDirection: "row", alignItems: "center" },
   navBadge: {
@@ -4328,6 +4521,135 @@ const s = StyleSheet.create({
     borderRadius: 12,
   },
 
+  // ── Slide Left Modal ──
+  slideLeftWrapper: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 40,
+  },
+  slideLeftOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(0,0,0,0.50)",
+  },
+  slideLeftContainer: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: C.bg,
+  },
+
+  // ── Remote Keyboard Fullscreen Modal ──
+  keyboardModalRoot: {
+    flex: 1,
+    backgroundColor: C.bg,
+  },
+  keyboardModalScroll: {
+    flex: 1,
+  },
+  keyboardModalScrollContent: {
+    paddingHorizontal: SP.md,
+    paddingTop: 0,
+    paddingBottom: SP.xl,
+  },
+  keyboardHeroCard: {
+    backgroundColor: C.elevated,
+    borderRadius: R.sm,
+    borderWidth: 1,
+    borderColor: C.border,
+    padding: SP.md,
+    marginBottom: SP.sm,
+  },
+  keyboardHeroTitle: {
+    fontSize: F.lg,
+    fontWeight: "800",
+    color: C.text,
+  },
+  keyboardHeroSub: {
+    marginTop: SP.xs,
+    fontSize: F.sm,
+    color: C.muted,
+    lineHeight: 19,
+  },
+  keyboardTitleBlock: {
+    marginBottom: SP.md,
+  },
+  keyboardPanel: {
+    backgroundColor: C.elevated,
+    borderRadius: R.sm,
+    borderWidth: 1,
+    borderColor: C.border,
+    padding: SP.md,
+    marginTop: SP.sm,
+  },
+  hiddenRealtimeInput: {
+    position: "absolute",
+    width: 1,
+    height: 1,
+    opacity: 0,
+  },
+  keyboardNativeToggleBtn: {
+    marginTop: SP.sm,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    backgroundColor: C.bg,
+    borderWidth: 1,
+    borderColor: C.border,
+    borderRadius: R.full,
+    paddingVertical: SP.sm,
+  },
+  keyboardNativeToggleBtnActive: {
+    backgroundColor: C.primaryDim,
+    borderColor: C.primary + "55",
+  },
+  keyboardNativeToggleText: {
+    fontSize: F.sm,
+    color: C.sub,
+    fontWeight: "700",
+  },
+  keyboardRealtimeGrid: {
+    marginTop: SP.sm,
+    flexDirection: "row",
+    flexWrap: "wrap",
+    justifyContent: "space-between",
+    rowGap: SP.sm,
+  },
+  keyboardRealtimeBtn: {
+    width: "31.5%",
+    minHeight: 48,
+    borderRadius: R.md,
+    borderWidth: 1,
+    borderColor: C.border,
+    backgroundColor: C.bg,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  keyboardRealtimeBtnText: {
+    fontSize: F.sm,
+    color: C.sub,
+    fontWeight: "700",
+  },
+  keyboardTextareaWrap: {
+    backgroundColor: C.bg,
+    borderWidth: 1,
+    borderColor: C.border,
+    borderRadius: R.md,
+    marginTop: SP.sm,
+  },
+  keyboardTextarea: {
+    minHeight: 130,
+    paddingTop: SP.sm,
+    paddingBottom: SP.sm,
+  },
+  keyboardBackBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: R.full,
+    backgroundColor: C.elevated,
+    justifyContent: "center",
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: C.border,
+  },
+
   // ── Remote Keyboard ──
   keyboardModeRow: {
     flexDirection: "row",
@@ -4416,6 +4738,51 @@ const s = StyleSheet.create({
     fontSize: F.md,
     paddingVertical: 0,
   },
+  queueExplainText: {
+    marginTop: SP.xs,
+    fontSize: F.xs,
+    color: C.muted,
+    lineHeight: 18,
+    fontWeight: "500",
+  },
+  queueIndicatorHero: {
+    marginTop: SP.sm,
+    marginBottom: SP.sm,
+    minHeight: 72,
+    justifyContent: "center",
+    overflow: "hidden",
+  },
+  queuePlaybackRow: {
+    flexDirection: "row",
+    alignItems: "flex-end",
+    minHeight: 64,
+  },
+  queuePlaybackText: {
+    fontSize: 56,
+    lineHeight: 60,
+    color: C.text,
+    marginRight: 1,
+    paddingTop: 10, // Ensure text isn't cut off by lineHeight constraints
+  },
+  queuePlaybackTextCurrent: {
+    color: C.primary,
+  },
+  keyboardQueueClearBtn: {
+    marginTop: SP.sm,
+    alignSelf: "stretch",
+    backgroundColor: C.elevated,
+    borderWidth: 1,
+    borderColor: C.border,
+    borderRadius: R.md,
+    paddingHorizontal: SP.md,
+    paddingVertical: SP.sm,
+    alignItems: "center",
+  },
+  keyboardQueueClearText: {
+    fontSize: F.xs,
+    color: C.text,
+    fontWeight: "800",
+  },
   queueDraftWrap: {
     flexDirection: "row",
     flexWrap: "wrap",
@@ -4488,9 +4855,33 @@ const s = StyleSheet.create({
     backgroundColor: C.elevated,
     borderWidth: 1,
     borderColor: C.border,
-    borderRadius: R.full,
+    borderRadius: R.md,
     paddingHorizontal: SP.md,
-    paddingVertical: SP.xs + 3,
+    paddingVertical: SP.sm,
+    alignItems: "center",
+    minWidth: "48%",
+  },
+  keyboardControlRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: SP.sm,
+    marginTop: SP.sm,
+    justifyContent: "space-between",
+  },
+  keyboardControlBtnPrimary: {
+    backgroundColor: C.primary,
+    borderWidth: 1,
+    borderColor: C.primary + "77",
+    borderRadius: R.md,
+    paddingHorizontal: SP.md,
+    paddingVertical: SP.sm,
+    alignItems: "center",
+    width: "100%",
+  },
+  keyboardControlPrimaryText: {
+    color: C.text,
+    fontSize: F.xs,
+    fontWeight: "800",
   },
   keyboardControlText: {
     color: C.text,
