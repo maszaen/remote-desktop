@@ -79,6 +79,7 @@ const APP_ICONS = {
     needCircle: false,
   },
   gta_v: { src: require("./assets/icon/gtav.png"), needCircle: false },
+  nfs_heat: { src: require("./assets/icon/nfsheat.jpg"), needCircle: true },
   spotify: { src: require("./assets/icon/spotify.png"), needCircle: true },
   steam: { src: require("./assets/icon/steam.jpeg"), needCircle: true },
   vscode: { src: require("./assets/icon/vscode.png"), needCircle: false },

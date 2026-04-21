@@ -4,6 +4,7 @@ import io
 import threading
 import psutil
 import pyautogui
+import pydirectinput
 import pyperclip
 import uvicorn
 import socket
@@ -22,8 +23,10 @@ from fastapi.middleware.cors import CORSMiddleware
 
 # Remove implicit 100ms delay inside pyautogui
 pyautogui.PAUSE = 0
+pydirectinput.PAUSE = 0
 # Prevent failsafe exceptions if cursor goes to corner during typing
 pyautogui.FAILSAFE = False
+pydirectinput.FAILSAFE = False
 
 # Enable Per-Monitor DPI Awareness so screenshots capture at native resolution
 try:
@@ -84,8 +87,12 @@ APP_LAUNCH_TARGETS = {
         "target": "com.epicgames.launcher://apps",
     },
     "gta_v": {
-        "label": "GTA V (Steam)",
-        "target": "steam://rungameid/271590",
+        "label": "GTA V Enhanced",
+        "target": "steam://rungameid/3240220",
+    },
+    "nfs_heat": {
+        "label": "Need for Speed Heat",
+        "target": "steam://rungameid/1222680",
     },
     "spotify": {
         "label": "Spotify",
@@ -230,13 +237,11 @@ def tap_key(key: str, hold_ms: int = 30):
     # If the original key was uppercase or special symbol and length is 1, write handles it better
     # Note: write doesn't support holding, but it's the only reliable way to send symbols/uppercase via pyautogui simply
     if len(key) == 1 and key != k:
-        pyautogui.write(key, interval=0)
+        pydirectinput.write(key, interval=0)
     else:
-        pyautogui.keyDown(k)
+        pydirectinput.keyDown(k)
         time.sleep(clamp_ms(hold_ms) / 1000.0)
-        pyautogui.keyUp(k)
-
-
+        pydirectinput.keyUp(k)
 def set_queue_state(**updates):
     with KEYBOARD_QUEUE_LOCK:
         KEYBOARD_QUEUE_STATE.update(updates)
@@ -299,12 +304,12 @@ def run_keyboard_queue(
 
             if mode == "hold":
                 k = normalize_key(key)
-                pyautogui.keyDown(k)
+                pydirectinput.keyDown(k)
                 set_queue_state(step_end_ts=time.time() + (hold_ms / 1000.0))
                 end_ts = time.time() + (hold_ms / 1000.0)
                 while time.time() < end_ts and not KEYBOARD_QUEUE_STOP.is_set():
                     time.sleep(0.01)
-                pyautogui.keyUp(k)
+                pydirectinput.keyUp(k)
             else:
                 tap_key(key, hold_ms=hold_ms)
 
@@ -688,7 +693,7 @@ def launch_app(req: LaunchAppRequest):
 def keyboard_realtime(req: RealtimeKeyboardRequest):
     try:
         if req.text is not None:
-            pyautogui.write(req.text, interval=0)
+            pydirectinput.write(req.text, interval=0)
             return {"status": "success", "mode": "text", "length": len(req.text)}
 
         if not req.key:
@@ -698,9 +703,9 @@ def keyboard_realtime(req: RealtimeKeyboardRequest):
         key = normalize_key(req.key)
 
         if mode == "down":
-            pyautogui.keyDown(key)
+            pydirectinput.keyDown(key)
         elif mode == "up":
-            pyautogui.keyUp(key)
+            pydirectinput.keyUp(key)
         else:
             tap_key(key, hold_ms=req.hold_ms)
 

@@ -3,6 +3,7 @@ uvicorn
 pycaw
 comtypes
 pyautogui
+pydirectinput
 psutil
 pystray
 Pillow
