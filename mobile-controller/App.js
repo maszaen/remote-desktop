@@ -43,6 +43,7 @@ import AnimatedRe, {
   runOnJS,
   cancelAnimation,
 } from "react-native-reanimated";
+import Svg, { Polyline } from "react-native-svg";
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
 
@@ -281,13 +282,29 @@ const IMG_H = SCREEN_WIDTH * (9 / 16) * RENDER_FACTOR;
 const MIN_SCALE = 1 / RENDER_FACTOR;
 const MAX_SCALE = 5 / RENDER_FACTOR;
 
+// ─── PEN UTILS ────────────────────────────────────────────────────────────────
+// Convert stored stroke points (normalized 0..1 within the actual PC content
+// area) back to Svg-coord strings inside the IMG_W x IMG_H frame, accounting
+// for letterbox offsets so strokes sit on top of the displayed pixel.
+const penPointsToSvg = (pts, contentLeft, contentTop, contentW, contentH) => {
+  if (!pts || pts.length === 0) return "";
+  let out = "";
+  for (let i = 0; i < pts.length; i++) {
+    const p = pts[i];
+    const x = contentLeft + p.nx * contentW;
+    const y = contentTop + p.ny * contentH;
+    if (i > 0) out += " ";
+    out += `${x.toFixed(1)},${y.toFixed(1)}`;
+  }
+  return out;
+};
+
 const ZoomableImage = ({
   uri,
   penMode = false,
   pcAspect = 16 / 9,
-  onPenStart,
-  onPenMove,
-  onPenEnd,
+  strokes = [],
+  onPenStrokeFinalize,
 }) => {
   const scale = useSharedValue(MIN_SCALE);
   const savedScale = useSharedValue(MIN_SCALE);
@@ -505,19 +522,47 @@ const ZoomableImage = ({
     });
 
   // ── Pen-mode draw gesture ──
-  // Uses maxPointers(1) so that a second finger automatically cancels the
-  // draw, letting the simultaneous pinch take over → 2 fingers = zoom,
-  // 1 finger = draw. Gesture coordinates (e.x, e.y) are relative to the
-  // GestureDetector's inner absoluteFill view, so we convert them into
-  // image-base coords by undoing the current translate + scale transform.
+  // UX: draw locally on the phone canvas immediately (zero network latency),
+  // accumulate points with timestamps, and fire ONE request to the server
+  // when the finger lifts. The server then replays the stroke with the
+  // recorded timing so viewers on the PC see the gesture animate in (not
+  // snap in all at once), which draws their eye to where the pointer is.
+  //
+  // 1 finger = draw, 2 fingers = pinch zoom (via maxPointers(1) +
+  // Simultaneous(pinch, draw)). Gesture coords are container-space; we
+  // convert to image-base coords by undoing translate + scale.
+  const [liveStrokePoints, setLiveStrokePoints] = useState(null);
+  const liveStrokeRef = useRef(null);
+  const strokeStartRef = useRef(0);
+
+  const handlePenStartJS = (nx, ny) => {
+    const now = Date.now();
+    strokeStartRef.current = now;
+    const initial = [{ nx, ny, t: 0 }];
+    liveStrokeRef.current = initial;
+    setLiveStrokePoints(initial);
+  };
+  const handlePenMoveJS = (nx, ny) => {
+    if (!liveStrokeRef.current) return;
+    const t = Date.now() - strokeStartRef.current;
+    const next = liveStrokeRef.current.concat([{ nx, ny, t }]);
+    liveStrokeRef.current = next;
+    setLiveStrokePoints(next);
+  };
+  const handlePenEndJS = () => {
+    const pts = liveStrokeRef.current;
+    liveStrokeRef.current = null;
+    setLiveStrokePoints(null);
+    if (!pts || pts.length === 0) return;
+    if (onPenStrokeFinalize) onPenStrokeFinalize(pts);
+  };
+
   const drawGesture = Gesture.Pan()
     .maxPointers(1)
     .minDistance(0)
     .onStart((e) => {
-      const tx =
-        offsetBaseX.value + panX.value + pinchX.value;
-      const ty =
-        offsetBaseY.value + panY.value + pinchY.value;
+      const tx = offsetBaseX.value + panX.value + pinchX.value;
+      const ty = offsetBaseY.value + panY.value + pinchY.value;
       const s = scale.value;
       const imgLeft = SCREEN_WIDTH / 2 + tx - (IMG_W * s) / 2;
       const imgTop = SCREEN_HEIGHT / 2 + ty - (IMG_H * s) / 2;
@@ -527,13 +572,11 @@ const ZoomableImage = ({
       let ny = (by - contentTop) / contentH;
       nx = Math.max(0, Math.min(1, nx));
       ny = Math.max(0, Math.min(1, ny));
-      if (onPenStart) runOnJS(onPenStart)(nx, ny);
+      runOnJS(handlePenStartJS)(nx, ny);
     })
     .onUpdate((e) => {
-      const tx =
-        offsetBaseX.value + panX.value + pinchX.value;
-      const ty =
-        offsetBaseY.value + panY.value + pinchY.value;
+      const tx = offsetBaseX.value + panX.value + pinchX.value;
+      const ty = offsetBaseY.value + panY.value + pinchY.value;
       const s = scale.value;
       const imgLeft = SCREEN_WIDTH / 2 + tx - (IMG_W * s) / 2;
       const imgTop = SCREEN_HEIGHT / 2 + ty - (IMG_H * s) / 2;
@@ -543,10 +586,10 @@ const ZoomableImage = ({
       let ny = (by - contentTop) / contentH;
       nx = Math.max(0, Math.min(1, nx));
       ny = Math.max(0, Math.min(1, ny));
-      if (onPenMove) runOnJS(onPenMove)(nx, ny);
+      runOnJS(handlePenMoveJS)(nx, ny);
     })
     .onFinalize(() => {
-      if (onPenEnd) runOnJS(onPenEnd)();
+      runOnJS(handlePenEndJS)();
     });
 
   const composedGestures = penMode
@@ -582,6 +625,41 @@ const ZoomableImage = ({
               hasLoadedRef.current = true;
             }}
           />
+          {/* Local pen canvas — renders completed strokes + the in-progress
+              one immediately (no round-trip to server). Points live in the
+              content-box coord system (inside the letterbox region), so the
+              visible goresan sits exactly where the user's finger went. */}
+          <Svg
+            width={IMG_W}
+            height={IMG_H}
+            viewBox={`0 0 ${IMG_W} ${IMG_H}`}
+            style={StyleSheet.absoluteFillObject}
+            pointerEvents="none"
+          >
+            {strokes.map((st, i) => (
+              <Polyline
+                key={st.id || i}
+                points={penPointsToSvg(st.points, contentLeft, contentTop, contentW, contentH)}
+                stroke={st.color || "#FF3B30"}
+                strokeWidth={6}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                fill="none"
+                vectorEffect="non-scaling-stroke"
+              />
+            ))}
+            {liveStrokePoints && liveStrokePoints.length > 0 && (
+              <Polyline
+                points={penPointsToSvg(liveStrokePoints, contentLeft, contentTop, contentW, contentH)}
+                stroke="#FF3B30"
+                strokeWidth={6}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                fill="none"
+                vectorEffect="non-scaling-stroke"
+              />
+            )}
+          </Svg>
         </AnimatedRe.View>
       </View>
     </GestureDetector>
@@ -959,9 +1037,7 @@ function AppMain() {
   const [penModeActive, setPenModeActive] = useState(false);
   const [penStarting, setPenStarting] = useState(false);
   const [overlayPcSize, setOverlayPcSize] = useState({ width: 0, height: 0 });
-  const penStrokeIdRef = useRef(null);
-  const penPendingRef = useRef([]);
-  const penFlushTimerRef = useRef(null);
+  const [penStrokes, setPenStrokes] = useState([]);
 
   const [launchableApps, setLaunchableApps] = useState([]);
   const [launchingKey, setLaunchingKey] = useState("");
@@ -1811,41 +1887,6 @@ function AppMain() {
   };
 
   // ── Pen Overlay ──
-  const flushPenStrokes = async (endFlag = false) => {
-    const points = penPendingRef.current;
-    penPendingRef.current = [];
-    const sid = penStrokeIdRef.current;
-    if (!sid) return;
-    if (points.length === 0 && !endFlag) return;
-    try {
-      await fetch(`${serverUrl}/overlay/stroke`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          pin: activePin,
-          "x-nexus-id": deviceId,
-        },
-        body: JSON.stringify({
-          stroke_id: sid,
-          points,
-          end: endFlag,
-          color: "#FF3B30",
-          width: 6,
-        }),
-      });
-    } catch (e) {
-      // network blips are ok mid-stroke — don't spam alerts
-    }
-  };
-
-  const schedulePenFlush = () => {
-    if (penFlushTimerRef.current) return;
-    penFlushTimerRef.current = setTimeout(() => {
-      penFlushTimerRef.current = null;
-      flushPenStrokes(false);
-    }, 35);
-  };
-
   const enablePenMode = async () => {
     if (penStarting || penModeActive) return;
     setPenStarting(true);
@@ -1857,6 +1898,7 @@ function AppMain() {
         const w = Number(r.width) || 0;
         const h = Number(r.height) || 0;
         if (w > 0 && h > 0) setOverlayPcSize({ width: w, height: h });
+        setPenStrokes([]);
         setPenModeActive(true);
       } else {
         Alert.alert("Pen Mode", "Failed to start overlay.");
@@ -1870,12 +1912,7 @@ function AppMain() {
 
   const disablePenMode = async () => {
     setPenModeActive(false);
-    if (penFlushTimerRef.current) {
-      clearTimeout(penFlushTimerRef.current);
-      penFlushTimerRef.current = null;
-    }
-    penPendingRef.current = [];
-    penStrokeIdRef.current = null;
+    setPenStrokes([]);
     setOverlayPcSize({ width: 0, height: 0 });
     try {
       await sendAction("/overlay/stop", "POST");
@@ -1884,29 +1921,40 @@ function AppMain() {
     }
   };
 
-  // ── Pen stroke handlers wired into ZoomableImage's draw gesture. ──
-  // ZoomableImage handles zoom/pan math + letterbox and hands us coords
-  // already normalized to the PC screen pixel area (0..1 in each axis).
-  const handlePenStart = (nx, ny) => {
-    if (!penModeActive) return;
-    penStrokeIdRef.current = `${Date.now()}-${Math.floor(
-      Math.random() * 1e6,
-    )}`;
-    penPendingRef.current = [[nx, ny]];
-    schedulePenFlush();
-  };
-  const handlePenMove = (nx, ny) => {
-    if (!penModeActive || !penStrokeIdRef.current) return;
-    penPendingRef.current.push([nx, ny]);
-    schedulePenFlush();
-  };
-  const handlePenEnd = () => {
-    if (!penStrokeIdRef.current) return;
-    if (penFlushTimerRef.current) {
-      clearTimeout(penFlushTimerRef.current);
-      penFlushTimerRef.current = null;
-    }
-    flushPenStrokes(true);
+  // ── Pen stroke finalization ──
+  // ZoomableImage's draw gesture buffers points locally and draws them on
+  // a phone-side Svg for instant feedback. When the finger lifts we get
+  // the complete stroke (points carry timestamps from the recording),
+  // append it to local state, and POST once to the server which replays
+  // it with original timing so PC viewers see the goresan animate in.
+  const handlePenStrokeFinalize = (points) => {
+    if (!penModeActive || !points || points.length === 0) return;
+    const strokeId = `${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
+    const color = "#FF3B30";
+    const width = 6;
+    const stroke = { id: strokeId, color, width, points };
+    setPenStrokes((prev) => prev.concat([stroke]));
+    // Send in the background — don't block the UI.
+    (async () => {
+      try {
+        await fetch(`${serverUrl}/overlay/replay_stroke`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            pin: activePin,
+            "x-nexus-id": deviceId,
+          },
+          body: JSON.stringify({
+            stroke_id: strokeId,
+            color,
+            width,
+            points: points.map((p) => [p.nx, p.ny, p.t]),
+          }),
+        });
+      } catch (e) {
+        // best-effort — local canvas already shows it
+      }
+    })();
   };
 
   // ── Live Screen ──
@@ -4761,9 +4809,8 @@ function AppMain() {
                       ? overlayPcSize.width / overlayPcSize.height
                       : 16 / 9
                   }
-                  onPenStart={handlePenStart}
-                  onPenMove={handlePenMove}
-                  onPenEnd={handlePenEnd}
+                  strokes={penStrokes}
+                  onPenStrokeFinalize={handlePenStrokeFinalize}
                 />
               ) : (
                 <View style={s.imgModalScrollContent}>
