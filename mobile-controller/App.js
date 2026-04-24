@@ -2340,14 +2340,8 @@ function AppMain() {
           onPress={() => {
             if (keyboardSheetOpen) setKeyboardSheetOpen(false);
             else if (shortcutSheetOpen) setShortcutSheetOpen(false);
-            else if (filesSheetOpen) {
-              if (filesCurrentPath) {
-                if (filesParent) browseFilesPath(filesParent);
-                else fetchFilesRoots();
-              } else {
-                setFilesSheetOpen(false);
-              }
-            } else disconnect();
+            else if (filesSheetOpen) setFilesSheetOpen(false);
+            else disconnect();
           }}
           activeOpacity={0.7}
         >
@@ -3996,7 +3990,6 @@ function AppMain() {
           <View
             style={{
               paddingTop: SP.md,
-              paddingBottom: SP.sm,
               backgroundColor: C.bg,
               zIndex: 10,
               flexDirection: "row",
