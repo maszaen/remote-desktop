@@ -19,7 +19,6 @@ import {
   KeyboardAvoidingView,
   Animated,
   Easing,
-  PanResponder,
   BackHandler,
   Pressable,
   Linking,
@@ -282,7 +281,14 @@ const IMG_H = SCREEN_WIDTH * (9 / 16) * RENDER_FACTOR;
 const MIN_SCALE = 1 / RENDER_FACTOR;
 const MAX_SCALE = 5 / RENDER_FACTOR;
 
-const ZoomableImage = ({ uri }) => {
+const ZoomableImage = ({
+  uri,
+  penMode = false,
+  pcAspect = 16 / 9,
+  onPenStart,
+  onPenMove,
+  onPenEnd,
+}) => {
   const scale = useSharedValue(MIN_SCALE);
   const savedScale = useSharedValue(MIN_SCALE);
 
@@ -297,6 +303,29 @@ const ZoomableImage = ({ uri }) => {
   const pinchActive = useSharedValue(0);
 
   const hasLoadedRef = useRef(false);
+
+  // ── Letterbox offsets inside IMG base frame (derived from PC aspect ratio).
+  // resizeMode:"contain" fits the source into IMG_W x IMG_H preserving aspect,
+  // so touches outside the actual image area must be clamped/mapped separately.
+  const frameAspect = IMG_W / IMG_H; // 16:9
+  let _contentW, _contentH, _contentLeft, _contentTop;
+  if (pcAspect >= frameAspect) {
+    // PC wider than frame → fits WIDTH, letterbox top/bottom
+    _contentW = IMG_W;
+    _contentH = IMG_W / pcAspect;
+    _contentLeft = 0;
+    _contentTop = (IMG_H - _contentH) / 2;
+  } else {
+    // PC taller than frame → fits HEIGHT, letterbox left/right
+    _contentH = IMG_H;
+    _contentW = IMG_H * pcAspect;
+    _contentLeft = (IMG_W - _contentW) / 2;
+    _contentTop = 0;
+  }
+  const contentW = _contentW;
+  const contentH = _contentH;
+  const contentLeft = _contentLeft;
+  const contentTop = _contentTop;
 
   const pinchGesture = Gesture.Pinch()
     .onStart((e) => {
@@ -475,10 +504,57 @@ const ZoomableImage = ({ uri }) => {
       }
     });
 
-  const composedGestures = Gesture.Race(
-    doubleTapGesture,
-    Gesture.Simultaneous(pinchGesture, panGesture),
-  );
+  // ── Pen-mode draw gesture ──
+  // Uses maxPointers(1) so that a second finger automatically cancels the
+  // draw, letting the simultaneous pinch take over → 2 fingers = zoom,
+  // 1 finger = draw. Gesture coordinates (e.x, e.y) are relative to the
+  // GestureDetector's inner absoluteFill view, so we convert them into
+  // image-base coords by undoing the current translate + scale transform.
+  const drawGesture = Gesture.Pan()
+    .maxPointers(1)
+    .minDistance(0)
+    .onStart((e) => {
+      const tx =
+        offsetBaseX.value + panX.value + pinchX.value;
+      const ty =
+        offsetBaseY.value + panY.value + pinchY.value;
+      const s = scale.value;
+      const imgLeft = SCREEN_WIDTH / 2 + tx - (IMG_W * s) / 2;
+      const imgTop = SCREEN_HEIGHT / 2 + ty - (IMG_H * s) / 2;
+      const bx = (e.x - imgLeft) / s;
+      const by = (e.y - imgTop) / s;
+      let nx = (bx - contentLeft) / contentW;
+      let ny = (by - contentTop) / contentH;
+      nx = Math.max(0, Math.min(1, nx));
+      ny = Math.max(0, Math.min(1, ny));
+      if (onPenStart) runOnJS(onPenStart)(nx, ny);
+    })
+    .onUpdate((e) => {
+      const tx =
+        offsetBaseX.value + panX.value + pinchX.value;
+      const ty =
+        offsetBaseY.value + panY.value + pinchY.value;
+      const s = scale.value;
+      const imgLeft = SCREEN_WIDTH / 2 + tx - (IMG_W * s) / 2;
+      const imgTop = SCREEN_HEIGHT / 2 + ty - (IMG_H * s) / 2;
+      const bx = (e.x - imgLeft) / s;
+      const by = (e.y - imgTop) / s;
+      let nx = (bx - contentLeft) / contentW;
+      let ny = (by - contentTop) / contentH;
+      nx = Math.max(0, Math.min(1, nx));
+      ny = Math.max(0, Math.min(1, ny));
+      if (onPenMove) runOnJS(onPenMove)(nx, ny);
+    })
+    .onFinalize(() => {
+      if (onPenEnd) runOnJS(onPenEnd)();
+    });
+
+  const composedGestures = penMode
+    ? Gesture.Simultaneous(pinchGesture, drawGesture)
+    : Gesture.Race(
+        doubleTapGesture,
+        Gesture.Simultaneous(pinchGesture, panGesture),
+      );
 
   const animStyle = useAnimatedStyle(() => ({
     transform: [
@@ -882,6 +958,7 @@ function AppMain() {
   // Pen overlay (annotation on PC monitor)
   const [penModeActive, setPenModeActive] = useState(false);
   const [penStarting, setPenStarting] = useState(false);
+  const [overlayPcSize, setOverlayPcSize] = useState({ width: 0, height: 0 });
   const penStrokeIdRef = useRef(null);
   const penPendingRef = useRef([]);
   const penFlushTimerRef = useRef(null);
@@ -1775,6 +1852,11 @@ function AppMain() {
     try {
       const r = await sendAction("/overlay/start", "POST");
       if (r && !r.error) {
+        // Server returns actual PC screen dimensions — used to compute
+        // letterbox offsets on the mobile side.
+        const w = Number(r.width) || 0;
+        const h = Number(r.height) || 0;
+        if (w > 0 && h > 0) setOverlayPcSize({ width: w, height: h });
         setPenModeActive(true);
       } else {
         Alert.alert("Pen Mode", "Failed to start overlay.");
@@ -1794,11 +1876,37 @@ function AppMain() {
     }
     penPendingRef.current = [];
     penStrokeIdRef.current = null;
+    setOverlayPcSize({ width: 0, height: 0 });
     try {
       await sendAction("/overlay/stop", "POST");
     } catch (e) {
       // best-effort
     }
+  };
+
+  // ── Pen stroke handlers wired into ZoomableImage's draw gesture. ──
+  // ZoomableImage handles zoom/pan math + letterbox and hands us coords
+  // already normalized to the PC screen pixel area (0..1 in each axis).
+  const handlePenStart = (nx, ny) => {
+    if (!penModeActive) return;
+    penStrokeIdRef.current = `${Date.now()}-${Math.floor(
+      Math.random() * 1e6,
+    )}`;
+    penPendingRef.current = [[nx, ny]];
+    schedulePenFlush();
+  };
+  const handlePenMove = (nx, ny) => {
+    if (!penModeActive || !penStrokeIdRef.current) return;
+    penPendingRef.current.push([nx, ny]);
+    schedulePenFlush();
+  };
+  const handlePenEnd = () => {
+    if (!penStrokeIdRef.current) return;
+    if (penFlushTimerRef.current) {
+      clearTimeout(penFlushTimerRef.current);
+      penFlushTimerRef.current = null;
+    }
+    flushPenStrokes(true);
   };
 
   // ── Live Screen ──
@@ -4645,71 +4753,24 @@ function AppMain() {
               ]}
             >
               {hiResImage ? (
-                <ZoomableImage uri={hiResImage} />
+                <ZoomableImage
+                  uri={hiResImage}
+                  penMode={penModeActive}
+                  pcAspect={
+                    overlayPcSize.width > 0 && overlayPcSize.height > 0
+                      ? overlayPcSize.width / overlayPcSize.height
+                      : 16 / 9
+                  }
+                  onPenStart={handlePenStart}
+                  onPenMove={handlePenMove}
+                  onPenEnd={handlePenEnd}
+                />
               ) : (
                 <View style={s.imgModalScrollContent}>
                   <ActivityIndicator size="large" color={C.primary} />
                 </View>
               )}
             </View>
-
-            {/* Pen overlay — captures touches when Pen Mode is active. */}
-            {penModeActive &&
-              (() => {
-                const padTop =
-                  Platform.OS === "android" ? StatusBar.currentHeight || 0 : 0;
-                const imgW = SCREEN_WIDTH;
-                const imgH = SCREEN_WIDTH * (9 / 16);
-                const imgTop = padTop + (SCREEN_HEIGHT - padTop - imgH) / 2;
-                const clamp01 = (v) => Math.max(0, Math.min(1, v));
-                const toNorm = (e) => [
-                  clamp01(e.nativeEvent.locationX / imgW),
-                  clamp01(e.nativeEvent.locationY / imgH),
-                ];
-                const responder = PanResponder.create({
-                  onStartShouldSetPanResponder: () => true,
-                  onMoveShouldSetPanResponder: () => true,
-                  onPanResponderTerminationRequest: () => false,
-                  onPanResponderGrant: (e) => {
-                    penStrokeIdRef.current = `${Date.now()}-${Math.floor(
-                      Math.random() * 1e6,
-                    )}`;
-                    penPendingRef.current = [toNorm(e)];
-                    schedulePenFlush();
-                  },
-                  onPanResponderMove: (e) => {
-                    penPendingRef.current.push(toNorm(e));
-                    schedulePenFlush();
-                  },
-                  onPanResponderRelease: () => {
-                    if (penFlushTimerRef.current) {
-                      clearTimeout(penFlushTimerRef.current);
-                      penFlushTimerRef.current = null;
-                    }
-                    flushPenStrokes(true);
-                  },
-                  onPanResponderTerminate: () => {
-                    if (penFlushTimerRef.current) {
-                      clearTimeout(penFlushTimerRef.current);
-                      penFlushTimerRef.current = null;
-                    }
-                    flushPenStrokes(true);
-                  },
-                });
-                return (
-                  <View
-                    {...responder.panHandlers}
-                    style={{
-                      position: "absolute",
-                      left: 0,
-                      top: imgTop,
-                      width: imgW,
-                      height: imgH,
-                      backgroundColor: "transparent",
-                    }}
-                  />
-                );
-              })()}
 
             {/* Floating top bar — overlays the image */}
             <View style={s.imgModalTopBar}>
