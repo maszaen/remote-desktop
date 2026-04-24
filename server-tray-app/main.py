@@ -1359,7 +1359,67 @@ def _overlay_worker(q, info):
         info["height"] = sh
         info["ready"] = True
 
-        state = {"last_point": None, "stroke_id": None}
+        state = {"last_point": None, "stroke_id": None, "gen": 0}
+
+        def _start_replay(pts, color, width_px):
+            # Each replay has its own `last_pt` so that multiple queued
+            # replays don't trample each other's connecting lines.
+            last = {"pt": None}
+            my_gen = state["gen"]
+
+            def draw_segment(i):
+                # If the canvas was cleared or stopped after this replay
+                # was scheduled, bail out so nothing is drawn and no
+                # stale TkError surfaces.
+                if state["gen"] != my_gen:
+                    return
+                if i >= len(pts):
+                    return
+                try:
+                    p = pts[i]
+                    nx = float(p[0])
+                    ny = float(p[1])
+                    t_ms = float(p[2]) if len(p) > 2 else 0.0
+                except Exception:
+                    return
+                x = max(0, min(sw - 1, int(nx * sw)))
+                y = max(0, min(sh - 1, int(ny * sh)))
+                try:
+                    if last["pt"] is not None:
+                        px, py = last["pt"]
+                        canvas.create_line(
+                            px, py, x, y,
+                            fill=color,
+                            width=width_px,
+                            capstyle=tk.ROUND,
+                            smooth=True,
+                        )
+                    else:
+                        r = max(1, width_px / 2)
+                        canvas.create_oval(
+                            x - r, y - r, x + r, y + r,
+                            fill=color, outline=color,
+                        )
+                except tk.TclError:
+                    # Window torn down mid-replay.
+                    return
+                last["pt"] = (x, y)
+                if i + 1 < len(pts):
+                    curr_t = t_ms
+                    try:
+                        next_t = float(pts[i + 1][2]) if len(pts[i + 1]) > 2 else curr_t
+                    except Exception:
+                        next_t = curr_t
+                    dt = int(max(1, min(200, next_t - curr_t)))
+                    try:
+                        root.after(dt, lambda: draw_segment(i + 1))
+                    except Exception:
+                        return
+
+            try:
+                root.after(0, lambda: draw_segment(0))
+            except Exception:
+                pass
 
         def poll():
             try:
@@ -1376,6 +1436,14 @@ def _overlay_worker(q, info):
                         canvas.delete("all")
                         state["last_point"] = None
                         state["stroke_id"] = None
+                        # Bump generation so any in-flight replays abort.
+                        state["gen"] += 1
+                    elif t == "replay":
+                        pts = msg.get("points", []) or []
+                        color = msg.get("color") or "#FF3B30"
+                        width_px = int(msg.get("width") or 6)
+                        if pts:
+                            _start_replay(pts, color, width_px)
                     elif t == "stroke":
                         sid = msg.get("stroke_id")
                         color = msg.get("color") or "#FF3B30"
@@ -1515,6 +1583,36 @@ def overlay_stroke(req: OverlayStrokeRequest):
                 "stroke_id": req.stroke_id,
                 "points": req.points,
                 "end": bool(req.end),
+                "color": req.color,
+                "width": req.width,
+            }
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    return {"status": "success"}
+
+
+class OverlayReplayRequest(BaseModel):
+    stroke_id: str
+    points: List[List[float]] = []  # each point: [nx, ny, t_ms]
+    color: Optional[str] = None
+    width: Optional[int] = None
+
+
+@app.post("/overlay/replay_stroke", dependencies=[Depends(verify_pin)])
+def overlay_replay_stroke(req: OverlayReplayRequest):
+    # Queue a stroke to be replayed on the PC overlay with the client's
+    # original timing. Each inner point is [nx, ny, t_ms]; the Tk worker
+    # schedules each segment with root.after(dt) using the recorded deltas.
+    q = OVERLAY_QUEUE
+    if q is None or not OVERLAY_INFO.get("ready"):
+        raise HTTPException(status_code=409, detail="Overlay not active")
+    try:
+        q.put_nowait(
+            {
+                "type": "replay",
+                "stroke_id": req.stroke_id,
+                "points": req.points,
                 "color": req.color,
                 "width": req.width,
             }
