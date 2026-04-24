@@ -22,12 +22,14 @@ import {
   PanResponder,
   BackHandler,
   Pressable,
+  Linking,
 } from "react-native";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import { LinearGradient } from "expo-linear-gradient";
 import * as Clipboard from "expo-clipboard";
+import * as DocumentPicker from "expo-document-picker";
 import {
   GestureHandlerRootView,
   GestureDetector,
@@ -84,6 +86,29 @@ const APP_ICONS = {
   steam: { src: require("./assets/icon/steam.jpeg"), needCircle: true },
   vscode: { src: require("./assets/icon/vscode.png"), needCircle: false },
 };
+
+// ─── ROOT / FOLDER ICON & COLOR MAPS ──────────────────────────────────────────
+// Used in File Transfer breadcrumb and root list
+const FOLDER_ICON_MAP = {
+  Desktop: "desktop-outline",
+  Downloads: "download-outline",
+  Documents: "document-text-outline",
+  Pictures: "image-outline",
+  Videos: "videocam-outline",
+  Music: "musical-notes-outline",
+};
+
+const FOLDER_COLOR_MAP = {
+  Desktop: "#4F8EF7", // C.primary
+  Downloads: "#4FCF8E", // C.success
+  Documents: "#F7A14F", // C.warning
+  Pictures: "#FF9F0A",
+  Videos: "#F7504F", // C.danger
+  Music: "#FF2D55",
+};
+
+// Returns whether a path is a drive root (e.g. "C:\", "D:/")
+const isDrivePath = (path) => /^[a-zA-Z]:[\\\/]?$/.test(path || "");
 
 const BottomSheet = ({ visible, onClose, children, title, subtitle }) => {
   const [mounted, setMounted] = useState(false);
@@ -844,6 +869,22 @@ function AppMain() {
   const [keyboardSheetOpen, setKeyboardSheetOpen] = useState(false);
   const [connectivitySheetOpen, setConnectivitySheetOpen] = useState(false);
   const [clipboardSheetOpen, setClipboardSheetOpen] = useState(false);
+  const [filesSheetOpen, setFilesSheetOpen] = useState(false);
+
+  // Files browser state
+  const [filesRoots, setFilesRoots] = useState([]);
+  const [filesCurrentPath, setFilesCurrentPath] = useState(null);
+  const [filesParent, setFilesParent] = useState(null);
+  const [filesEntries, setFilesEntries] = useState([]);
+  const [filesLoading, setFilesLoading] = useState(false);
+  const [filesUploading, setFilesUploading] = useState(false);
+
+  // Pen overlay (annotation on PC monitor)
+  const [penModeActive, setPenModeActive] = useState(false);
+  const [penStarting, setPenStarting] = useState(false);
+  const penStrokeIdRef = useRef(null);
+  const penPendingRef = useRef([]);
+  const penFlushTimerRef = useRef(null);
 
   const [launchableApps, setLaunchableApps] = useState([]);
   const [launchingKey, setLaunchingKey] = useState("");
@@ -1231,6 +1272,15 @@ function AppMain() {
         setClipboardSheetOpen(false);
         return true;
       }
+      if (filesSheetOpen) {
+        if (filesCurrentPath) {
+          if (filesParent) browseFilesPath(filesParent);
+          else fetchFilesRoots();
+        } else {
+          setFilesSheetOpen(false);
+        }
+        return true;
+      }
       if (isScanningQR) {
         setIsScanningQR(false);
         return true;
@@ -1279,6 +1329,9 @@ function AppMain() {
     keyboardSheetOpen,
     connectivitySheetOpen,
     clipboardSheetOpen,
+    filesSheetOpen,
+    filesCurrentPath,
+    filesParent,
     isScanningQR,
     pairingModalOpen,
     renameTarget,
@@ -1576,6 +1629,178 @@ function AppMain() {
     await sendAction("/panic");
   };
 
+  // ── File Transfer ──
+  const formatBytes = (n) => {
+    if (!n || n <= 0) return "";
+    const units = ["B", "KB", "MB", "GB"];
+    let i = 0;
+    let v = n;
+    while (v >= 1024 && i < units.length - 1) {
+      v /= 1024;
+      i++;
+    }
+    return `${v.toFixed(v >= 10 || i === 0 ? 0 : 1)} ${units[i]}`;
+  };
+
+  const fetchFilesRoots = async () => {
+    setFilesLoading(true);
+    try {
+      const r = await sendAction("/files/roots", "GET");
+      if (r && !r.error && Array.isArray(r.roots)) {
+        setFilesRoots(r.roots);
+        setFilesCurrentPath(null);
+        setFilesParent(null);
+        setFilesEntries([]);
+      } else {
+        Alert.alert("Error", "Failed to load folders");
+      }
+    } catch (e) {
+      Alert.alert("Error", e.message);
+    } finally {
+      setFilesLoading(false);
+    }
+  };
+
+  const browseFilesPath = async (path) => {
+    setFilesLoading(true);
+    try {
+      const r = await sendAction(
+        `/files/list?path=${encodeURIComponent(path)}`,
+        "GET",
+      );
+      if (r && !r.error && Array.isArray(r.entries)) {
+        setFilesCurrentPath(r.path);
+        setFilesParent(r.parent);
+        setFilesEntries(r.entries);
+      } else {
+        Alert.alert("Error", r?.message || "Failed to load folder");
+      }
+    } catch (e) {
+      Alert.alert("Error", e.message);
+    } finally {
+      setFilesLoading(false);
+    }
+  };
+
+  const downloadFile = (entry) => {
+    const url = `${serverUrl}/files/download?token=${encodeURIComponent(
+      deviceId,
+    )}&path=${encodeURIComponent(entry.path)}`;
+    Linking.openURL(url).catch((e) => Alert.alert("Download Error", e.message));
+  };
+
+  const uploadFileToCurrent = async () => {
+    if (!filesCurrentPath) {
+      Alert.alert("Pick Folder", "Open a destination folder first.");
+      return;
+    }
+    try {
+      const res = await DocumentPicker.getDocumentAsync({
+        copyToCacheDirectory: true,
+        multiple: false,
+        type: "*/*",
+      });
+      if (res.canceled) return;
+      const asset = res.assets && res.assets[0];
+      if (!asset) return;
+      setFilesUploading(true);
+      const form = new FormData();
+      form.append("dest_path", filesCurrentPath);
+      form.append("file", {
+        uri: asset.uri,
+        name: asset.name || "upload.bin",
+        type: asset.mimeType || "application/octet-stream",
+      });
+      const r = await fetch(`${serverUrl}/files/upload`, {
+        method: "POST",
+        headers: { pin: activePin, "x-nexus-id": deviceId },
+        body: form,
+      });
+      const payload = await r.json().catch(() => null);
+      if (!r.ok || !payload || payload.error) {
+        Alert.alert(
+          "Upload Failed",
+          payload?.detail || payload?.message || `HTTP ${r.status}`,
+        );
+      } else {
+        await browseFilesPath(filesCurrentPath);
+        Alert.alert("Uploaded", payload.name || "File sent to PC.");
+      }
+    } catch (e) {
+      Alert.alert("Upload Error", e.message);
+    } finally {
+      setFilesUploading(false);
+    }
+  };
+
+  // ── Pen Overlay ──
+  const flushPenStrokes = async (endFlag = false) => {
+    const points = penPendingRef.current;
+    penPendingRef.current = [];
+    const sid = penStrokeIdRef.current;
+    if (!sid) return;
+    if (points.length === 0 && !endFlag) return;
+    try {
+      await fetch(`${serverUrl}/overlay/stroke`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          pin: activePin,
+          "x-nexus-id": deviceId,
+        },
+        body: JSON.stringify({
+          stroke_id: sid,
+          points,
+          end: endFlag,
+          color: "#FF3B30",
+          width: 6,
+        }),
+      });
+    } catch (e) {
+      // network blips are ok mid-stroke — don't spam alerts
+    }
+  };
+
+  const schedulePenFlush = () => {
+    if (penFlushTimerRef.current) return;
+    penFlushTimerRef.current = setTimeout(() => {
+      penFlushTimerRef.current = null;
+      flushPenStrokes(false);
+    }, 35);
+  };
+
+  const enablePenMode = async () => {
+    if (penStarting || penModeActive) return;
+    setPenStarting(true);
+    try {
+      const r = await sendAction("/overlay/start", "POST");
+      if (r && !r.error) {
+        setPenModeActive(true);
+      } else {
+        Alert.alert("Pen Mode", "Failed to start overlay.");
+      }
+    } catch (e) {
+      Alert.alert("Pen Mode", e.message);
+    } finally {
+      setPenStarting(false);
+    }
+  };
+
+  const disablePenMode = async () => {
+    setPenModeActive(false);
+    if (penFlushTimerRef.current) {
+      clearTimeout(penFlushTimerRef.current);
+      penFlushTimerRef.current = null;
+    }
+    penPendingRef.current = [];
+    penStrokeIdRef.current = null;
+    try {
+      await sendAction("/overlay/stop", "POST");
+    } catch (e) {
+      // best-effort
+    }
+  };
+
   // ── Live Screen ──
   const startLiveScreen = () => {
     setLiveScreenActive(true);
@@ -1622,6 +1847,19 @@ function AppMain() {
       fetchLaunchableApps();
     }
   }, [launcherSheetOpen]);
+
+  useEffect(() => {
+    if (filesSheetOpen) {
+      fetchFilesRoots();
+    }
+  }, [filesSheetOpen]);
+
+  useEffect(() => {
+    // Stop pen mode when the image modal closes or live screen stops.
+    if ((!imageModalOpen || !liveScreenActive) && penModeActive) {
+      disablePenMode();
+    }
+  }, [imageModalOpen, liveScreenActive]);
 
   useEffect(() => {
     if (!keyboardSheetOpen) {
@@ -2102,14 +2340,29 @@ function AppMain() {
           onPress={() => {
             if (keyboardSheetOpen) setKeyboardSheetOpen(false);
             else if (shortcutSheetOpen) setShortcutSheetOpen(false);
-            else disconnect();
+            else if (filesSheetOpen) {
+              if (filesCurrentPath) {
+                if (filesParent) browseFilesPath(filesParent);
+                else fetchFilesRoots();
+              } else {
+                setFilesSheetOpen(false);
+              }
+            } else disconnect();
           }}
           activeOpacity={0.7}
         >
           <Ionicons
-            name={(keyboardSheetOpen || shortcutSheetOpen) ? "arrow-back" : "power"}
+            name={
+              keyboardSheetOpen || shortcutSheetOpen || filesSheetOpen
+                ? "arrow-back"
+                : "power"
+            }
             size={17}
-            color={(keyboardSheetOpen || shortcutSheetOpen) ? C.sub : C.danger}
+            color={
+              keyboardSheetOpen || shortcutSheetOpen || filesSheetOpen
+                ? C.sub
+                : C.danger
+            }
           />
         </TouchableOpacity>
       </View>
@@ -2645,6 +2898,29 @@ function AppMain() {
         </TouchableOpacity>
 
         <View style={s.sep} />
+
+        {/* File Transfer row */}
+        <TouchableOpacity
+          style={s.menuRow}
+          onPress={() => setFilesSheetOpen(true)}
+          activeOpacity={0.6}
+        >
+          <View style={[s.menuRowIcon, { backgroundColor: C.warningDim }]}>
+            <Ionicons name="folder-open" size={18} color={C.warning} />
+          </View>
+          <View style={s.menuRowBody}>
+            <Text style={s.menuRowTitle}>File Transfer</Text>
+            <Text style={s.menuRowSub}>Browse PC folders & send files</Text>
+          </View>
+          <Ionicons
+            name="arrow-forward-outline"
+            size={20}
+            color={C.muted}
+            style={{ paddingRight: SP.sm }}
+          />
+        </TouchableOpacity>
+
+        <View style={s.sep} />
         {/* Power row */}
         <TouchableOpacity
           style={s.menuRow}
@@ -3087,17 +3363,11 @@ function AppMain() {
                 <View
                   style={[s.powerRowIcon, { backgroundColor: C.primaryDim }]}
                 >
-                  <Ionicons
-                    name="logo-windows"
-                    size={22}
-                    color={C.primary}
-                  />
+                  <Ionicons name="logo-windows" size={22} color={C.primary} />
                 </View>
                 <View style={{ flex: 1 }}>
                   <Text style={s.powerRowTitle}>Windows</Text>
-                  <Text style={s.powerRowSub}>
-                    Show/Hide Start Menu
-                  </Text>
+                  <Text style={s.powerRowSub}>Show/Hide Start Menu</Text>
                 </View>
               </TouchableOpacity>
               <View style={[s.sep, { marginLeft: 56 }]} />
@@ -3715,6 +3985,627 @@ function AppMain() {
         </View>
       </BottomSheet>
 
+      {/* ═══ FILE TRANSFER MODAL ═══ */}
+      <SlideLeftModal
+        visible={filesSheetOpen}
+        onClose={() => setFilesSheetOpen(false)}
+        contentInsetTop={keyboardModalTopInset}
+      >
+        <View style={[s.keyboardModalRoot, { position: "relative" }]}>
+          {/* BREADCRUMB HEADER */}
+          <View
+            style={{
+              paddingTop: SP.md,
+              paddingBottom: SP.sm,
+              backgroundColor: C.bg,
+              zIndex: 10,
+              flexDirection: "row",
+              alignItems: "center",
+              position: "relative",
+            }}
+          >
+            {/* Path Scroll */}
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={{
+                alignItems: "center",
+                paddingHorizontal: SP.lg,
+              }}
+            >
+              {/* Root / Disk Button */}
+              {(() => {
+                // Find most-specific matching root for current path
+                const currentRoot = filesCurrentPath
+                  ? filesRoots
+                      .filter((r) =>
+                        filesCurrentPath
+                          .toLowerCase()
+                          .startsWith(r.path.toLowerCase()),
+                      )
+                      .sort((a, b) => b.path.length - a.path.length)[0]
+                  : null;
+
+                const isDrive = currentRoot && isDrivePath(currentRoot.path);
+                const driveLetter = isDrive
+                  ? currentRoot.path.charAt(0).toUpperCase() + ":"
+                  : null;
+                // Strip the "(C:)" suffix from drive name e.g. "Local Disk (C:)" → "Local Disk"
+                const driveName = isDrive
+                  ? currentRoot.label.replace(/\s*\([A-Z]:\)\s*$/, "").trim()
+                  : null;
+                const folderColor =
+                  currentRoot && !isDrive
+                    ? FOLDER_COLOR_MAP[currentRoot.label] || "#4F8EF7"
+                    : "#4F8EF7";
+                const folderIcon =
+                  currentRoot && !isDrive
+                    ? FOLDER_ICON_MAP[currentRoot.label] || "folder-outline"
+                    : null;
+
+                return (
+                  <TouchableOpacity
+                    activeOpacity={0.6}
+                    onPress={() => fetchFilesRoots()}
+                    style={{
+                      flexDirection: "row",
+                      alignItems: "center",
+                      backgroundColor: folderColor + "18",
+                      borderWidth: 1,
+                      borderColor: folderColor + "30",
+                      paddingHorizontal: 10,
+                      paddingVertical: 6,
+                      borderRadius: R.sm,
+                    }}
+                  >
+                    {!filesCurrentPath ? (
+                      // At root view
+                      <>
+                        <Ionicons
+                          name="grid-outline"
+                          size={15}
+                          color={"#4F8EF7"}
+                          style={{ marginRight: 5 }}
+                        />
+                        <Text
+                          style={{
+                            fontSize: F.sm,
+                            fontWeight: "600",
+                            color: "#4F8EF7",
+                          }}
+                        >
+                          Storage
+                        </Text>
+                      </>
+                    ) : isDrive ? (
+                      // Inside a disk drive — show letter + name stacked
+                      <>
+                        <Ionicons
+                          name="disc-outline"
+                          size={15}
+                          color={"#4F8EF7"}
+                          style={{ marginRight: 6 }}
+                        />
+                        <View
+                          style={{
+                            flexDirection: "row",
+                            alignItems: "center",
+                          }}
+                        >
+                          {driveName ? (
+                            <Text
+                              style={{
+                                fontSize: F.sm,
+                                fontWeight: "700",
+                                color: "#AEAEB2",
+                                lineHeight: 15,
+                                textTransform: "Capitalize",
+                              }}
+                            >
+                              {driveName} ({driveLetter})
+                            </Text>
+                          ) : null}
+                        </View>
+                      </>
+                    ) : (
+                      // Inside a user folder (Desktop, Downloads, etc.)
+                      <>
+                        <Ionicons
+                          name={folderIcon}
+                          size={15}
+                          color={folderColor}
+                          style={{ marginRight: 5 }}
+                        />
+                        <Text
+                          style={{
+                            fontSize: F.sm,
+                            fontWeight: "600",
+                            color: folderColor,
+                          }}
+                        >
+                          {currentRoot.label}
+                        </Text>
+                      </>
+                    )}
+                  </TouchableOpacity>
+                );
+              })()}
+
+              {/* Breadcrumb path — shows only the path RELATIVE to current root */}
+              {filesCurrentPath &&
+                (() => {
+                  const currentRoot = filesRoots
+                    .filter((r) =>
+                      filesCurrentPath
+                        .toLowerCase()
+                        .startsWith(r.path.toLowerCase()),
+                    )
+                    .sort((a, b) => b.path.length - a.path.length)[0];
+                  const rootPath = currentRoot ? currentRoot.path : "";
+                  // Relative path after stripping the root (e.g. "\Users\zaen" for disk, "\subfolder" for Desktop)
+                  const relativePath = filesCurrentPath.substring(
+                    rootPath.length,
+                  );
+                  const segments = relativePath.split(/[\\/]+/).filter(Boolean);
+
+                  return segments.map((part, index, arr) => {
+                    const isLast = index === arr.length - 1;
+                    // Build the full path up to this segment (for navigation on tap)
+                    const sep = rootPath.includes("/") ? "/" : "\\";
+                    const trailingRoot =
+                      rootPath.endsWith("\\") || rootPath.endsWith("/")
+                        ? rootPath
+                        : rootPath + sep;
+                    const segmentPath =
+                      trailingRoot + arr.slice(0, index + 1).join(sep);
+
+                    return (
+                      <React.Fragment key={index}>
+                        <Ionicons
+                          name="chevron-forward"
+                          size={13}
+                          color={isLast ? "#5c5c5e" : "#FFFFFF0D"}
+                          style={{ marginHorizontal: 6 }}
+                        />
+                        {isLast ? (
+                          <Text
+                            style={{
+                              fontSize: F.sm,
+                              color: "#F2F2F7",
+                              fontWeight: "600",
+                              paddingVertical: 4,
+                            }}
+                          >
+                            {part}
+                          </Text>
+                        ) : (
+                          <TouchableOpacity
+                            activeOpacity={0.6}
+                            onPress={() => browseFilesPath(segmentPath)}
+                          >
+                            <Text
+                              style={{
+                                fontSize: F.sm,
+                                color: "#AEAEB2",
+                                fontWeight: "400",
+                                paddingVertical: 4,
+                              }}
+                            >
+                              {part}
+                            </Text>
+                          </TouchableOpacity>
+                        )}
+                      </React.Fragment>
+                    );
+                  });
+                })()}
+            </ScrollView>
+            <LinearGradient
+              colors={[C.bg, "transparent"]}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 0 }}
+              style={{
+                position: "absolute",
+                left: 0,
+                top: 0,
+                bottom: 0,
+                width: 40,
+              }}
+              pointerEvents="none"
+            />
+            <LinearGradient
+              colors={["transparent", C.bg]}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 0 }}
+              style={{
+                position: "absolute",
+                right: 0,
+                top: 0,
+                bottom: 0,
+                width: 40,
+              }}
+              pointerEvents="none"
+            />
+          </View>
+
+          {/* MAIN CONTAINER */}
+          <View
+            style={{
+              flex: 1,
+              padding: SP.md,
+              paddingBottom: SP.xl,
+              minHeight:
+                SCREEN_HEIGHT -
+                (Platform.OS === "android" ? StatusBar.currentHeight || 0 : 0) -
+                120,
+            }}
+          >
+            <View
+              style={{
+                flex: 1,
+                backgroundColor: C.elevated,
+                borderRadius: R.lg,
+                borderWidth: 1,
+                borderColor: C.border,
+                overflow: "hidden",
+                minHeight: 200,
+              }}
+            >
+              {filesLoading ? (
+                // LOADING STATE
+                <View
+                  style={{
+                    flex: 1,
+                    paddingVertical: SP.xxl * 2,
+                    alignItems: "center",
+                    justifyContent: "center",
+                  }}
+                >
+                  <ActivityIndicator size="large" color={C.primary} />
+                  <Text
+                    style={{
+                      marginTop: SP.md,
+                      color: C.sub,
+                      fontSize: F.sm,
+                      fontWeight: "500",
+                    }}
+                  >
+                    Loading folder...
+                  </Text>
+                </View>
+              ) : (
+                <FadeSlideIn
+                  key={filesCurrentPath || "root"}
+                  style={{ flex: 1 }}
+                >
+                  {!filesCurrentPath ? (
+                    // SHOW ROOTS
+                    <ScrollView
+                      style={{ flex: 1 }}
+                      contentContainerStyle={{ paddingBottom: 100 }}
+                      showsVerticalScrollIndicator={false}
+                    >
+                      {filesRoots.length === 0 ? (
+                        // EMPTY ROOTS STATE
+                        <View
+                          style={{
+                            paddingVertical: SP.xxl * 1.5,
+                            alignItems: "center",
+                          }}
+                        >
+                          <View
+                            style={{
+                              width: 80,
+                              height: 80,
+                              borderRadius: 40,
+                              backgroundColor: C.primaryDim,
+                              justifyContent: "center",
+                              alignItems: "center",
+                              marginBottom: SP.lg,
+                            }}
+                          >
+                            <Ionicons
+                              name="folder-open"
+                              size={40}
+                              color={C.primary}
+                            />
+                          </View>
+                          <Text
+                            style={{
+                              fontSize: F.lg,
+                              fontWeight: "600",
+                              color: C.text,
+                            }}
+                          >
+                            No folders
+                          </Text>
+                          <Text
+                            style={{
+                              fontSize: F.sm,
+                              color: C.sub,
+                              marginTop: 4,
+                              textAlign: "center",
+                            }}
+                          >
+                            There are no roots available.
+                          </Text>
+                        </View>
+                      ) : (
+                        filesRoots.map((root, index) => {
+                          const isRootDrive = isDrivePath(root.path);
+                          const rootIconName = isRootDrive
+                            ? "disc-outline"
+                            : FOLDER_ICON_MAP[root.label] ||
+                              "folder-open-outline";
+                          const rootIconColor = isRootDrive
+                            ? "#4F8EF7"
+                            : FOLDER_COLOR_MAP[root.label] || "#4F8EF7";
+                          const rootBgColor = rootIconColor + "18";
+                          return (
+                            <View key={root.path}>
+                              <TouchableOpacity
+                                style={[
+                                  s.fileRow,
+                                  {
+                                    paddingVertical: SP.md,
+                                    paddingHorizontal: SP.md,
+                                  },
+                                ]}
+                                activeOpacity={0.6}
+                                onPress={() => browseFilesPath(root.path)}
+                              >
+                                <View
+                                  style={[
+                                    s.fileRowIcon,
+                                    {
+                                      width: 44,
+                                      height: 44,
+                                      borderRadius: 12,
+                                      backgroundColor: rootBgColor,
+                                    },
+                                  ]}
+                                >
+                                  <Ionicons
+                                    name={rootIconName}
+                                    size={24}
+                                    color={rootIconColor}
+                                  />
+                                </View>
+                                <View
+                                  style={{
+                                    flex: 1,
+                                    marginLeft: SP.sm,
+                                    justifyContent: "center",
+                                  }}
+                                >
+                                  <Text
+                                    style={[
+                                      s.fileRowTitle,
+                                      {
+                                        fontSize: F.md,
+                                        fontWeight: "600",
+                                        marginBottom: 2,
+                                      },
+                                    ]}
+                                    numberOfLines={1}
+                                  >
+                                    {root.label}
+                                  </Text>
+                                  <Text
+                                    style={[
+                                      s.fileRowSub,
+                                      { fontSize: 13, marginTop: 0 },
+                                    ]}
+                                    numberOfLines={1}
+                                  >
+                                    {root.path}
+                                  </Text>
+                                </View>
+                                <Ionicons
+                                  name="chevron-forward"
+                                  size={20}
+                                  color={C.muted}
+                                />
+                              </TouchableOpacity>
+                              {index < filesRoots.length - 1 && (
+                                <View
+                                  style={{
+                                    height: 1,
+                                    backgroundColor: C.border,
+                                    marginLeft: 74,
+                                  }}
+                                />
+                              )}
+                            </View>
+                          );
+                        })
+                      )}
+                    </ScrollView>
+                  ) : (
+                    // SHOW ENTRIES
+                    <ScrollView
+                      style={{ flex: 1 }}
+                      contentContainerStyle={{ paddingBottom: 100 }}
+                      showsVerticalScrollIndicator={false}
+                    >
+                      {filesEntries.length === 0 ? (
+                        // EMPTY ENTRIES STATE
+                        <View
+                          style={{
+                            paddingVertical: SP.xxl * 1.5,
+                            alignItems: "center",
+                          }}
+                        >
+                          <View
+                            style={{
+                              width: 80,
+                              height: 80,
+                              borderRadius: 40,
+                              backgroundColor: C.primaryDim,
+                              justifyContent: "center",
+                              alignItems: "center",
+                              marginBottom: SP.lg,
+                            }}
+                          >
+                            <Ionicons
+                              name="folder-open"
+                              size={40}
+                              color={C.primary}
+                            />
+                          </View>
+                          <Text
+                            style={{
+                              fontSize: F.lg,
+                              fontWeight: "600",
+                              color: C.text,
+                            }}
+                          >
+                            Folder is empty
+                          </Text>
+                          <Text
+                            style={{
+                              fontSize: F.sm,
+                              color: C.sub,
+                              marginTop: 4,
+                              textAlign: "center",
+                              paddingHorizontal: SP.xl,
+                            }}
+                          >
+                            There are no files or folders to display in this
+                            location.
+                          </Text>
+                        </View>
+                      ) : (
+                        filesEntries.map((entry, index) => (
+                          <View key={entry.path}>
+                            <TouchableOpacity
+                              style={[
+                                s.fileRow,
+                                {
+                                  paddingVertical: SP.md,
+                                  paddingHorizontal: SP.md,
+                                },
+                              ]}
+                              activeOpacity={0.6}
+                              onPress={() => {
+                                if (entry.is_dir) browseFilesPath(entry.path);
+                                else downloadFile(entry);
+                              }}
+                            >
+                              <View
+                                style={[
+                                  s.fileRowIcon,
+                                  {
+                                    width: 44,
+                                    height: 44,
+                                    borderRadius: 12,
+                                    backgroundColor: entry.is_dir
+                                      ? C.primaryDim
+                                      : C.border,
+                                  },
+                                ]}
+                              >
+                                <Ionicons
+                                  name={
+                                    entry.is_dir ? "folder" : "document-text"
+                                  }
+                                  size={22}
+                                  color={entry.is_dir ? C.primary : C.sub}
+                                />
+                              </View>
+                              <View
+                                style={{
+                                  flex: 1,
+                                  marginLeft: SP.sm,
+                                  justifyContent: "center",
+                                }}
+                              >
+                                <Text
+                                  style={[
+                                    s.fileRowTitle,
+                                    {
+                                      fontSize: F.md,
+                                      fontWeight: "500",
+                                      marginBottom: 2,
+                                    },
+                                  ]}
+                                  numberOfLines={1}
+                                >
+                                  {entry.name}
+                                </Text>
+                                <Text
+                                  style={[
+                                    s.fileRowSub,
+                                    { fontSize: 13, marginTop: 0 },
+                                  ]}
+                                >
+                                  {entry.is_dir
+                                    ? "Folder"
+                                    : formatBytes(entry.size)}
+                                </Text>
+                              </View>
+                              <Ionicons
+                                name={
+                                  entry.is_dir
+                                    ? "chevron-forward"
+                                    : "download-outline"
+                                }
+                                size={20}
+                                color={entry.is_dir ? C.muted : C.sub}
+                              />
+                            </TouchableOpacity>
+                            {index < filesEntries.length - 1 && (
+                              <View
+                                style={{
+                                  height: 1,
+                                  backgroundColor: C.border,
+                                  marginLeft: 74,
+                                }}
+                              />
+                            )}
+                          </View>
+                        ))
+                      )}
+                    </ScrollView>
+                  )}
+                </FadeSlideIn>
+              )}
+            </View>
+          </View>
+
+          {/* FLOATING UPLOAD BUTTON */}
+          {filesCurrentPath && (
+            <TouchableOpacity
+              style={{
+                position: "absolute",
+                bottom: SP.xl + SP.md,
+                right: SP.xl,
+                width: 56,
+                height: 56,
+                borderRadius: 28,
+                backgroundColor: C.primary,
+                justifyContent: "center",
+                alignItems: "center",
+                shadowColor: "#000",
+                shadowOffset: { width: 0, height: 4 },
+                shadowOpacity: 0.3,
+                shadowRadius: 5,
+                elevation: 6,
+              }}
+              disabled={filesUploading}
+              onPress={uploadFileToCurrent}
+              activeOpacity={0.8}
+            >
+              {filesUploading ? (
+                <ActivityIndicator size="small" color={C.bg} />
+              ) : (
+                <Ionicons name="cloud-upload" size={28} color={C.bg} />
+              )}
+            </TouchableOpacity>
+          )}
+        </View>
+      </SlideLeftModal>
+
       {/* ═══ IMAGE DETAIL MODAL ═══ */}
       <Modal
         visible={imageModalOpen}
@@ -3748,6 +4639,64 @@ function AppMain() {
                 </View>
               )}
             </View>
+
+            {/* Pen overlay — captures touches when Pen Mode is active. */}
+            {penModeActive &&
+              (() => {
+                const padTop =
+                  Platform.OS === "android" ? StatusBar.currentHeight || 0 : 0;
+                const imgW = SCREEN_WIDTH;
+                const imgH = SCREEN_WIDTH * (9 / 16);
+                const imgTop = padTop + (SCREEN_HEIGHT - padTop - imgH) / 2;
+                const clamp01 = (v) => Math.max(0, Math.min(1, v));
+                const toNorm = (e) => [
+                  clamp01(e.nativeEvent.locationX / imgW),
+                  clamp01(e.nativeEvent.locationY / imgH),
+                ];
+                const responder = PanResponder.create({
+                  onStartShouldSetPanResponder: () => true,
+                  onMoveShouldSetPanResponder: () => true,
+                  onPanResponderTerminationRequest: () => false,
+                  onPanResponderGrant: (e) => {
+                    penStrokeIdRef.current = `${Date.now()}-${Math.floor(
+                      Math.random() * 1e6,
+                    )}`;
+                    penPendingRef.current = [toNorm(e)];
+                    schedulePenFlush();
+                  },
+                  onPanResponderMove: (e) => {
+                    penPendingRef.current.push(toNorm(e));
+                    schedulePenFlush();
+                  },
+                  onPanResponderRelease: () => {
+                    if (penFlushTimerRef.current) {
+                      clearTimeout(penFlushTimerRef.current);
+                      penFlushTimerRef.current = null;
+                    }
+                    flushPenStrokes(true);
+                  },
+                  onPanResponderTerminate: () => {
+                    if (penFlushTimerRef.current) {
+                      clearTimeout(penFlushTimerRef.current);
+                      penFlushTimerRef.current = null;
+                    }
+                    flushPenStrokes(true);
+                  },
+                });
+                return (
+                  <View
+                    {...responder.panHandlers}
+                    style={{
+                      position: "absolute",
+                      left: 0,
+                      top: imgTop,
+                      width: imgW,
+                      height: imgH,
+                      backgroundColor: "transparent",
+                    }}
+                  />
+                );
+              })()}
 
             {/* Floating top bar — overlays the image */}
             <View style={s.imgModalTopBar}>
@@ -3793,35 +4742,73 @@ function AppMain() {
                   </Text>
                 </View>
               )}
-              <TouchableOpacity
-                style={[
-                  s.liveScreenBtn,
-                  liveScreenActive && s.liveScreenBtnActive,
-                ]}
-                onPress={() => {
-                  if (liveScreenActive) {
-                    stopLiveScreen();
-                  } else {
-                    startLiveScreen();
-                  }
-                }}
-                activeOpacity={0.7}
-              >
-                {liveScreenActive && <BlinkDot color={C.danger} />}
-                <Ionicons
-                  name={liveScreenActive ? "videocam" : "videocam-outline"}
-                  size={16}
-                  color={liveScreenActive ? C.danger : C.sub}
-                />
-                <Text
+              <View style={s.imgModalBottomBtnRow}>
+                <TouchableOpacity
                   style={[
-                    s.liveScreenBtnText,
-                    liveScreenActive && { color: C.danger },
+                    s.liveScreenBtn,
+                    liveScreenActive && s.liveScreenBtnActive,
                   ]}
+                  onPress={() => {
+                    if (liveScreenActive) {
+                      stopLiveScreen();
+                    } else {
+                      startLiveScreen();
+                    }
+                  }}
+                  activeOpacity={0.7}
                 >
-                  {liveScreenActive ? "LIVE" : "Go Live"}
-                </Text>
-              </TouchableOpacity>
+                  {liveScreenActive && <BlinkDot color={C.danger} />}
+                  <Ionicons
+                    name={liveScreenActive ? "videocam" : "videocam-outline"}
+                    size={16}
+                    color={liveScreenActive ? C.danger : C.sub}
+                  />
+                  <Text
+                    style={[
+                      s.liveScreenBtnText,
+                      liveScreenActive && { color: C.danger },
+                    ]}
+                  >
+                    {liveScreenActive ? "LIVE" : "Go Live"}
+                  </Text>
+                </TouchableOpacity>
+
+                {/* Pen Mode — only available while Go Live is active. */}
+                <TouchableOpacity
+                  style={[
+                    s.liveScreenBtn,
+                    !liveScreenActive && { opacity: 0.4 },
+                    penModeActive && s.penModeBtnActive,
+                  ]}
+                  disabled={!liveScreenActive || penStarting}
+                  onPress={() => {
+                    if (penModeActive) {
+                      disablePenMode();
+                    } else {
+                      enablePenMode();
+                    }
+                  }}
+                  activeOpacity={0.7}
+                >
+                  {penStarting ? (
+                    <ActivityIndicator size="small" color={C.warning} />
+                  ) : (
+                    <Ionicons
+                      name={penModeActive ? "create" : "create-outline"}
+                      size={16}
+                      color={penModeActive ? C.warning : C.sub}
+                    />
+                  )}
+                  <Text
+                    style={[
+                      s.liveScreenBtnText,
+                      penModeActive && { color: C.warning },
+                    ]}
+                  >
+                    {penModeActive ? "PEN ON" : "Pen Mode"}
+                  </Text>
+                </TouchableOpacity>
+              </View>
             </View>
           </View>
         </GestureHandlerRootView>
@@ -5097,5 +6084,77 @@ const s = StyleSheet.create({
     fontWeight: "700",
     color: C.sub,
     letterSpacing: 0.5,
+  },
+  imgModalBottomBtnRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: SP.sm,
+  },
+  penModeBtnActive: {
+    backgroundColor: C.warning + "18",
+    borderColor: C.warning + "40",
+  },
+
+  // ── File Transfer Sheet ──
+  fileNavRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: SP.sm,
+    paddingHorizontal: SP.sm,
+    gap: SP.sm,
+    marginBottom: SP.xs,
+  },
+  fileNavText: {
+    fontSize: F.sm,
+    color: C.sub,
+    fontWeight: "600",
+  },
+  fileRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: SP.sm + 2,
+    paddingHorizontal: SP.sm,
+    gap: SP.md,
+  },
+  fileRowIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: R.sm,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  fileRowTitle: {
+    fontSize: F.sm,
+    color: C.text,
+    fontWeight: "600",
+  },
+  fileRowSub: {
+    fontSize: F.xs,
+    color: C.muted,
+    marginTop: 2,
+  },
+  fileEmptyText: {
+    fontSize: F.sm,
+    color: C.muted,
+    textAlign: "center",
+    paddingVertical: SP.xl,
+  },
+  fileUploadBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: SP.sm,
+    marginTop: SP.md,
+    paddingVertical: SP.md,
+    borderRadius: R.md,
+    borderWidth: 1,
+    borderStyle: "dashed",
+    borderColor: C.primary + "40",
+    backgroundColor: C.primaryDim,
+  },
+  fileUploadText: {
+    fontSize: F.sm,
+    color: C.primary,
+    fontWeight: "700",
   },
 });
