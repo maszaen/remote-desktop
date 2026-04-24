@@ -11,8 +11,9 @@ import socket
 import subprocess
 import random
 import ctypes
+import queue as _stdlib_queue
 from typing import Optional, List
-from fastapi import FastAPI, Response, HTTPException, Depends, Header
+from fastapi import FastAPI, Response, HTTPException, Depends, Header, UploadFile, File, Form
 import time
 from pydantic import BaseModel
 from pystray import Icon, Menu, MenuItem
@@ -20,6 +21,7 @@ from PIL import Image, ImageDraw
 from pycaw.pycaw import AudioUtilities
 from comtypes import CoInitialize
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 
 # Remove implicit 100ms delay inside pyautogui
 pyautogui.PAUSE = 0
@@ -1141,6 +1143,354 @@ async def toggle_connectivity(radio_type: str, action: str):
     except Exception as e:
         print(f"[CONNECTIVITY] Error: {e}")
         return {"error": str(e)}
+
+
+# ── File Transfer (PC ↔ Mobile) ──
+ALLOWED_ROOTS = {}
+
+
+def _init_allowed_roots():
+    home = os.path.expanduser("~")
+    candidates = [
+        ("Desktop", os.path.join(home, "Desktop")),
+        ("Downloads", os.path.join(home, "Downloads")),
+        ("Documents", os.path.join(home, "Documents")),
+        ("Pictures", os.path.join(home, "Pictures")),
+        ("Videos", os.path.join(home, "Videos")),
+        ("Music", os.path.join(home, "Music")),
+    ]
+    for label, p in candidates:
+        if os.path.isdir(p):
+            ALLOWED_ROOTS[label] = os.path.realpath(p)
+
+
+_init_allowed_roots()
+
+
+def _resolve_within_roots(path: str) -> str:
+    if not path:
+        raise HTTPException(status_code=400, detail="Missing path")
+    try:
+        real = os.path.realpath(path)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid path")
+    for root in ALLOWED_ROOTS.values():
+        try:
+            common = os.path.commonpath([real, root])
+            if os.path.normcase(common) == os.path.normcase(root):
+                return real
+        except ValueError:
+            continue
+    raise HTTPException(status_code=403, detail="Path not allowed")
+
+
+@app.get("/files/roots", dependencies=[Depends(verify_pin)])
+def files_roots():
+    return {
+        "roots": [{"label": k, "path": v} for k, v in ALLOWED_ROOTS.items()],
+    }
+
+
+@app.get("/files/list", dependencies=[Depends(verify_pin)])
+def files_list(path: str):
+    real = _resolve_within_roots(path)
+    if not os.path.isdir(real):
+        raise HTTPException(status_code=400, detail="Not a directory")
+    entries = []
+    try:
+        with os.scandir(real) as it:
+            for entry in it:
+                try:
+                    is_dir = entry.is_dir(follow_symlinks=False)
+                    stat = entry.stat(follow_symlinks=False)
+                    entries.append(
+                        {
+                            "name": entry.name,
+                            "path": os.path.join(real, entry.name),
+                            "is_dir": is_dir,
+                            "size": 0 if is_dir else stat.st_size,
+                            "mtime": int(stat.st_mtime),
+                        }
+                    )
+                except Exception:
+                    continue
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    entries.sort(key=lambda e: (not e["is_dir"], e["name"].lower()))
+
+    parent_path = None
+    parent = os.path.dirname(real)
+    if parent and parent != real:
+        try:
+            _resolve_within_roots(parent)
+            parent_path = parent
+        except HTTPException:
+            parent_path = None
+
+    return {"path": real, "parent": parent_path, "entries": entries}
+
+
+@app.get("/files/download")
+def files_download(path: str, token: str = None):
+    # Token-based auth (matches /screen/raw pattern) so mobile can use
+    # Linking.openURL / native browser downloader without header support.
+    clean_id = token if (token and token != "null") else None
+    if not clean_id or clean_id not in TRUSTED_DEVICES:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    real = _resolve_within_roots(path)
+    if not os.path.isfile(real):
+        raise HTTPException(status_code=404, detail="File not found")
+    return FileResponse(real, filename=os.path.basename(real))
+
+
+@app.post("/files/upload", dependencies=[Depends(verify_pin)])
+async def files_upload(
+    dest_path: str = Form(...),
+    file: UploadFile = File(...),
+):
+    real_dir = _resolve_within_roots(dest_path)
+    if not os.path.isdir(real_dir):
+        raise HTTPException(status_code=400, detail="Destination not a directory")
+    safe_name = os.path.basename(file.filename or "upload.bin")
+    if not safe_name:
+        safe_name = "upload.bin"
+    target = os.path.join(real_dir, safe_name)
+    base, ext = os.path.splitext(target)
+    counter = 1
+    while os.path.exists(target):
+        target = f"{base} ({counter}){ext}"
+        counter += 1
+    try:
+        with open(target, "wb") as f:
+            while True:
+                chunk = await file.read(1024 * 1024)
+                if not chunk:
+                    break
+                f.write(chunk)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    try:
+        size = os.path.getsize(target)
+    except Exception:
+        size = 0
+    return {"status": "success", "path": target, "name": os.path.basename(target), "size": size}
+
+
+# ── Pen Overlay (transparent click-through canvas) ──
+OVERLAY_LOCK = threading.Lock()
+OVERLAY_THREAD: Optional[threading.Thread] = None
+OVERLAY_QUEUE: Optional["_stdlib_queue.Queue"] = None
+OVERLAY_INFO = {"width": 0, "height": 0, "ready": False}
+
+
+def _overlay_worker(q, info):
+    try:
+        import tkinter as tk
+
+        root = tk.Tk()
+        root.overrideredirect(True)
+        try:
+            root.attributes("-topmost", True)
+        except Exception:
+            pass
+        sw = root.winfo_screenwidth()
+        sh = root.winfo_screenheight()
+        TRANSPARENT_KEY = "magenta"
+        root.configure(bg=TRANSPARENT_KEY)
+        try:
+            root.attributes("-transparentcolor", TRANSPARENT_KEY)
+        except Exception as e:
+            print(f"[OVERLAY] transparentcolor failed: {e}")
+        root.geometry(f"{sw}x{sh}+0+0")
+        root.update_idletasks()
+
+        # Make overlay click-through: WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOOLWINDOW
+        try:
+            hwnd = ctypes.windll.user32.GetParent(root.winfo_id())
+            GWL_EXSTYLE = -20
+            WS_EX_LAYERED = 0x00080000
+            WS_EX_TRANSPARENT = 0x00000020
+            WS_EX_TOOLWINDOW = 0x00000080
+            styles = ctypes.windll.user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
+            ctypes.windll.user32.SetWindowLongW(
+                hwnd,
+                GWL_EXSTYLE,
+                styles | WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOOLWINDOW,
+            )
+        except Exception as e:
+            print(f"[OVERLAY] click-through setup failed: {e}")
+
+        canvas = tk.Canvas(root, bg=TRANSPARENT_KEY, highlightthickness=0, cursor="none")
+        canvas.pack(fill="both", expand=True)
+
+        info["width"] = sw
+        info["height"] = sh
+        info["ready"] = True
+
+        state = {"last_point": None, "stroke_id": None}
+
+        def poll():
+            try:
+                while True:
+                    msg = q.get_nowait()
+                    t = msg.get("type")
+                    if t == "stop":
+                        try:
+                            root.destroy()
+                        except Exception:
+                            pass
+                        return
+                    elif t == "clear":
+                        canvas.delete("all")
+                        state["last_point"] = None
+                        state["stroke_id"] = None
+                    elif t == "stroke":
+                        sid = msg.get("stroke_id")
+                        color = msg.get("color") or "#FF3B30"
+                        width_px = int(msg.get("width") or 4)
+                        if state["stroke_id"] != sid:
+                            state["stroke_id"] = sid
+                            state["last_point"] = None
+                        for pt in msg.get("points", []) or []:
+                            try:
+                                nx, ny = pt[0], pt[1]
+                            except Exception:
+                                continue
+                            x = max(0, min(sw - 1, int(float(nx) * sw)))
+                            y = max(0, min(sh - 1, int(float(ny) * sh)))
+                            if state["last_point"] is not None:
+                                px, py = state["last_point"]
+                                canvas.create_line(
+                                    px,
+                                    py,
+                                    x,
+                                    y,
+                                    fill=color,
+                                    width=width_px,
+                                    capstyle=tk.ROUND,
+                                    smooth=True,
+                                )
+                            else:
+                                r = max(1, width_px / 2)
+                                canvas.create_oval(
+                                    x - r, y - r, x + r, y + r, fill=color, outline=color
+                                )
+                            state["last_point"] = (x, y)
+                        if msg.get("end"):
+                            state["last_point"] = None
+                            state["stroke_id"] = None
+            except _stdlib_queue.Empty:
+                pass
+            try:
+                root.after(10, poll)
+            except Exception:
+                pass
+
+        root.after(10, poll)
+        root.mainloop()
+    except Exception as e:
+        print(f"[OVERLAY] worker crash: {e}")
+    finally:
+        info["ready"] = False
+
+
+class OverlayStrokeRequest(BaseModel):
+    stroke_id: str
+    points: List[List[float]] = []
+    end: bool = False
+    color: Optional[str] = None
+    width: Optional[int] = None
+
+
+@app.post("/overlay/start", dependencies=[Depends(verify_pin)])
+def overlay_start():
+    global OVERLAY_THREAD, OVERLAY_QUEUE, OVERLAY_INFO
+    with OVERLAY_LOCK:
+        if OVERLAY_THREAD and OVERLAY_THREAD.is_alive() and OVERLAY_INFO.get("ready"):
+            # Already running — clear any existing strokes for a fresh canvas.
+            try:
+                OVERLAY_QUEUE.put_nowait({"type": "clear"})
+            except Exception:
+                pass
+            return {
+                "status": "already_running",
+                "width": OVERLAY_INFO.get("width", 0),
+                "height": OVERLAY_INFO.get("height", 0),
+            }
+        OVERLAY_QUEUE = _stdlib_queue.Queue()
+        OVERLAY_INFO = {"width": 0, "height": 0, "ready": False}
+        OVERLAY_THREAD = threading.Thread(
+            target=_overlay_worker,
+            args=(OVERLAY_QUEUE, OVERLAY_INFO),
+            daemon=True,
+        )
+        OVERLAY_THREAD.start()
+
+    # Wait briefly for window to initialize
+    deadline = time.time() + 1.5
+    while time.time() < deadline:
+        if OVERLAY_INFO.get("ready"):
+            break
+        time.sleep(0.02)
+
+    return {
+        "status": "success",
+        "width": OVERLAY_INFO.get("width", 0),
+        "height": OVERLAY_INFO.get("height", 0),
+    }
+
+
+@app.post("/overlay/stop", dependencies=[Depends(verify_pin)])
+def overlay_stop():
+    global OVERLAY_THREAD, OVERLAY_QUEUE, OVERLAY_INFO
+    with OVERLAY_LOCK:
+        q = OVERLAY_QUEUE
+        t = OVERLAY_THREAD
+        OVERLAY_QUEUE = None
+        OVERLAY_THREAD = None
+    if q is not None:
+        try:
+            q.put_nowait({"type": "stop"})
+        except Exception:
+            pass
+    if t is not None:
+        t.join(timeout=1.5)
+    OVERLAY_INFO = {"width": 0, "height": 0, "ready": False}
+    return {"status": "success"}
+
+
+@app.post("/overlay/clear", dependencies=[Depends(verify_pin)])
+def overlay_clear():
+    q = OVERLAY_QUEUE
+    if q is None:
+        raise HTTPException(status_code=409, detail="Overlay not active")
+    try:
+        q.put_nowait({"type": "clear"})
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    return {"status": "success"}
+
+
+@app.post("/overlay/stroke", dependencies=[Depends(verify_pin)])
+def overlay_stroke(req: OverlayStrokeRequest):
+    q = OVERLAY_QUEUE
+    if q is None or not OVERLAY_INFO.get("ready"):
+        raise HTTPException(status_code=409, detail="Overlay not active")
+    try:
+        q.put_nowait(
+            {
+                "type": "stroke",
+                "stroke_id": req.stroke_id,
+                "points": req.points,
+                "end": bool(req.end),
+                "color": req.color,
+                "width": req.width,
+            }
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    return {"status": "success"}
 
 
 # --- Tray Icon ---

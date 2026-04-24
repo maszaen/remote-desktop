@@ -22,12 +22,14 @@ import {
   PanResponder,
   BackHandler,
   Pressable,
+  Linking,
 } from "react-native";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import { LinearGradient } from "expo-linear-gradient";
 import * as Clipboard from "expo-clipboard";
+import * as DocumentPicker from "expo-document-picker";
 import {
   GestureHandlerRootView,
   GestureDetector,
@@ -844,6 +846,22 @@ function AppMain() {
   const [keyboardSheetOpen, setKeyboardSheetOpen] = useState(false);
   const [connectivitySheetOpen, setConnectivitySheetOpen] = useState(false);
   const [clipboardSheetOpen, setClipboardSheetOpen] = useState(false);
+  const [filesSheetOpen, setFilesSheetOpen] = useState(false);
+
+  // Files browser state
+  const [filesRoots, setFilesRoots] = useState([]);
+  const [filesCurrentPath, setFilesCurrentPath] = useState(null);
+  const [filesParent, setFilesParent] = useState(null);
+  const [filesEntries, setFilesEntries] = useState([]);
+  const [filesLoading, setFilesLoading] = useState(false);
+  const [filesUploading, setFilesUploading] = useState(false);
+
+  // Pen overlay (annotation on PC monitor)
+  const [penModeActive, setPenModeActive] = useState(false);
+  const [penStarting, setPenStarting] = useState(false);
+  const penStrokeIdRef = useRef(null);
+  const penPendingRef = useRef([]);
+  const penFlushTimerRef = useRef(null);
 
   const [launchableApps, setLaunchableApps] = useState([]);
   const [launchingKey, setLaunchingKey] = useState("");
@@ -1231,6 +1249,10 @@ function AppMain() {
         setClipboardSheetOpen(false);
         return true;
       }
+      if (filesSheetOpen) {
+        setFilesSheetOpen(false);
+        return true;
+      }
       if (isScanningQR) {
         setIsScanningQR(false);
         return true;
@@ -1279,6 +1301,7 @@ function AppMain() {
     keyboardSheetOpen,
     connectivitySheetOpen,
     clipboardSheetOpen,
+    filesSheetOpen,
     isScanningQR,
     pairingModalOpen,
     renameTarget,
@@ -1576,6 +1599,180 @@ function AppMain() {
     await sendAction("/panic");
   };
 
+  // ── File Transfer ──
+  const formatBytes = (n) => {
+    if (!n || n <= 0) return "";
+    const units = ["B", "KB", "MB", "GB"];
+    let i = 0;
+    let v = n;
+    while (v >= 1024 && i < units.length - 1) {
+      v /= 1024;
+      i++;
+    }
+    return `${v.toFixed(v >= 10 || i === 0 ? 0 : 1)} ${units[i]}`;
+  };
+
+  const fetchFilesRoots = async () => {
+    setFilesLoading(true);
+    try {
+      const r = await sendAction("/files/roots", "GET");
+      if (r && !r.error && Array.isArray(r.roots)) {
+        setFilesRoots(r.roots);
+        setFilesCurrentPath(null);
+        setFilesParent(null);
+        setFilesEntries([]);
+      } else {
+        Alert.alert("Error", "Failed to load folders");
+      }
+    } catch (e) {
+      Alert.alert("Error", e.message);
+    } finally {
+      setFilesLoading(false);
+    }
+  };
+
+  const browseFilesPath = async (path) => {
+    setFilesLoading(true);
+    try {
+      const r = await sendAction(
+        `/files/list?path=${encodeURIComponent(path)}`,
+        "GET",
+      );
+      if (r && !r.error && Array.isArray(r.entries)) {
+        setFilesCurrentPath(r.path);
+        setFilesParent(r.parent);
+        setFilesEntries(r.entries);
+      } else {
+        Alert.alert("Error", r?.message || "Failed to load folder");
+      }
+    } catch (e) {
+      Alert.alert("Error", e.message);
+    } finally {
+      setFilesLoading(false);
+    }
+  };
+
+  const downloadFile = (entry) => {
+    const url = `${serverUrl}/files/download?token=${encodeURIComponent(
+      deviceId,
+    )}&path=${encodeURIComponent(entry.path)}`;
+    Linking.openURL(url).catch((e) =>
+      Alert.alert("Download Error", e.message),
+    );
+  };
+
+  const uploadFileToCurrent = async () => {
+    if (!filesCurrentPath) {
+      Alert.alert("Pick Folder", "Open a destination folder first.");
+      return;
+    }
+    try {
+      const res = await DocumentPicker.getDocumentAsync({
+        copyToCacheDirectory: true,
+        multiple: false,
+        type: "*/*",
+      });
+      if (res.canceled) return;
+      const asset = res.assets && res.assets[0];
+      if (!asset) return;
+      setFilesUploading(true);
+      const form = new FormData();
+      form.append("dest_path", filesCurrentPath);
+      form.append("file", {
+        uri: asset.uri,
+        name: asset.name || "upload.bin",
+        type: asset.mimeType || "application/octet-stream",
+      });
+      const r = await fetch(`${serverUrl}/files/upload`, {
+        method: "POST",
+        headers: { pin: activePin, "x-nexus-id": deviceId },
+        body: form,
+      });
+      const payload = await r.json().catch(() => null);
+      if (!r.ok || !payload || payload.error) {
+        Alert.alert(
+          "Upload Failed",
+          payload?.detail || payload?.message || `HTTP ${r.status}`,
+        );
+      } else {
+        await browseFilesPath(filesCurrentPath);
+        Alert.alert("Uploaded", payload.name || "File sent to PC.");
+      }
+    } catch (e) {
+      Alert.alert("Upload Error", e.message);
+    } finally {
+      setFilesUploading(false);
+    }
+  };
+
+  // ── Pen Overlay ──
+  const flushPenStrokes = async (endFlag = false) => {
+    const points = penPendingRef.current;
+    penPendingRef.current = [];
+    const sid = penStrokeIdRef.current;
+    if (!sid) return;
+    if (points.length === 0 && !endFlag) return;
+    try {
+      await fetch(`${serverUrl}/overlay/stroke`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          pin: activePin,
+          "x-nexus-id": deviceId,
+        },
+        body: JSON.stringify({
+          stroke_id: sid,
+          points,
+          end: endFlag,
+          color: "#FF3B30",
+          width: 6,
+        }),
+      });
+    } catch (e) {
+      // network blips are ok mid-stroke — don't spam alerts
+    }
+  };
+
+  const schedulePenFlush = () => {
+    if (penFlushTimerRef.current) return;
+    penFlushTimerRef.current = setTimeout(() => {
+      penFlushTimerRef.current = null;
+      flushPenStrokes(false);
+    }, 35);
+  };
+
+  const enablePenMode = async () => {
+    if (penStarting || penModeActive) return;
+    setPenStarting(true);
+    try {
+      const r = await sendAction("/overlay/start", "POST");
+      if (r && !r.error) {
+        setPenModeActive(true);
+      } else {
+        Alert.alert("Pen Mode", "Failed to start overlay.");
+      }
+    } catch (e) {
+      Alert.alert("Pen Mode", e.message);
+    } finally {
+      setPenStarting(false);
+    }
+  };
+
+  const disablePenMode = async () => {
+    setPenModeActive(false);
+    if (penFlushTimerRef.current) {
+      clearTimeout(penFlushTimerRef.current);
+      penFlushTimerRef.current = null;
+    }
+    penPendingRef.current = [];
+    penStrokeIdRef.current = null;
+    try {
+      await sendAction("/overlay/stop", "POST");
+    } catch (e) {
+      // best-effort
+    }
+  };
+
   // ── Live Screen ──
   const startLiveScreen = () => {
     setLiveScreenActive(true);
@@ -1622,6 +1819,19 @@ function AppMain() {
       fetchLaunchableApps();
     }
   }, [launcherSheetOpen]);
+
+  useEffect(() => {
+    if (filesSheetOpen) {
+      fetchFilesRoots();
+    }
+  }, [filesSheetOpen]);
+
+  useEffect(() => {
+    // Stop pen mode when the image modal closes or live screen stops.
+    if ((!imageModalOpen || !liveScreenActive) && penModeActive) {
+      disablePenMode();
+    }
+  }, [imageModalOpen, liveScreenActive]);
 
   useEffect(() => {
     if (!keyboardSheetOpen) {
@@ -2635,6 +2845,29 @@ function AppMain() {
           <View style={s.menuRowBody}>
             <Text style={s.menuRowTitle}>Clipboard Access</Text>
             <Text style={s.menuRowSub}>Cross-device clipboard</Text>
+          </View>
+          <Ionicons
+            name="arrow-forward-outline"
+            size={20}
+            color={C.muted}
+            style={{ paddingRight: SP.sm }}
+          />
+        </TouchableOpacity>
+
+        <View style={s.sep} />
+
+        {/* File Transfer row */}
+        <TouchableOpacity
+          style={s.menuRow}
+          onPress={() => setFilesSheetOpen(true)}
+          activeOpacity={0.6}
+        >
+          <View style={[s.menuRowIcon, { backgroundColor: C.warningDim }]}>
+            <Ionicons name="folder-open" size={18} color={C.warning} />
+          </View>
+          <View style={s.menuRowBody}>
+            <Text style={s.menuRowTitle}>File Transfer</Text>
+            <Text style={s.menuRowSub}>Browse PC folders & send files</Text>
           </View>
           <Ionicons
             name="arrow-forward-outline"
@@ -3691,6 +3924,161 @@ function AppMain() {
         </View>
       </BottomSheet>
 
+      {/* ═══ FILE TRANSFER MODAL ═══ */}
+      <BottomSheet
+        visible={filesSheetOpen}
+        onClose={() => setFilesSheetOpen(false)}
+        title="File Transfer"
+        subtitle={filesCurrentPath || "Browse PC folders"}
+      >
+        <View style={s.sheetContent}>
+          {/* Back / up-dir nav */}
+          {filesCurrentPath && (
+            <TouchableOpacity
+              style={s.fileNavRow}
+              activeOpacity={0.6}
+              onPress={() => {
+                if (filesParent) {
+                  browseFilesPath(filesParent);
+                } else {
+                  fetchFilesRoots();
+                }
+              }}
+            >
+              <Ionicons name="arrow-back" size={18} color={C.sub} />
+              <Text style={s.fileNavText}>
+                {filesParent ? "Up one folder" : "Back to roots"}
+              </Text>
+            </TouchableOpacity>
+          )}
+
+          {filesLoading ? (
+            <View style={{ paddingVertical: SP.xl, alignItems: "center" }}>
+              <ActivityIndicator size="small" color={C.primary} />
+            </View>
+          ) : !filesCurrentPath ? (
+            // Show roots
+            <View>
+              {filesRoots.length === 0 ? (
+                <Text style={s.fileEmptyText}>No folders available.</Text>
+              ) : (
+                filesRoots.map((root) => (
+                  <TouchableOpacity
+                    key={root.path}
+                    style={s.fileRow}
+                    activeOpacity={0.6}
+                    onPress={() => browseFilesPath(root.path)}
+                  >
+                    <View
+                      style={[
+                        s.fileRowIcon,
+                        { backgroundColor: C.primaryDim },
+                      ]}
+                    >
+                      <Ionicons name="folder" size={20} color={C.primary} />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={s.fileRowTitle} numberOfLines={1}>
+                        {root.label}
+                      </Text>
+                      <Text style={s.fileRowSub} numberOfLines={1}>
+                        {root.path}
+                      </Text>
+                    </View>
+                    <Ionicons
+                      name="chevron-forward"
+                      size={18}
+                      color={C.muted}
+                    />
+                  </TouchableOpacity>
+                ))
+              )}
+            </View>
+          ) : (
+            // Show entries
+            <View>
+              {filesEntries.length === 0 ? (
+                <Text style={s.fileEmptyText}>Empty folder.</Text>
+              ) : (
+                filesEntries.map((entry) => (
+                  <TouchableOpacity
+                    key={entry.path}
+                    style={s.fileRow}
+                    activeOpacity={0.6}
+                    onPress={() => {
+                      if (entry.is_dir) browseFilesPath(entry.path);
+                      else downloadFile(entry);
+                    }}
+                  >
+                    <View
+                      style={[
+                        s.fileRowIcon,
+                        {
+                          backgroundColor: entry.is_dir
+                            ? C.primaryDim
+                            : C.successDim,
+                        },
+                      ]}
+                    >
+                      <Ionicons
+                        name={entry.is_dir ? "folder" : "document"}
+                        size={18}
+                        color={entry.is_dir ? C.primary : C.success}
+                      />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={s.fileRowTitle} numberOfLines={1}>
+                        {entry.name}
+                      </Text>
+                      {!entry.is_dir && (
+                        <Text style={s.fileRowSub}>
+                          {formatBytes(entry.size)}
+                        </Text>
+                      )}
+                    </View>
+                    <Ionicons
+                      name={
+                        entry.is_dir ? "chevron-forward" : "download-outline"
+                      }
+                      size={18}
+                      color={entry.is_dir ? C.muted : C.sub}
+                    />
+                  </TouchableOpacity>
+                ))
+              )}
+            </View>
+          )}
+
+          {/* Upload button (only when inside a folder) */}
+          {filesCurrentPath && (
+            <TouchableOpacity
+              style={[
+                s.fileUploadBtn,
+                filesUploading && { opacity: 0.5 },
+              ]}
+              disabled={filesUploading}
+              onPress={uploadFileToCurrent}
+              activeOpacity={0.7}
+            >
+              {filesUploading ? (
+                <ActivityIndicator size="small" color={C.primary} />
+              ) : (
+                <Ionicons
+                  name="cloud-upload-outline"
+                  size={18}
+                  color={C.primary}
+                />
+              )}
+              <Text style={s.fileUploadText}>
+                {filesUploading
+                  ? "Uploading…"
+                  : "Upload file from phone to this folder"}
+              </Text>
+            </TouchableOpacity>
+          )}
+        </View>
+      </BottomSheet>
+
       {/* ═══ IMAGE DETAIL MODAL ═══ */}
       <Modal
         visible={imageModalOpen}
@@ -3724,6 +4112,66 @@ function AppMain() {
                 </View>
               )}
             </View>
+
+            {/* Pen overlay — captures touches when Pen Mode is active. */}
+            {penModeActive &&
+              (() => {
+                const padTop =
+                  Platform.OS === "android"
+                    ? StatusBar.currentHeight || 0
+                    : 0;
+                const imgW = SCREEN_WIDTH;
+                const imgH = SCREEN_WIDTH * (9 / 16);
+                const imgTop = padTop + (SCREEN_HEIGHT - padTop - imgH) / 2;
+                const clamp01 = (v) => Math.max(0, Math.min(1, v));
+                const toNorm = (e) => [
+                  clamp01(e.nativeEvent.locationX / imgW),
+                  clamp01(e.nativeEvent.locationY / imgH),
+                ];
+                const responder = PanResponder.create({
+                  onStartShouldSetPanResponder: () => true,
+                  onMoveShouldSetPanResponder: () => true,
+                  onPanResponderTerminationRequest: () => false,
+                  onPanResponderGrant: (e) => {
+                    penStrokeIdRef.current = `${Date.now()}-${Math.floor(
+                      Math.random() * 1e6,
+                    )}`;
+                    penPendingRef.current = [toNorm(e)];
+                    schedulePenFlush();
+                  },
+                  onPanResponderMove: (e) => {
+                    penPendingRef.current.push(toNorm(e));
+                    schedulePenFlush();
+                  },
+                  onPanResponderRelease: () => {
+                    if (penFlushTimerRef.current) {
+                      clearTimeout(penFlushTimerRef.current);
+                      penFlushTimerRef.current = null;
+                    }
+                    flushPenStrokes(true);
+                  },
+                  onPanResponderTerminate: () => {
+                    if (penFlushTimerRef.current) {
+                      clearTimeout(penFlushTimerRef.current);
+                      penFlushTimerRef.current = null;
+                    }
+                    flushPenStrokes(true);
+                  },
+                });
+                return (
+                  <View
+                    {...responder.panHandlers}
+                    style={{
+                      position: "absolute",
+                      left: 0,
+                      top: imgTop,
+                      width: imgW,
+                      height: imgH,
+                      backgroundColor: "transparent",
+                    }}
+                  />
+                );
+              })()}
 
             {/* Floating top bar — overlays the image */}
             <View style={s.imgModalTopBar}>
@@ -3769,35 +4217,73 @@ function AppMain() {
                   </Text>
                 </View>
               )}
-              <TouchableOpacity
-                style={[
-                  s.liveScreenBtn,
-                  liveScreenActive && s.liveScreenBtnActive,
-                ]}
-                onPress={() => {
-                  if (liveScreenActive) {
-                    stopLiveScreen();
-                  } else {
-                    startLiveScreen();
-                  }
-                }}
-                activeOpacity={0.7}
-              >
-                {liveScreenActive && <BlinkDot color={C.danger} />}
-                <Ionicons
-                  name={liveScreenActive ? "videocam" : "videocam-outline"}
-                  size={16}
-                  color={liveScreenActive ? C.danger : C.sub}
-                />
-                <Text
+              <View style={s.imgModalBottomBtnRow}>
+                <TouchableOpacity
                   style={[
-                    s.liveScreenBtnText,
-                    liveScreenActive && { color: C.danger },
+                    s.liveScreenBtn,
+                    liveScreenActive && s.liveScreenBtnActive,
                   ]}
+                  onPress={() => {
+                    if (liveScreenActive) {
+                      stopLiveScreen();
+                    } else {
+                      startLiveScreen();
+                    }
+                  }}
+                  activeOpacity={0.7}
                 >
-                  {liveScreenActive ? "LIVE" : "Go Live"}
-                </Text>
-              </TouchableOpacity>
+                  {liveScreenActive && <BlinkDot color={C.danger} />}
+                  <Ionicons
+                    name={liveScreenActive ? "videocam" : "videocam-outline"}
+                    size={16}
+                    color={liveScreenActive ? C.danger : C.sub}
+                  />
+                  <Text
+                    style={[
+                      s.liveScreenBtnText,
+                      liveScreenActive && { color: C.danger },
+                    ]}
+                  >
+                    {liveScreenActive ? "LIVE" : "Go Live"}
+                  </Text>
+                </TouchableOpacity>
+
+                {/* Pen Mode — only available while Go Live is active. */}
+                <TouchableOpacity
+                  style={[
+                    s.liveScreenBtn,
+                    !liveScreenActive && { opacity: 0.4 },
+                    penModeActive && s.penModeBtnActive,
+                  ]}
+                  disabled={!liveScreenActive || penStarting}
+                  onPress={() => {
+                    if (penModeActive) {
+                      disablePenMode();
+                    } else {
+                      enablePenMode();
+                    }
+                  }}
+                  activeOpacity={0.7}
+                >
+                  {penStarting ? (
+                    <ActivityIndicator size="small" color={C.warning} />
+                  ) : (
+                    <Ionicons
+                      name={penModeActive ? "create" : "create-outline"}
+                      size={16}
+                      color={penModeActive ? C.warning : C.sub}
+                    />
+                  )}
+                  <Text
+                    style={[
+                      s.liveScreenBtnText,
+                      penModeActive && { color: C.warning },
+                    ]}
+                  >
+                    {penModeActive ? "PEN ON" : "Pen Mode"}
+                  </Text>
+                </TouchableOpacity>
+              </View>
             </View>
           </View>
         </GestureHandlerRootView>
@@ -5073,5 +5559,77 @@ const s = StyleSheet.create({
     fontWeight: "700",
     color: C.sub,
     letterSpacing: 0.5,
+  },
+  imgModalBottomBtnRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: SP.sm,
+  },
+  penModeBtnActive: {
+    backgroundColor: C.warning + "18",
+    borderColor: C.warning + "40",
+  },
+
+  // ── File Transfer Sheet ──
+  fileNavRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: SP.sm,
+    paddingHorizontal: SP.sm,
+    gap: SP.sm,
+    marginBottom: SP.xs,
+  },
+  fileNavText: {
+    fontSize: F.sm,
+    color: C.sub,
+    fontWeight: "600",
+  },
+  fileRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: SP.sm + 2,
+    paddingHorizontal: SP.sm,
+    gap: SP.md,
+  },
+  fileRowIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: R.sm,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  fileRowTitle: {
+    fontSize: F.sm,
+    color: C.text,
+    fontWeight: "600",
+  },
+  fileRowSub: {
+    fontSize: F.xs,
+    color: C.muted,
+    marginTop: 2,
+  },
+  fileEmptyText: {
+    fontSize: F.sm,
+    color: C.muted,
+    textAlign: "center",
+    paddingVertical: SP.xl,
+  },
+  fileUploadBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: SP.sm,
+    marginTop: SP.md,
+    paddingVertical: SP.md,
+    borderRadius: R.md,
+    borderWidth: 1,
+    borderStyle: "dashed",
+    borderColor: C.primary + "40",
+    backgroundColor: C.primaryDim,
+  },
+  fileUploadText: {
+    fontSize: F.sm,
+    color: C.primary,
+    fontWeight: "700",
   },
 });
