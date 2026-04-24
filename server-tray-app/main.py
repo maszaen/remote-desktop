@@ -217,27 +217,40 @@ def clamp_ms(value: int, min_ms: int = 10, max_ms: int = 120000) -> int:
 def normalize_key(key: str) -> str:
     if not key:
         return ""
+    k = key.lower()
     aliases = {
         " ": "space",
         "esc": "escape",
-        "return": "enter",
         "del": "delete",
         "pgup": "pageup",
         "pgdn": "pagedown",
     }
-    k = key.strip().lower()
     return aliases.get(k, k)
 
+
+SHIFT_CHARS = {
+    '~': '`', '!': '1', '@': '2', '#': '3', '$': '4', '%': '5',
+    '^': '6', '&': '7', '*': '8', '(': '9', ')': '0', '_': '-',
+    '+': '=', '{': '[', '}': ']', '|': '\\', ':': ';', '"': "'",
+    '<': ',', '>': '.', '?': '/'
+}
 
 def tap_key(key: str, hold_ms: int = 30):
     k = normalize_key(key)
     if not k:
         return
         
-    # If the original key was uppercase or special symbol and length is 1, write handles it better
-    # Note: write doesn't support holding, but it's the only reliable way to send symbols/uppercase via pyautogui simply
-    if len(key) == 1 and key != k:
-        pydirectinput.write(key, interval=0)
+    if len(key) == 1:
+        if key.isupper():
+            pydirectinput.keyDown('shift')
+            pydirectinput.write(key.lower(), interval=0)
+            pydirectinput.keyUp('shift')
+        elif key in SHIFT_CHARS:
+            pydirectinput.keyDown('shift')
+            pydirectinput.write(SHIFT_CHARS[key], interval=0)
+            pydirectinput.keyUp('shift')
+        else:
+            pydirectinput.write(key, interval=0)
     else:
         pydirectinput.keyDown(k)
         time.sleep(clamp_ms(hold_ms) / 1000.0)
@@ -693,7 +706,13 @@ def launch_app(req: LaunchAppRequest):
 def keyboard_realtime(req: RealtimeKeyboardRequest):
     try:
         if req.text is not None:
-            pydirectinput.write(req.text, interval=0)
+            for char in req.text:
+                if char.isupper():
+                    pydirectinput.keyDown('shift')
+                    pydirectinput.write(char.lower(), interval=0)
+                    pydirectinput.keyUp('shift')
+                else:
+                    pydirectinput.write(char, interval=0)
             return {"status": "success", "mode": "text", "length": len(req.text)}
 
         if not req.key:
@@ -1011,6 +1030,8 @@ def send_shortcut(req: ShortcutRequest):
             execute_hotkey("ctrlleft", "s")
         elif shortcut == "win-d":
             execute_hotkey("winleft", "d")
+        elif shortcut == "win":
+            execute_hotkey("winleft")
         elif shortcut == "enter":
             execute_hotkey("enter")
         elif shortcut == "backspace":
@@ -1025,7 +1046,6 @@ def send_shortcut(req: ShortcutRequest):
             execute_hotkey("ctrlleft", "shiftleft", "t")
         else:
             return {"error": f"Unknown shortcut: {shortcut}"}
-        print(f"[SHORTCUT] Sent: {shortcut}")
         return {"status": "success", "shortcut": shortcut}
     except Exception as e:
         return {"error": str(e)}
@@ -1057,7 +1077,6 @@ def panic_button():
     """Instantly show desktop (Win+D) — hide everything."""
     try:
         execute_hotkey("winleft", "d")
-        print("[PANIC] Desktop shown")
         return {"status": "success", "message": "Desktop shown"}
     except Exception as e:
         return {"error": str(e)}

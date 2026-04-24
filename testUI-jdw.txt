@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test UI Jadwal Kuliah Zaen (Max Load)</title>
+    
+    <script type="module" src="https://unpkg.com/ionicons@7.1.0/dist/ionicons/ionicons.esm.js"></script>
+    <script nomodule src="https://unpkg.com/ionicons@7.1.0/dist/ionicons/ionicons.js"></script>
+
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Helvetica', Arial, sans-serif;
+        }
+        
+        body {
+            background-color: #f0f0f0;
+            display: flex;
+            justify-content: center;
+            height: 100vh;
+        }
+
+        .mobile-container {
+            width: 100%;
+            max-width: 414px;
+            background-color: #ffffff;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 0 15px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+
+        .header {
+            background-color: #4c17a7;
+            color: white;
+            padding: 16px;
+            display: flex;
+            align-items: center;
+            font-size: 18px;
+            font-weight: bold;
+            flex-shrink: 0;
+            z-index: 10;
+        }
+
+        .back-icon {
+            margin-right: 16px;
+            font-size: 24px;
+            cursor: pointer;
+        }
+
+        .tabs-container {
+            display: flex;
+            padding: 16px;
+            gap: 10px;
+            overflow-x: auto;
+            white-space: nowrap;
+            scrollbar-width: none;
+            flex-shrink: 0;
+            background-color: #fff;
+            border-bottom: 1px solid #eee;
+            z-index: 10;
+        }
+        
+        .tabs-container::-webkit-scrollbar {
+            display: none;
+        }
+
+        .tab {
+            padding: 8px 20px;
+            border-radius: 8px;
+            background-color: #f2f2f2;
+            color: #666;
+            font-size: 14px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .tab.active {
+            background-color: #fca311;
+            color: white;
+        }
+
+        .content-scroll {
+            flex-grow: 1;
+            overflow-y: auto;
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+            scrollbar-width: none; /* Menyembunyikan scrollbar agar UI lebih bersih seperti di HP */
+        }
+        .content-scroll::-webkit-scrollbar {
+            display: none;
+        }
+
+        .card {
+            position: relative;
+            border-radius: 12px;
+            overflow: hidden;
+            height: 170px;
+            flex-shrink: 0;
+            display: flex;
+            flex-direction: column;
+            justify-content: flex-end;
+            color: white;
+            background-color: #333;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+
+        .card::before {
+            content: '';
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: linear-gradient(to bottom, rgba(0,0,0,0.2) 0%, rgba(0,0,0,0.95) 100%);
+            z-index: 1;
+        }
+
+        .badge {
+            position: absolute;
+            top: 0; right: 0;
+            padding: 6px 14px;
+            font-size: 12px;
+            font-weight: bold;
+            border-bottom-left-radius: 12px;
+            z-index: 2;
+        }
+        .badge.praktikum { background-color: #fca311; }
+        .badge.teori { background-color: #4c17a7; }
+
+        .card-content {
+            position: relative;
+            z-index: 2;
+            padding: 14px;
+        }
+
+        .course-title {
+            font-size: 15px;
+            font-weight: bold;
+            margin-bottom: 4px;
+            text-transform: uppercase;
+        }
+
+        .lecturer-name {
+            font-size: 12px;
+            margin-bottom: 12px;
+            color: #ddd;
+            line-height: 1.4;
+        }
+
+        .card-footer {
+            display: flex;
+            justify-content: space-between;
+            font-size: 13px;
+        }
+
+        .footer-item {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+
+        .icon-time { font-size: 16px; }
+        .icon-loc { font-size: 16px; color: #fff; }
+    </style>
+</head>
+<body>
+
+    <div class="mobile-container">
+        
+        <div class="header">
+            <ion-icon name="arrow-back-outline" class="back-icon"></ion-icon>
+            <div>Jadwal Kuliah</div>
+        </div>
+
+        <div class="tabs-container" id="tabs-menu">
+            <div class="tab active" onclick="showDay('Senin', this)">Senin</div>
+            <div class="tab" onclick="showDay('Selasa', this)">Selasa</div>
+            <div class="tab" onclick="showDay('Rabu', this)">Rabu</div>
+            <div class="tab" onclick="showDay('Kamis', this)">Kamis</div>
+            <div class="tab" onclick="showDay('Jumat', this)">Jumat</div>
+        </div>
+
+        <div class="content-scroll" id="schedule-content">
+            </div>
+    </div>
+
+    <script>
+        // Mapping Gambar 
+        const courseImages = {
+            'Multimedia': 'https://images.unsplash.com/photo-1498050108023-c5249f4df085?w=600&q=80',
+            'Kecerdasan Buatan': 'https://images.unsplash.com/photo-1677442136019-21780ecad995?w=600&q=80',
+            'Development Operation': 'https://images.unsplash.com/photo-1522071820081-009f0129c71c?w=600&q=80&auto=format&fit=crop&ixlib=rb-4.1.0&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D',
+            'Kepemimpinan': 'https://images.unsplash.com/photo-1542744173-8e7e53415bb0?w=600&q=80',
+            'Metodologi Penelitian': 'https://images.unsplash.com/photo-1518152006812-edab29b069ac?w=600&q=80&auto=format&fit=crop&ixlib=rb-4.1.0&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D',
+            'Manajemen Proyek IT': 'https://images.unsplash.com/photo-1531403009284-440f080d1e12?w=600&q=80',
+            'Big Data Fundamental': 'https://images.unsplash.com/photo-1563206767-5b18f218e8de?w=600&q=80&auto=format&fit=crop&ixlib=rb-4.1.0&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D',
+            'Keamanan Web': 'https://images.unsplash.com/photo-1563206767-5b18f218e8de?w=600&q=80',
+            'Pemrograman Berbasis Objek': 'https://images.unsplash.com/photo-1461749280684-dccba630e2f6?w=600&q=80',
+            'Manajemen Strategik': 'https://images.unsplash.com/photo-1507679799987-c73779587ccf?w=600&q=80'
+        };
+
+        // Pola Waktu Real Kampus (100 Menit/Sesi):
+        // Sesi 1: 07:00 - 08:40
+        // Sesi 2: 08:50 - 10:30
+        // Sesi 3: 10:40 - 12:20
+        // Sesi 4: 13:20 - 15:00
+        // Sesi 5: 15:30 - 17:10
+
+        const scheduleData = {
+            'Senin': [
+                { title: 'Pemrograman Berbasis Objek', type: 'Teori', lecturer: 'Ahlili Masruro, M.Kom.', time: '07:00 – 08:40', loc: '05.04.03' },
+                { title: 'Multimedia', type: 'Praktikum', lecturer: 'Dwi Rahayu, S.Kom., M.Kom.', time: '08:50 – 10:30', loc: 'L 2.4.4' },
+                { title: 'Kecerdasan Buatan', type: 'Teori', lecturer: 'Afrig Aminuddin, dkk', time: '10:40 – 12:20', loc: '04.02.01' },
+                { title: 'Development Operation', type: 'Teori', lecturer: 'Hastari Utama, S.Kom., M.Cs.', time: '13:20 – 15:00', loc: '05.02.02' },
+                { title: 'Kepemimpinan', type: 'Teori', lecturer: 'Dr. Barka Satya, S.Kom., M.Kom.', time: '15:30 – 17:10', loc: '05.03.08' }
+            ],
+            'Selasa': [
+                { title: 'Keamanan Web', type: 'Teori', lecturer: 'Pramudhita Ferdiansyah, M.Kom.', time: '07:00 – 08:40', loc: '05.02.03' },
+                { title: 'Manajemen Proyek IT', type: 'Teori', lecturer: 'Pramudhita Ferdiansyah, M.Kom.', time: '08:50 – 10:30', loc: '07.01.03' },
+                { title: 'Big Data Fundamental', type: 'Praktikum', lecturer: 'Hastari Utama, S.Kom., M.Cs.', time: '10:40 – 12:20', loc: 'L 7.4.2' },
+                { title: 'Kepemimpinan', type: 'Teori', lecturer: 'Dr. Barka Satya, M.Kom.', time: '13:20 – 15:00', loc: '05.03.08' },
+                { title: 'Metodologi Penelitian', type: 'Teori', lecturer: 'Ria Andriani, S.Kom., M.Kom.', time: '15:30 – 17:10', loc: '04.03.01' }
+            ],
+            'Rabu': [
+                { title: 'Development Operation', type: 'Praktikum', lecturer: 'Hastari Utama, S.Kom., M.Cs.', time: '07:00 – 08:40', loc: 'L 2.2.1' },
+                { title: 'Manajemen Proyek IT', type: 'Teori', lecturer: 'Pramudhita Ferdiansyah, M.Kom.', time: '08:50 – 10:30', loc: '07.01.03' },
+                { title: 'Big Data Fundamental', type: 'Praktikum', lecturer: 'Hastari Utama, M.Cs.', time: '10:40 – 12:20', loc: 'L 7.4.2' },
+                { title: 'Manajemen Strategik', type: 'Teori', lecturer: 'Nila Feby Puspitasari, M.Cs.', time: '13:20 – 15:00', loc: '04.02.04' },
+                { title: 'Kecerdasan Buatan', type: 'Teori', lecturer: 'Afrig Aminuddin, dkk', time: '15:30 – 17:10', loc: '04.02.01' }
+            ],
+            'Kamis': [
+                { title: 'Keamanan Web', type: 'Teori', lecturer: 'Pramudhita Ferdiansyah, M.Kom.', time: '07:00 – 08:40', loc: '05.02.03' },
+                { title: 'Pemrograman Berbasis Objek', type: 'Teori', lecturer: 'Ahlili Masruro, M.Kom.', time: '08:50 – 10:30', loc: '05.04.03' },
+                { title: 'Multimedia', type: 'Praktikum', lecturer: 'Dwi Rahayu, M.Kom.', time: '10:40 – 12:20', loc: 'L 2.4.4' },
+                { title: 'Development Operation', type: 'Praktikum', lecturer: 'Hastari Utama, S.Kom., M.Cs.', time: '13:20 – 15:00', loc: 'L 2.2.1' },
+                { title: 'Metodologi Penelitian', type: 'Teori', lecturer: 'Ria Andriani, M.Kom.', time: '15:30 – 17:10', loc: '04.03.01' }
+            ],
+            'Jumat': [
+                { title: 'Pemrograman Berbasis Objek', type: 'Praktikum', lecturer: 'Ahlili Masruro, M.Kom.', time: '07:00 – 08:40', loc: 'L 7.4.2' },
+                { title: 'Manajemen Proyek IT', type: 'Teori', lecturer: 'Pramudhita Ferdiansyah, M.Kom.', time: '08:50 – 10:30', loc: '07.01.03' },
+                { title: 'Big Data Fundamental', type: 'Praktikum', lecturer: 'Hastari Utama, M.Cs.', time: '10:40 – 12:20', loc: 'L 7.4.2' },
+                { title: 'Manajemen Strategik', type: 'Teori', lecturer: 'Nila Feby Puspitasari, S.Kom., M.Cs.', time: '13:20 – 15:00', loc: '04.02.04' },
+                { title: 'Kepemimpinan', type: 'Teori', lecturer: 'Dr. Barka Satya, M.Kom.', time: '15:30 – 17:10', loc: '05.03.08' }
+            ]
+        };
+
+        function showDay(day, element) {
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            element.classList.add('active');
+
+            const container = document.getElementById('schedule-content');
+            container.innerHTML = ''; 
+            
+            scheduleData[day].forEach(item => {
+                const badgeClass = item.type.toLowerCase();
+                const bgImage = courseImages[item.title] || 'https://images.unsplash.com/photo-1517694712202-14dd9538aa97?w=600&q=80';
+                
+                const cardHtml = `
+                    <div class="card" style="background: url('${bgImage}') center/cover no-repeat;">
+                        <div class="badge ${badgeClass}">${item.type}</div>
+                        <div class="card-content">
+                            <div class="course-title">${item.title}</div>
+                            <div class="lecturer-name">${item.lecturer}</div>
+                            <div class="card-footer">
+                                <div class="footer-item">
+                                    <ion-icon name="time-outline" class="icon-time"></ion-icon> ${item.time}
+                                </div>
+                                <div class="footer-item">
+                                    <ion-icon name="location" class="icon-loc"></ion-icon> ${item.loc}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+                container.innerHTML += cardHtml;
+            });
+
+            container.scrollTop = 0;
+        }
+
+        window.onload = () => {
+            showDay('Senin', document.querySelector('.tab'));
+        };
+    </script>
+</body>
+</html>

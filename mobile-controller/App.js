@@ -856,7 +856,7 @@ function AppMain() {
     _setQueueInput(val);
   };
   const [queueDelayMs, setQueueDelayMs] = useState("10");
-  const [queueHoldMs, setQueueHoldMs] = useState("2000");
+  const [queueHoldMs, setQueueHoldMs] = useState("100");
   const queueLoopActive = useRef(false);
 
   const [wifiActive, setWifiActive] = useState(false);
@@ -3056,7 +3056,6 @@ function AppMain() {
                 style={s.powerRow}
                 onPress={() => {
                   sendShortcut("win-d");
-                  setShortcutSheetOpen(false);
                 }}
                 activeOpacity={0.7}
               >
@@ -3073,6 +3072,31 @@ function AppMain() {
                   <Text style={s.powerRowTitle}>Windows + D</Text>
                   <Text style={s.powerRowSub}>
                     Show Desktop or Minimize Apps
+                  </Text>
+                </View>
+              </TouchableOpacity>
+              <View style={[s.sep, { marginLeft: 56 }]} />
+
+              <TouchableOpacity
+                style={s.powerRow}
+                onPress={() => {
+                  sendShortcut("win");
+                }}
+                activeOpacity={0.7}
+              >
+                <View
+                  style={[s.powerRowIcon, { backgroundColor: C.primaryDim }]}
+                >
+                  <Ionicons
+                    name="logo-windows"
+                    size={22}
+                    color={C.primary}
+                  />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={s.powerRowTitle}>Windows</Text>
+                  <Text style={s.powerRowSub}>
+                    Show/Hide Start Menu
                   </Text>
                 </View>
               </TouchableOpacity>
