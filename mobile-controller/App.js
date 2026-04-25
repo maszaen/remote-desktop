@@ -1120,6 +1120,14 @@ function AppMain() {
   const [connectivitySheetOpen, setConnectivitySheetOpen] = useState(false);
   const [clipboardSheetOpen, setClipboardSheetOpen] = useState(false);
   const [filesSheetOpen, setFilesSheetOpen] = useState(false);
+  const [terminalSheetOpen, setTerminalSheetOpen] = useState(false);
+
+  // Terminal state
+  const [terminalHistory, setTerminalHistory] = useState([]);
+  const [terminalInput, setTerminalInput] = useState("");
+  const [terminalCwd, setTerminalCwd] = useState("");
+  const [terminalRunning, setTerminalRunning] = useState(false);
+  const terminalScrollRef = useRef(null);
 
   // Files browser state
   const [filesRoots, setFilesRoots] = useState([]);
@@ -1530,6 +1538,10 @@ function AppMain() {
         }
         return true;
       }
+      if (terminalSheetOpen) {
+        setTerminalSheetOpen(false);
+        return true;
+      }
       if (isScanningQR) {
         setIsScanningQR(false);
         return true;
@@ -1579,6 +1591,7 @@ function AppMain() {
     connectivitySheetOpen,
     clipboardSheetOpen,
     filesSheetOpen,
+    terminalSheetOpen,
     filesCurrentPath,
     filesParent,
     isScanningQR,
@@ -1891,6 +1904,53 @@ function AppMain() {
     return `${v.toFixed(v >= 10 || i === 0 ? 0 : 1)} ${units[i]}`;
   };
 
+  // ── Terminal helpers ──
+  const terminalExec = async (cmd) => {
+    if (!cmd.trim() || terminalRunning) return;
+    setTerminalRunning(true);
+    setTerminalHistory((h) => [...h, { type: "cmd", text: cmd }]);
+    setTerminalInput("");
+    try {
+      const r = await sendAction("/terminal/exec", "POST", { command: cmd });
+      if (r && !r.error) {
+        const output = (r.stdout || "") + (r.stderr || "");
+        if (output.trim()) {
+          setTerminalHistory((h) => [
+            ...h,
+            {
+              type: "out",
+              text: output.trimEnd(),
+              isError: r.exit_code !== 0,
+            },
+          ]);
+        }
+        if (r.cwd) setTerminalCwd(r.cwd);
+      } else {
+        setTerminalHistory((h) => [
+          ...h,
+          { type: "out", text: r?.message || "Request failed", isError: true },
+        ]);
+      }
+    } catch (e) {
+      setTerminalHistory((h) => [
+        ...h,
+        { type: "out", text: String(e), isError: true },
+      ]);
+    }
+    setTerminalRunning(false);
+    setTimeout(
+      () => terminalScrollRef.current?.scrollToEnd?.({ animated: true }),
+      100,
+    );
+  };
+
+  const fetchTerminalCwd = async () => {
+    try {
+      const r = await sendAction("/terminal/cwd", "GET");
+      if (r && r.cwd) setTerminalCwd(r.cwd);
+    } catch {}
+  };
+
   const fetchFilesRoots = async () => {
     setFilesLoading(true);
     try {
@@ -2105,6 +2165,12 @@ function AppMain() {
       fetchFilesRoots();
     }
   }, [filesSheetOpen]);
+
+  useEffect(() => {
+    if (terminalSheetOpen && !terminalCwd) {
+      fetchTerminalCwd();
+    }
+  }, [terminalSheetOpen]);
 
   useEffect(() => {
     // Stop pen mode when the image modal closes or live screen stops.
@@ -2608,19 +2674,20 @@ function AppMain() {
             if (keyboardSheetOpen) setKeyboardSheetOpen(false);
             else if (shortcutSheetOpen) setShortcutSheetOpen(false);
             else if (filesSheetOpen) setFilesSheetOpen(false);
+            else if (terminalSheetOpen) setTerminalSheetOpen(false);
             else disconnect();
           }}
           activeOpacity={0.7}
         >
           <Ionicons
             name={
-              keyboardSheetOpen || shortcutSheetOpen || filesSheetOpen
+              keyboardSheetOpen || shortcutSheetOpen || filesSheetOpen || terminalSheetOpen
                 ? "arrow-back"
                 : "power"
             }
             size={17}
             color={
-              keyboardSheetOpen || shortcutSheetOpen || filesSheetOpen
+              keyboardSheetOpen || shortcutSheetOpen || filesSheetOpen || terminalSheetOpen
                 ? C.sub
                 : C.danger
             }
@@ -3175,6 +3242,29 @@ function AppMain() {
           <View style={s.menuRowBody}>
             <Text style={s.menuRowTitle}>File Transfer</Text>
             <Text style={s.menuRowSub}>Browse PC folders & send files</Text>
+          </View>
+          <Ionicons
+            name="arrow-forward-outline"
+            size={20}
+            color={C.muted}
+            style={{ paddingRight: SP.sm }}
+          />
+        </TouchableOpacity>
+
+        <View style={s.sep} />
+
+        {/* Terminal Access row */}
+        <TouchableOpacity
+          style={s.menuRow}
+          onPress={() => setTerminalSheetOpen(true)}
+          activeOpacity={0.6}
+        >
+          <View style={[s.menuRowIcon, { backgroundColor: C.primaryDim }]}>
+            <Ionicons name="terminal" size={18} color={C.primary} />
+          </View>
+          <View style={s.menuRowBody}>
+            <Text style={s.menuRowTitle}>Terminal</Text>
+            <Text style={s.menuRowSub}>Run commands on PC</Text>
           </View>
           <Ionicons
             name="arrow-forward-outline"
@@ -5285,6 +5375,241 @@ function AppMain() {
               ) : (
                 <Ionicons name="cloud-upload" size={28} color={C.bg} />
               )}
+            </TouchableOpacity>
+          )}
+        </View>
+      </SlideLeftModal>
+
+      {/* ═══ TERMINAL ACCESS MODAL ═══ */}
+      <SlideLeftModal
+        visible={terminalSheetOpen}
+        onClose={() => setTerminalSheetOpen(false)}
+        contentInsetTop={keyboardModalTopInset}
+      >
+        <View style={s.keyboardModalRoot}>
+          {/* HEADER */}
+          <View
+            style={{
+              paddingTop: SP.md,
+              paddingBottom: SP.sm,
+              paddingHorizontal: SP.lg,
+              backgroundColor: C.bg,
+              zIndex: 10,
+            }}
+          >
+            <Text
+              style={{
+                fontSize: F.xl,
+                fontWeight: "700",
+                color: C.text,
+                letterSpacing: -0.5,
+              }}
+            >
+              Terminal
+            </Text>
+            <Text style={{ fontSize: F.sm, color: C.sub, marginTop: 4 }}>
+              {terminalCwd || "Remote command execution"}
+            </Text>
+          </View>
+
+          {/* OUTPUT HISTORY */}
+          <ScrollView
+            ref={terminalScrollRef}
+            style={{ flex: 1 }}
+            contentContainerStyle={{
+              paddingHorizontal: SP.md,
+              paddingBottom: SP.md,
+            }}
+            keyboardShouldPersistTaps="handled"
+          >
+            {terminalHistory.length === 0 && (
+              <View
+                style={{
+                  paddingTop: SP.xxl,
+                  alignItems: "center",
+                }}
+              >
+                <Ionicons name="terminal" size={48} color={C.muted} />
+                <Text
+                  style={{
+                    fontSize: F.md,
+                    color: C.muted,
+                    marginTop: SP.md,
+                    textAlign: "center",
+                  }}
+                >
+                  Type a command below to execute on your PC
+                </Text>
+              </View>
+            )}
+            {terminalHistory.map((entry, i) => (
+              <View key={i} style={{ marginTop: i === 0 ? 0 : SP.xs }}>
+                {entry.type === "cmd" ? (
+                  <View
+                    style={{
+                      flexDirection: "row",
+                      alignItems: "flex-start",
+                      marginTop: SP.sm,
+                    }}
+                  >
+                    <Text
+                      style={{
+                        fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace",
+                        fontSize: F.sm,
+                        color: C.primary,
+                        marginRight: SP.xs,
+                      }}
+                    >
+                      {">"}
+                    </Text>
+                    <Text
+                      selectable
+                      style={{
+                        fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace",
+                        fontSize: F.sm,
+                        color: C.text,
+                        flex: 1,
+                      }}
+                    >
+                      {entry.text}
+                    </Text>
+                  </View>
+                ) : (
+                  <Text
+                    selectable
+                    style={{
+                      fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace",
+                      fontSize: F.xs,
+                      color: entry.isError ? C.danger : C.sub,
+                      lineHeight: 18,
+                    }}
+                  >
+                    {entry.text}
+                  </Text>
+                )}
+              </View>
+            ))}
+            {terminalRunning && (
+              <View
+                style={{
+                  flexDirection: "row",
+                  alignItems: "center",
+                  marginTop: SP.sm,
+                }}
+              >
+                <ActivityIndicator size="small" color={C.primary} />
+                <Text
+                  style={{
+                    fontSize: F.sm,
+                    color: C.sub,
+                    marginLeft: SP.sm,
+                  }}
+                >
+                  Running...
+                </Text>
+              </View>
+            )}
+          </ScrollView>
+
+          {/* INPUT BAR */}
+          <KeyboardAvoidingView
+            behavior={Platform.OS === "ios" ? "padding" : undefined}
+            keyboardVerticalOffset={keyboardModalTopInset}
+          >
+            <View
+              style={{
+                flexDirection: "row",
+                alignItems: "center",
+                paddingHorizontal: SP.md,
+                paddingVertical: SP.sm,
+                borderTopWidth: 1,
+                borderTopColor: C.border,
+                backgroundColor: C.bg,
+              }}
+            >
+              <View
+                style={{
+                  flex: 1,
+                  flexDirection: "row",
+                  alignItems: "center",
+                  backgroundColor: C.elevated,
+                  borderRadius: R.sm,
+                  borderWidth: 1,
+                  borderColor: C.border,
+                  paddingHorizontal: SP.sm,
+                }}
+              >
+                <Text
+                  style={{
+                    fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace",
+                    fontSize: F.sm,
+                    color: C.primary,
+                    marginRight: SP.xs,
+                  }}
+                >
+                  {">"}
+                </Text>
+                <TextInput
+                  style={{
+                    flex: 1,
+                    fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace",
+                    fontSize: F.md,
+                    color: C.text,
+                    paddingVertical: Platform.OS === "ios" ? SP.sm : SP.xs,
+                  }}
+                  value={terminalInput}
+                  onChangeText={setTerminalInput}
+                  placeholder="Enter command..."
+                  placeholderTextColor={C.muted}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  returnKeyType="send"
+                  editable={!terminalRunning}
+                  onSubmitEditing={() => terminalExec(terminalInput)}
+                  blurOnSubmit={false}
+                />
+              </View>
+              <TouchableOpacity
+                style={{
+                  marginLeft: SP.sm,
+                  width: 40,
+                  height: 40,
+                  borderRadius: 20,
+                  backgroundColor: terminalInput.trim()
+                    ? C.primary
+                    : C.elevated,
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+                onPress={() => terminalExec(terminalInput)}
+                disabled={!terminalInput.trim() || terminalRunning}
+                activeOpacity={0.7}
+              >
+                <Ionicons
+                  name="send"
+                  size={18}
+                  color={terminalInput.trim() ? "#fff" : C.muted}
+                />
+              </TouchableOpacity>
+            </View>
+          </KeyboardAvoidingView>
+
+          {/* CLEAR BUTTON */}
+          {terminalHistory.length > 0 && (
+            <TouchableOpacity
+              style={{
+                alignItems: "center",
+                paddingVertical: SP.sm,
+                backgroundColor: C.bg,
+                borderTopWidth: 1,
+                borderTopColor: C.border,
+              }}
+              onPress={() => setTerminalHistory([])}
+              activeOpacity={0.6}
+            >
+              <Text style={{ fontSize: F.sm, color: C.muted }}>
+                Clear History
+              </Text>
             </TouchableOpacity>
           )}
         </View>

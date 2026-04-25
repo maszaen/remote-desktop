@@ -1694,6 +1694,78 @@ def overlay_replay_stroke(req: OverlayReplayRequest):
     return {"status": "success"}
 
 
+# --- Terminal Access ---
+TERMINAL_CWD = os.path.expanduser("~")
+TERMINAL_CWD_LOCK = threading.Lock()
+
+
+class TerminalExecRequest(BaseModel):
+    command: str
+    timeout: Optional[int] = 30
+
+
+@app.post("/terminal/exec", dependencies=[Depends(verify_pin)])
+def terminal_exec(req: TerminalExecRequest):
+    global TERMINAL_CWD
+    cmd = req.command.strip()
+    if not cmd:
+        raise HTTPException(status_code=400, detail="Empty command")
+
+    with TERMINAL_CWD_LOCK:
+        cwd = TERMINAL_CWD
+
+    # Handle cd separately so the working directory persists across calls
+    if cmd.lower() == "cd" or cmd.lower().startswith("cd ") or cmd.lower().startswith("cd\t"):
+        parts = cmd.split(None, 1)
+        target = parts[1].strip().strip('"').strip("'") if len(parts) > 1 else os.path.expanduser("~")
+        try:
+            new_cwd = os.path.normpath(os.path.join(cwd, target))
+            if os.path.isdir(new_cwd):
+                with TERMINAL_CWD_LOCK:
+                    TERMINAL_CWD = new_cwd
+                return {"stdout": "", "stderr": "", "exit_code": 0, "cwd": new_cwd}
+            else:
+                return {
+                    "stdout": "",
+                    "stderr": f"The system cannot find the path specified: {new_cwd}",
+                    "exit_code": 1,
+                    "cwd": cwd,
+                }
+        except Exception as e:
+            return {"stdout": "", "stderr": str(e), "exit_code": 1, "cwd": cwd}
+
+    try:
+        result = subprocess.run(
+            cmd,
+            shell=True,
+            capture_output=True,
+            text=True,
+            timeout=min(req.timeout, 120),
+            cwd=cwd,
+        )
+        return {
+            "stdout": result.stdout,
+            "stderr": result.stderr,
+            "exit_code": result.returncode,
+            "cwd": cwd,
+        }
+    except subprocess.TimeoutExpired:
+        return {
+            "stdout": "",
+            "stderr": f"Command timed out after {req.timeout}s",
+            "exit_code": -1,
+            "cwd": cwd,
+        }
+    except Exception as e:
+        return {"stdout": "", "stderr": str(e), "exit_code": -1, "cwd": cwd}
+
+
+@app.get("/terminal/cwd", dependencies=[Depends(verify_pin)])
+def terminal_cwd():
+    with TERMINAL_CWD_LOCK:
+        return {"cwd": TERMINAL_CWD}
+
+
 # --- Tray Icon ---
 def create_image():
     icon_path = get_resource_path("favicon.png")
