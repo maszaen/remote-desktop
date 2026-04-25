@@ -22,6 +22,7 @@ import {
   BackHandler,
   Pressable,
   Linking,
+  useWindowDimensions,
 } from "react-native";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -282,10 +283,9 @@ const SlideLeftModal = ({
 // Render at 3x layout size so React Native decodes full source resolution.
 // Scale range is shifted: MIN_SCALE = fits screen, MAX_SCALE = 5x visual zoom.
 const RENDER_FACTOR = 3;
-const IMG_W = SCREEN_WIDTH * RENDER_FACTOR;
-const IMG_H = SCREEN_WIDTH * (9 / 16) * RENDER_FACTOR;
 const MIN_SCALE = 1 / RENDER_FACTOR;
 const MAX_SCALE = 5 / RENDER_FACTOR;
+const FRAME_ASPECT = 16 / 9;
 
 // ─── PEN UTILS ────────────────────────────────────────────────────────────────
 // Convert stored stroke points (normalized 0..1 within the actual PC content
@@ -304,6 +304,21 @@ const penPointsToSvg = (pts, contentLeft, contentTop, contentW, contentH) => {
   return out;
 };
 
+// Derive "contain-fit" image frame dimensions from current viewport size.
+const calcImgDims = (screenW, screenH) => {
+  "worklet";
+  const screenAspect = screenW / screenH;
+  let fitW, fitH;
+  if (screenAspect <= FRAME_ASPECT) {
+    fitW = screenW;
+    fitH = screenW / FRAME_ASPECT;
+  } else {
+    fitH = screenH;
+    fitW = screenH * FRAME_ASPECT;
+  }
+  return { imgW: fitW * RENDER_FACTOR, imgH: fitH * RENDER_FACTOR };
+};
+
 const ZoomableImage = ({
   uri,
   penMode = false,
@@ -311,6 +326,40 @@ const ZoomableImage = ({
   strokes = [],
   onPenStrokeFinalize,
 }) => {
+  const { width: winW, height: winH } = useWindowDimensions();
+
+  // Derive frame dimensions that "contain" fit a 16:9 box inside the viewport
+  const { imgW, imgH } = calcImgDims(winW, winH);
+
+  // Letterbox offsets for the actual PC content inside the 16:9 frame
+  const frameAspect = imgW / imgH;
+  let _contentW, _contentH, _contentLeft, _contentTop;
+  if (pcAspect >= frameAspect) {
+    _contentW = imgW;
+    _contentH = imgW / pcAspect;
+    _contentLeft = 0;
+    _contentTop = (imgH - _contentH) / 2;
+  } else {
+    _contentH = imgH;
+    _contentW = imgH * pcAspect;
+    _contentLeft = (imgW - _contentW) / 2;
+    _contentTop = 0;
+  }
+  const contentW = _contentW;
+  const contentH = _contentH;
+  const contentLeft = _contentLeft;
+  const contentTop = _contentTop;
+
+  // ── Shared values for worklet access (updated on orientation change) ──
+  const svScreenW = useSharedValue(winW);
+  const svScreenH = useSharedValue(winH);
+  const svImgW = useSharedValue(imgW);
+  const svImgH = useSharedValue(imgH);
+  const svContentW = useSharedValue(contentW);
+  const svContentH = useSharedValue(contentH);
+  const svContentLeft = useSharedValue(contentLeft);
+  const svContentTop = useSharedValue(contentTop);
+
   const scale = useSharedValue(MIN_SCALE);
   const savedScale = useSharedValue(MIN_SCALE);
   const [prevUri, setPrevUri] = useState(uri);
@@ -326,53 +375,50 @@ const ZoomableImage = ({
   const pinchActive = useSharedValue(0);
 
   const hasLoadedRef = useRef(false);
+  const prevDimsRef = useRef({ w: winW, h: winH });
 
-  // ── Letterbox offsets inside IMG base frame (derived from PC aspect ratio).
-  // resizeMode:"contain" fits the source into IMG_W x IMG_H preserving aspect,
-  // so touches outside the actual image area must be clamped/mapped separately.
-  const frameAspect = IMG_W / IMG_H; // 16:9
-  let _contentW, _contentH, _contentLeft, _contentTop;
-  if (pcAspect >= frameAspect) {
-    // PC wider than frame → fits WIDTH, letterbox top/bottom
-    _contentW = IMG_W;
-    _contentH = IMG_W / pcAspect;
-    _contentLeft = 0;
-    _contentTop = (IMG_H - _contentH) / 2;
-  } else {
-    // PC taller than frame → fits HEIGHT, letterbox left/right
-    _contentH = IMG_H;
-    _contentW = IMG_H * pcAspect;
-    _contentLeft = (IMG_W - _contentW) / 2;
-    _contentTop = 0;
-  }
-  const contentW = _contentW;
-  const contentH = _contentH;
-  const contentLeft = _contentLeft;
-  const contentTop = _contentTop;
+  // Sync shared values & reset zoom/pan when orientation changes
+  useEffect(() => {
+    svScreenW.value = winW;
+    svScreenH.value = winH;
+    svImgW.value = imgW;
+    svImgH.value = imgH;
+    svContentW.value = contentW;
+    svContentH.value = contentH;
+    svContentLeft.value = contentLeft;
+    svContentTop.value = contentTop;
+
+    if (prevDimsRef.current.w !== winW || prevDimsRef.current.h !== winH) {
+      prevDimsRef.current = { w: winW, h: winH };
+      cancelAnimation(offsetBaseX);
+      cancelAnimation(offsetBaseY);
+      cancelAnimation(scale);
+      scale.value = MIN_SCALE;
+      savedScale.value = MIN_SCALE;
+      offsetBaseX.value = 0;
+      offsetBaseY.value = 0;
+      panX.value = 0;
+      panY.value = 0;
+      pinchX.value = 0;
+      pinchY.value = 0;
+    }
+  }, [winW, winH, imgW, imgH, contentW, contentH, contentLeft, contentTop]);
 
   const pinchGesture = Gesture.Pinch()
     .onStart((e) => {
       pinchActive.value = 1;
       savedScale.value = scale.value;
-      // focalX is in view-local coords (GestureDetector wraps absoluteFill = screen)
-      // Subtract offsetBase to get distance from visual image center to fingers
-      originX.value = e.focalX - SCREEN_WIDTH / 2 - offsetBaseX.value;
-      originY.value = e.focalY - SCREEN_HEIGHT / 2 - offsetBaseY.value;
+      originX.value = e.focalX - svScreenW.value / 2 - offsetBaseX.value;
+      originY.value = e.focalY - svScreenH.value / 2 - offsetBaseY.value;
     })
     .onUpdate((e) => {
       scale.value = savedScale.value * e.scale;
-      // Ideal shift to keep the finger focal-point fixed
       let purePinchX = -originX.value * (e.scale - 1);
       let purePinchY = -originY.value * (e.scale - 1);
-
-      // No edge clamping during active pinch — let the image follow the
-      // user's fingers freely (consistent with pan). Edge snap-back is
-      // handled on release in onEnd.
       pinchX.value = purePinchX;
       pinchY.value = purePinchY;
     })
     .onEnd(() => {
-      // Fold everything into base to capture exact visual state
       offsetBaseX.value += pinchX.value + panX.value;
       offsetBaseY.value += pinchY.value + panY.value;
 
@@ -385,17 +431,20 @@ const ZoomableImage = ({
       if (scale.value < MIN_SCALE) targetScale = MIN_SCALE;
       else if (scale.value > MAX_SCALE) targetScale = MAX_SCALE;
 
+      const _imgW = svImgW.value;
+      const _imgH = svImgH.value;
+      const _scrW = svScreenW.value;
+      const _scrH = svScreenH.value;
+
       if (targetScale !== scale.value) {
-        // Viewport-centered zoom: scale the offset proportionally so that
-        // the point currently at the viewport center stays fixed.
         const ratio = targetScale / scale.value;
         let targetX = offsetBaseX.value * ratio;
         let targetY = offsetBaseY.value * ratio;
 
-        const scaledW = IMG_W * targetScale;
-        const scaledH = IMG_H * targetScale;
-        const maxX = Math.max(0, (scaledW - SCREEN_WIDTH) / 2);
-        const maxY = Math.max(0, (scaledH - SCREEN_HEIGHT) / 2);
+        const scaledW = _imgW * targetScale;
+        const scaledH = _imgH * targetScale;
+        const maxX = Math.max(0, (scaledW - _scrW) / 2);
+        const maxY = Math.max(0, (scaledH - _scrH) / 2);
         targetX = Math.max(-maxX, Math.min(maxX, targetX));
         targetY = Math.max(-maxY, Math.min(maxY, targetY));
 
@@ -403,10 +452,10 @@ const ZoomableImage = ({
         offsetBaseY.value = withSpring(targetY);
         scale.value = withSpring(targetScale);
       } else {
-        const scaledW = IMG_W * targetScale;
-        const scaledH = IMG_H * targetScale;
-        const maxX = Math.max(0, (scaledW - SCREEN_WIDTH) / 2);
-        const maxY = Math.max(0, (scaledH - SCREEN_HEIGHT) / 2);
+        const scaledW = _imgW * targetScale;
+        const scaledH = _imgH * targetScale;
+        const maxX = Math.max(0, (scaledW - _scrW) / 2);
+        const maxY = Math.max(0, (scaledH - _scrH) / 2);
         const cx = offsetBaseX.value;
         const cy = offsetBaseY.value;
         const clampedX = Math.max(-maxX, Math.min(maxX, cx));
@@ -439,9 +488,6 @@ const ZoomableImage = ({
       panY.value = e.translationY;
     })
     .onEnd((e) => {
-      // If pinch just ended and handled the auto-zoom-out, skip pan's own
-      // folding/animation — pinch already folded panX/panY and started
-      // viewport-centered springs that we must not overwrite.
       if (
         panX.value === 0 &&
         panY.value === 0 &&
@@ -459,10 +505,15 @@ const ZoomableImage = ({
       if (scale.value < MIN_SCALE) targetScale = MIN_SCALE;
       else if (scale.value > MAX_SCALE) targetScale = MAX_SCALE;
 
-      const scaledW = IMG_W * targetScale;
-      const scaledH = IMG_H * targetScale;
-      const maxX = Math.max(0, (scaledW - SCREEN_WIDTH) / 2);
-      const maxY = Math.max(0, (scaledH - SCREEN_HEIGHT) / 2);
+      const _imgW = svImgW.value;
+      const _imgH = svImgH.value;
+      const _scrW = svScreenW.value;
+      const _scrH = svScreenH.value;
+
+      const scaledW = _imgW * targetScale;
+      const scaledH = _imgH * targetScale;
+      const maxX = Math.max(0, (scaledW - _scrW) / 2);
+      const maxY = Math.max(0, (scaledH - _scrH) / 2);
       const clampX = (v) => Math.max(-maxX, Math.min(maxX, v));
       const clampY = (v) => Math.max(-maxY, Math.min(maxY, v));
 
@@ -470,8 +521,6 @@ const ZoomableImage = ({
       const cy = offsetBaseY.value;
 
       if (targetScale !== scale.value) {
-        // If scale is out of bounds, Pan must ensure scale and positions bounce back properly.
-        // This handles cases where the user interrupted a scale bounce with a drag, then released.
         const ratio = targetScale / scale.value;
         let targetX = cx * ratio;
         let targetY = cy * ratio;
@@ -504,6 +553,11 @@ const ZoomableImage = ({
   const doubleTapGesture = Gesture.Tap()
     .numberOfTaps(2)
     .onEnd((e) => {
+      const _imgW = svImgW.value;
+      const _imgH = svImgH.value;
+      const _scrW = svScreenW.value;
+      const _scrH = svScreenH.value;
+
       if (scale.value > MIN_SCALE * 1.1) {
         scale.value = withSpring(MIN_SCALE);
         savedScale.value = MIN_SCALE;
@@ -511,14 +565,14 @@ const ZoomableImage = ({
         offsetBaseY.value = withSpring(0);
       } else {
         const targetScale = 2.5 / RENDER_FACTOR;
-        const dx = e.x - SCREEN_WIDTH / 2;
-        const dy = e.y - SCREEN_HEIGHT / 2;
+        const dx = e.x - _scrW / 2;
+        const dy = e.y - _scrH / 2;
         const offsetX = -dx * (targetScale / MIN_SCALE - 1);
         const offsetY = -dy * (targetScale / MIN_SCALE - 1);
-        const scaledW = IMG_W * targetScale;
-        const scaledH = IMG_H * targetScale;
-        const maxX = Math.max(0, (scaledW - SCREEN_WIDTH) / 2);
-        const maxY = Math.max(0, (scaledH - SCREEN_HEIGHT) / 2);
+        const scaledW = _imgW * targetScale;
+        const scaledH = _imgH * targetScale;
+        const maxX = Math.max(0, (scaledW - _scrW) / 2);
+        const maxY = Math.max(0, (scaledH - _scrH) / 2);
         const clampedX = Math.max(-maxX, Math.min(maxX, offsetX));
         const clampedY = Math.max(-maxY, Math.min(maxY, offsetY));
         scale.value = withSpring(targetScale);
@@ -529,15 +583,6 @@ const ZoomableImage = ({
     });
 
   // ── Pen-mode draw gesture ──
-  // UX: draw locally on the phone canvas immediately (zero network latency),
-  // accumulate points with timestamps, and fire ONE request to the server
-  // when the finger lifts. The server then replays the stroke with the
-  // recorded timing so viewers on the PC see the gesture animate in (not
-  // snap in all at once), which draws their eye to where the pointer is.
-  //
-  // 1 finger = draw, 2 fingers = pinch zoom (via maxPointers(1) +
-  // Simultaneous(pinch, draw)). Gesture coords are container-space; we
-  // convert to image-base coords by undoing translate + scale.
   const [liveStrokePoints, setLiveStrokePoints] = useState(null);
   const liveStrokeRef = useRef(null);
   const strokeStartRef = useRef(0);
@@ -571,12 +616,12 @@ const ZoomableImage = ({
       const tx = offsetBaseX.value + panX.value + pinchX.value;
       const ty = offsetBaseY.value + panY.value + pinchY.value;
       const s = scale.value;
-      const imgLeft = SCREEN_WIDTH / 2 + tx - (IMG_W * s) / 2;
-      const imgTop = SCREEN_HEIGHT / 2 + ty - (IMG_H * s) / 2;
+      const imgLeft = svScreenW.value / 2 + tx - (svImgW.value * s) / 2;
+      const imgTop = svScreenH.value / 2 + ty - (svImgH.value * s) / 2;
       const bx = (e.x - imgLeft) / s;
       const by = (e.y - imgTop) / s;
-      let nx = (bx - contentLeft) / contentW;
-      let ny = (by - contentTop) / contentH;
+      let nx = (bx - svContentLeft.value) / svContentW.value;
+      let ny = (by - svContentTop.value) / svContentH.value;
       nx = Math.max(0, Math.min(1, nx));
       ny = Math.max(0, Math.min(1, ny));
       runOnJS(handlePenStartJS)(nx, ny);
@@ -585,12 +630,12 @@ const ZoomableImage = ({
       const tx = offsetBaseX.value + panX.value + pinchX.value;
       const ty = offsetBaseY.value + panY.value + pinchY.value;
       const s = scale.value;
-      const imgLeft = SCREEN_WIDTH / 2 + tx - (IMG_W * s) / 2;
-      const imgTop = SCREEN_HEIGHT / 2 + ty - (IMG_H * s) / 2;
+      const imgLeft = svScreenW.value / 2 + tx - (svImgW.value * s) / 2;
+      const imgTop = svScreenH.value / 2 + ty - (svImgH.value * s) / 2;
       const bx = (e.x - imgLeft) / s;
       const by = (e.y - imgTop) / s;
-      let nx = (bx - contentLeft) / contentW;
-      let ny = (by - contentTop) / contentH;
+      let nx = (bx - svContentLeft.value) / svContentW.value;
+      let ny = (by - svContentTop.value) / svContentH.value;
       nx = Math.max(0, Math.min(1, nx));
       ny = Math.max(0, Math.min(1, ny));
       runOnJS(handlePenMoveJS)(nx, ny);
@@ -628,8 +673,8 @@ const ZoomableImage = ({
               source={{ uri: prevUri }}
               style={{
                 position: "absolute",
-                width: IMG_W,
-                height: IMG_H,
+                width: imgW,
+                height: imgH,
                 borderRadius: R.md,
               }}
               resizeMode="contain"
@@ -638,7 +683,7 @@ const ZoomableImage = ({
           )}
           <Image
             source={{ uri }}
-            style={{ width: IMG_W, height: IMG_H, borderRadius: R.md }}
+            style={{ width: imgW, height: imgH, borderRadius: R.md }}
             resizeMode="contain"
             fadeDuration={hasLoadedRef.current ? 0 : 300}
             onLoad={() => {
@@ -646,14 +691,10 @@ const ZoomableImage = ({
               setPrevUri(uri);
             }}
           />
-          {/* Local pen canvas — renders completed strokes + the in-progress
-              one immediately (no round-trip to server). Points live in the
-              content-box coord system (inside the letterbox region), so the
-              visible goresan sits exactly where the user's finger went. */}
           <Svg
-            width={IMG_W}
-            height={IMG_H}
-            viewBox={`0 0 ${IMG_W} ${IMG_H}`}
+            width={imgW}
+            height={imgH}
+            viewBox={`0 0 ${imgW} ${imgH}`}
             style={StyleSheet.absoluteFillObject}
             pointerEvents="none"
           >
@@ -5233,6 +5274,7 @@ function AppMain() {
         transparent
         animationType="fade"
         statusBarTranslucent
+        supportedOrientations={["portrait", "landscape"]}
         onRequestClose={() => {
           setImageModalOpen(false);
           stopLiveScreen();
