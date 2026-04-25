@@ -1127,6 +1127,7 @@ function AppMain() {
   const [terminalInput, setTerminalInput] = useState("");
   const [terminalCwd, setTerminalCwd] = useState("");
   const [terminalRunning, setTerminalRunning] = useState(false);
+  const [terminalKbHeight, setTerminalKbHeight] = useState(0);
   const terminalScrollRef = useRef(null);
 
   // Files browser state
@@ -2166,6 +2167,28 @@ function AppMain() {
     if (terminalSheetOpen && !terminalCwd) {
       fetchTerminalCwd();
     }
+  }, [terminalSheetOpen]);
+
+  // Track keyboard height for terminal input positioning
+  useEffect(() => {
+    if (!terminalSheetOpen) {
+      setTerminalKbHeight(0);
+      return;
+    }
+    const showEvent =
+      Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
+    const hideEvent =
+      Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
+    const showSub = Keyboard.addListener(showEvent, (e) => {
+      setTerminalKbHeight(e.endCoordinates.height);
+    });
+    const hideSub = Keyboard.addListener(hideEvent, () => {
+      setTerminalKbHeight(0);
+    });
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
   }, [terminalSheetOpen]);
 
   useEffect(() => {
@@ -5382,11 +5405,7 @@ function AppMain() {
         onClose={() => setTerminalSheetOpen(false)}
         contentInsetTop={keyboardModalTopInset}
       >
-        <KeyboardAvoidingView
-          style={{ flex: 1, backgroundColor: C.bg }}
-          behavior="padding"
-          keyboardVerticalOffset={keyboardModalTopInset}
-        >
+        <View style={{ flex: 1, backgroundColor: C.bg }}>
           {/* HEADER — title, cwd path, and clear action */}
           <View
             style={{
@@ -5567,12 +5586,13 @@ function AppMain() {
             )}
           </ScrollView>
 
-          {/* INPUT BAR — clustrix ChatInput style, no prefix in form */}
+          {/* INPUT BAR — clustrix ChatInput style, keyboard-aware padding */}
           <View
             style={{
               paddingHorizontal: SP.md,
               paddingTop: SP.xs,
-              paddingBottom: SP.md,
+              paddingBottom: terminalKbHeight > 0 ? SP.sm : SP.md,
+              marginBottom: terminalKbHeight,
               backgroundColor: C.bg,
             }}
           >
@@ -5633,7 +5653,7 @@ function AppMain() {
               </TouchableOpacity>
             </View>
           </View>
-        </KeyboardAvoidingView>
+        </View>
       </SlideLeftModal>
 
       {/* ═══ IMAGE DETAIL MODAL ═══ */}
