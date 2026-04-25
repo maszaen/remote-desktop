@@ -39,6 +39,7 @@ import {
 import AnimatedRe, {
   useSharedValue,
   useAnimatedStyle,
+  useAnimatedKeyboard,
   withSpring,
   withTiming,
   withDecay,
@@ -1127,8 +1128,27 @@ function AppMain() {
   const [terminalInput, setTerminalInput] = useState("");
   const [terminalCwd, setTerminalCwd] = useState("");
   const [terminalRunning, setTerminalRunning] = useState(false);
-  const [terminalKbHeight, setTerminalKbHeight] = useState(0);
   const terminalScrollRef = useRef(null);
+
+  // Smooth keyboard animation for terminal (Reanimated worklet, no re-renders)
+  const terminalKb = useAnimatedKeyboard({
+    isStatusBarTranslucentAndroid: true,
+    isNavigationBarTranslucentAndroid: true,
+  });
+  // Input bar: translate up by keyboard height
+  const terminalInputAnimStyle = useAnimatedStyle(() => {
+    "worklet";
+    return {
+      transform: [{ translateY: -terminalKb.height.value }],
+    };
+  });
+  // Scroll area: also shift up so content stays visible above input
+  const terminalScrollAnimStyle = useAnimatedStyle(() => {
+    "worklet";
+    return {
+      marginBottom: terminalKb.height.value,
+    };
+  });
 
   // Files browser state
   const [filesRoots, setFilesRoots] = useState([]);
@@ -2167,28 +2187,6 @@ function AppMain() {
     if (terminalSheetOpen && !terminalCwd) {
       fetchTerminalCwd();
     }
-  }, [terminalSheetOpen]);
-
-  // Track keyboard height for terminal input positioning
-  useEffect(() => {
-    if (!terminalSheetOpen) {
-      setTerminalKbHeight(0);
-      return;
-    }
-    const showEvent =
-      Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
-    const hideEvent =
-      Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
-    const showSub = Keyboard.addListener(showEvent, (e) => {
-      setTerminalKbHeight(e.endCoordinates.height);
-    });
-    const hideSub = Keyboard.addListener(hideEvent, () => {
-      setTerminalKbHeight(0);
-    });
-    return () => {
-      showSub.remove();
-      hideSub.remove();
-    };
   }, [terminalSheetOpen]);
 
   useEffect(() => {
@@ -5459,142 +5457,150 @@ function AppMain() {
             )}
           </View>
 
-          {/* OUTPUT HISTORY — scrollable area */}
-          <ScrollView
-            ref={terminalScrollRef}
-            style={{ flex: 1 }}
-            contentContainerStyle={{
-              paddingHorizontal: SP.md,
-              paddingTop: SP.xs,
-              paddingBottom: SP.md,
-              flexGrow: 1,
-            }}
-            keyboardShouldPersistTaps="handled"
-            keyboardDismissMode="interactive"
-            onContentSizeChange={() =>
-              terminalScrollRef.current?.scrollToEnd?.({ animated: true })
-            }
-          >
-            {/* Empty state */}
-            {terminalHistory.length === 0 && (
-              <View
-                style={{
-                  flex: 1,
-                  justifyContent: "center",
-                  alignItems: "center",
-                  paddingBottom: SP.xxl,
-                }}
-              >
-                <Ionicons name="terminal" size={48} color={C.muted} />
-                <Text
+          {/* OUTPUT HISTORY — scrollable, animated marginBottom follows keyboard */}
+          <AnimatedRe.View style={[{ flex: 1 }, terminalScrollAnimStyle]}>
+            <ScrollView
+              ref={terminalScrollRef}
+              style={{ flex: 1 }}
+              contentContainerStyle={{
+                paddingHorizontal: SP.md,
+                paddingTop: SP.xs,
+                paddingBottom: 70,
+                flexGrow: 1,
+              }}
+              keyboardShouldPersistTaps="handled"
+              keyboardDismissMode="interactive"
+              onContentSizeChange={() =>
+                terminalScrollRef.current?.scrollToEnd?.({ animated: true })
+              }
+            >
+              {/* Empty state */}
+              {terminalHistory.length === 0 && (
+                <View
                   style={{
-                    fontSize: F.md,
-                    color: C.muted,
-                    marginTop: SP.md,
-                    textAlign: "center",
+                    flex: 1,
+                    justifyContent: "center",
+                    alignItems: "center",
+                    paddingBottom: SP.xxl,
                   }}
                 >
-                  Run commands on your PC
-                </Text>
-                <Text
-                  style={{
-                    fontSize: F.xs,
-                    color: C.muted,
-                    marginTop: SP.xs,
-                    textAlign: "center",
-                  }}
-                >
-                  PowerShell session
-                </Text>
-              </View>
-            )}
-
-            {/* Command + output entries */}
-            {terminalHistory.map((entry, i) => (
-              <View key={i} style={{ marginTop: i === 0 ? 0 : SP.xs }}>
-                {entry.type === "cmd" ? (
-                  <View
+                  <Ionicons name="terminal" size={48} color={C.muted} />
+                  <Text
                     style={{
-                      flexDirection: "row",
-                      alignItems: "flex-start",
-                      marginTop: SP.sm,
+                      fontSize: F.md,
+                      color: C.muted,
+                      marginTop: SP.md,
+                      textAlign: "center",
                     }}
                   >
-                    <Text
+                    Run commands on your PC
+                  </Text>
+                  <Text
+                    style={{
+                      fontSize: F.xs,
+                      color: C.muted,
+                      marginTop: SP.xs,
+                      textAlign: "center",
+                    }}
+                  >
+                    PowerShell session
+                  </Text>
+                </View>
+              )}
+
+              {/* Command + output entries */}
+              {terminalHistory.map((entry, i) => (
+                <View key={i} style={{ marginTop: i === 0 ? 0 : SP.xs }}>
+                  {entry.type === "cmd" ? (
+                    <View
                       style={{
-                        fontFamily:
-                          Platform.OS === "ios" ? "Menlo" : "monospace",
-                        fontSize: F.sm,
-                        color: C.primary,
-                        marginRight: SP.xs,
+                        flexDirection: "row",
+                        alignItems: "flex-start",
+                        marginTop: SP.sm,
                       }}
                     >
-                      {entry.cwd ? `PS ${entry.cwd}>` : "PS>"}
-                    </Text>
+                      <Text
+                        style={{
+                          fontFamily:
+                            Platform.OS === "ios" ? "Menlo" : "monospace",
+                          fontSize: F.sm,
+                          color: C.primary,
+                          marginRight: SP.xs,
+                        }}
+                      >
+                        {entry.cwd ? `PS ${entry.cwd}>` : "PS>"}
+                      </Text>
+                      <Text
+                        selectable
+                        style={{
+                          fontFamily:
+                            Platform.OS === "ios" ? "Menlo" : "monospace",
+                          fontSize: F.sm,
+                          color: C.text,
+                          flex: 1,
+                        }}
+                      >
+                        {entry.text}
+                      </Text>
+                    </View>
+                  ) : (
                     <Text
                       selectable
                       style={{
                         fontFamily:
                           Platform.OS === "ios" ? "Menlo" : "monospace",
-                        fontSize: F.sm,
-                        color: C.text,
-                        flex: 1,
+                        fontSize: F.xs,
+                        color: entry.isError ? C.danger : C.sub,
+                        lineHeight: 18,
                       }}
                     >
                       {entry.text}
                     </Text>
-                  </View>
-                ) : (
-                  <Text
-                    selectable
-                    style={{
-                      fontFamily:
-                        Platform.OS === "ios" ? "Menlo" : "monospace",
-                      fontSize: F.xs,
-                      color: entry.isError ? C.danger : C.sub,
-                      lineHeight: 18,
-                    }}
-                  >
-                    {entry.text}
-                  </Text>
-                )}
-              </View>
-            ))}
+                  )}
+                </View>
+              ))}
 
-            {/* Running indicator */}
-            {terminalRunning && (
-              <View
-                style={{
-                  flexDirection: "row",
-                  alignItems: "center",
-                  marginTop: SP.sm,
-                }}
-              >
-                <ActivityIndicator size="small" color={C.primary} />
-                <Text
+              {/* Running indicator */}
+              {terminalRunning && (
+                <View
                   style={{
-                    fontSize: F.sm,
-                    color: C.sub,
-                    marginLeft: SP.sm,
-                    fontFamily:
-                      Platform.OS === "ios" ? "Menlo" : "monospace",
+                    flexDirection: "row",
+                    alignItems: "center",
+                    marginTop: SP.sm,
                   }}
                 >
-                  Running...
-                </Text>
-              </View>
-            )}
-          </ScrollView>
+                  <ActivityIndicator size="small" color={C.primary} />
+                  <Text
+                    style={{
+                      fontSize: F.sm,
+                      color: C.sub,
+                      marginLeft: SP.sm,
+                      fontFamily:
+                        Platform.OS === "ios" ? "Menlo" : "monospace",
+                    }}
+                  >
+                    Running...
+                  </Text>
+                </View>
+              )}
+            </ScrollView>
+          </AnimatedRe.View>
 
-          {/* INPUT BAR — clustrix ChatInput style, keyboard-aware padding */}
-          <View
-            style={{
-              paddingHorizontal: SP.md,
-              paddingTop: SP.xs,
-              paddingBottom: terminalKbHeight > 0 ? SP.sm : SP.md,
-              marginBottom: terminalKbHeight,
-              backgroundColor: C.bg,
-            }}
+          {/* INPUT BAR — absolute bottom, smooth translateY follows keyboard */}
+          <AnimatedRe.View
+            style={[
+              {
+                position: "absolute",
+                bottom: 0,
+                left: 0,
+                right: 0,
+                paddingHorizontal: SP.md,
+                paddingTop: SP.xs,
+                paddingBottom: SP.md,
+                backgroundColor: C.bg,
+              },
+              terminalInputAnimStyle,
+            ]}
           >
             <View
               style={{
@@ -5652,7 +5658,7 @@ function AppMain() {
                 />
               </TouchableOpacity>
             </View>
-          </View>
+          </AnimatedRe.View>
         </View>
       </SlideLeftModal>
 
