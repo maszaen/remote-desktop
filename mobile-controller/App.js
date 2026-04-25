@@ -583,28 +583,55 @@ const ZoomableImage = ({
     });
 
   // ── Pen-mode draw gesture ──
-  const [liveStrokePoints, setLiveStrokePoints] = useState(null);
+  // Performance: use mutable push + incremental SVG string + rAF throttle
+  // to avoid O(n²) array copies and O(n) string rebuilds per touch move.
+  const [liveStrokeVersion, setLiveStrokeVersion] = useState(0);
   const liveStrokeRef = useRef(null);
   const strokeStartRef = useRef(0);
+  const liveSvgRef = useRef("");
+  const rafRef = useRef(null);
+
+  useEffect(() => {
+    return () => {
+      if (rafRef.current) {
+        cancelAnimationFrame(rafRef.current);
+        rafRef.current = null;
+      }
+    };
+  }, []);
 
   const handlePenStartJS = (nx, ny) => {
     const now = Date.now();
     strokeStartRef.current = now;
-    const initial = [{ nx, ny, t: 0 }];
-    liveStrokeRef.current = initial;
-    setLiveStrokePoints(initial);
+    liveStrokeRef.current = [{ nx, ny, t: 0 }];
+    const x = contentLeft + nx * contentW;
+    const y = contentTop + ny * contentH;
+    liveSvgRef.current = `${x.toFixed(1)},${y.toFixed(1)}`;
+    setLiveStrokeVersion((v) => v + 1);
   };
   const handlePenMoveJS = (nx, ny) => {
     if (!liveStrokeRef.current) return;
     const t = Date.now() - strokeStartRef.current;
-    const next = liveStrokeRef.current.concat([{ nx, ny, t }]);
-    liveStrokeRef.current = next;
-    setLiveStrokePoints(next);
+    liveStrokeRef.current.push({ nx, ny, t });
+    const x = contentLeft + nx * contentW;
+    const y = contentTop + ny * contentH;
+    liveSvgRef.current += ` ${x.toFixed(1)},${y.toFixed(1)}`;
+    if (!rafRef.current) {
+      rafRef.current = requestAnimationFrame(() => {
+        rafRef.current = null;
+        setLiveStrokeVersion((v) => v + 1);
+      });
+    }
   };
   const handlePenEndJS = () => {
+    if (rafRef.current) {
+      cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
+    }
     const pts = liveStrokeRef.current;
     liveStrokeRef.current = null;
-    setLiveStrokePoints(null);
+    liveSvgRef.current = "";
+    setLiveStrokeVersion((v) => v + 1);
     if (!pts || pts.length === 0) return;
     if (onPenStrokeFinalize) onPenStrokeFinalize(pts);
   };
@@ -716,23 +743,18 @@ const ZoomableImage = ({
                 vectorEffect="non-scaling-stroke"
               />
             ))}
-            {liveStrokePoints && liveStrokePoints.length > 0 && (
-              <Polyline
-                points={penPointsToSvg(
-                  liveStrokePoints,
-                  contentLeft,
-                  contentTop,
-                  contentW,
-                  contentH,
-                )}
-                stroke="#FF3B30"
-                strokeWidth={6}
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                fill="none"
-                vectorEffect="non-scaling-stroke"
-              />
-            )}
+            {liveStrokeRef.current &&
+              liveStrokeRef.current.length > 0 && (
+                <Polyline
+                  points={liveSvgRef.current}
+                  stroke="#FF3B30"
+                  strokeWidth={6}
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  fill="none"
+                  vectorEffect="non-scaling-stroke"
+                />
+              )}
           </Svg>
         </AnimatedRe.View>
       </View>
