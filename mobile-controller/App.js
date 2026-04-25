@@ -744,18 +744,17 @@ const ZoomableImage = ({
                 vectorEffect="non-scaling-stroke"
               />
             ))}
-            {liveStrokeRef.current &&
-              liveStrokeRef.current.length > 0 && (
-                <Polyline
-                  points={liveSvgRef.current}
-                  stroke="#FF3B30"
-                  strokeWidth={6}
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  fill="none"
-                  vectorEffect="non-scaling-stroke"
-                />
-              )}
+            {liveStrokeRef.current && liveStrokeRef.current.length > 0 && (
+              <Polyline
+                points={liveSvgRef.current}
+                stroke="#FF3B30"
+                strokeWidth={6}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                fill="none"
+                vectorEffect="non-scaling-stroke"
+              />
+            )}
           </Svg>
         </AnimatedRe.View>
       </View>
@@ -1139,7 +1138,7 @@ function AppMain() {
   const terminalInputAnimStyle = useAnimatedStyle(() => {
     "worklet";
     return {
-      transform: [{ translateY: -terminalKb.height.value }],
+      transform: [{ translateY: -terminalKb.height.value - 10 }],
     };
   });
   // Scroll area: also shift up so content stays visible above input
@@ -1929,7 +1928,10 @@ function AppMain() {
   const terminalExec = async (cmd) => {
     if (!cmd.trim() || terminalRunning) return;
     setTerminalRunning(true);
-    setTerminalHistory((h) => [...h, { type: "cmd", text: cmd, cwd: terminalCwd }]);
+    setTerminalHistory((h) => [
+      ...h,
+      { type: "cmd", text: cmd, cwd: terminalCwd },
+    ]);
     setTerminalInput("");
     try {
       const r = await sendAction("/terminal/exec", "POST", { command: cmd });
@@ -2698,13 +2700,19 @@ function AppMain() {
         >
           <Ionicons
             name={
-              keyboardSheetOpen || shortcutSheetOpen || filesSheetOpen || terminalSheetOpen
+              keyboardSheetOpen ||
+              shortcutSheetOpen ||
+              filesSheetOpen ||
+              terminalSheetOpen
                 ? "arrow-back"
                 : "power"
             }
             size={17}
             color={
-              keyboardSheetOpen || shortcutSheetOpen || filesSheetOpen || terminalSheetOpen
+              keyboardSheetOpen ||
+              shortcutSheetOpen ||
+              filesSheetOpen ||
+              terminalSheetOpen
                 ? C.sub
                 : C.danger
             }
@@ -5434,8 +5442,7 @@ function AppMain() {
                   fontSize: F.xs,
                   color: C.muted,
                   marginTop: 2,
-                  fontFamily:
-                    Platform.OS === "ios" ? "Menlo" : "monospace",
+                  fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace",
                 }}
               >
                 {terminalCwd || "PowerShell"}
@@ -5575,8 +5582,7 @@ function AppMain() {
                       fontSize: F.sm,
                       color: C.sub,
                       marginLeft: SP.sm,
-                      fontFamily:
-                        Platform.OS === "ios" ? "Menlo" : "monospace",
+                      fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace",
                     }}
                   >
                     Running...
@@ -5639,9 +5645,7 @@ function AppMain() {
                   width: 34,
                   height: 34,
                   borderRadius: 28,
-                  backgroundColor: terminalInput.trim()
-                    ? C.primary
-                    : C.surface,
+                  backgroundColor: terminalInput.trim() ? C.primary : C.surface,
                   alignItems: "center",
                   justifyContent: "center",
                 }}
@@ -5650,9 +5654,7 @@ function AppMain() {
                 activeOpacity={0.7}
               >
                 <Ionicons
-                  name={
-                    terminalRunning ? "hourglass-outline" : "arrow-up"
-                  }
+                  name={terminalRunning ? "hourglass-outline" : "arrow-up"}
                   size={18}
                   color={terminalInput.trim() ? "#fff" : C.muted}
                 />
