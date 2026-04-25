@@ -1736,8 +1736,7 @@ def terminal_exec(req: TerminalExecRequest):
 
     try:
         result = subprocess.run(
-            cmd,
-            shell=True,
+            ["powershell", "-NoProfile", "-Command", cmd],
             capture_output=True,
             text=True,
             timeout=min(req.timeout, 120),
