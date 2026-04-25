@@ -639,7 +639,13 @@ const ZoomableImage = ({
             {strokes.map((st, i) => (
               <Polyline
                 key={st.id || i}
-                points={penPointsToSvg(st.points, contentLeft, contentTop, contentW, contentH)}
+                points={penPointsToSvg(
+                  st.points,
+                  contentLeft,
+                  contentTop,
+                  contentW,
+                  contentH,
+                )}
                 stroke={st.color || "#FF3B30"}
                 strokeWidth={6}
                 strokeLinecap="round"
@@ -650,7 +656,13 @@ const ZoomableImage = ({
             ))}
             {liveStrokePoints && liveStrokePoints.length > 0 && (
               <Polyline
-                points={penPointsToSvg(liveStrokePoints, contentLeft, contentTop, contentW, contentH)}
+                points={penPointsToSvg(
+                  liveStrokePoints,
+                  contentLeft,
+                  contentTop,
+                  contentW,
+                  contentH,
+                )}
                 stroke="#FF3B30"
                 strokeWidth={6}
                 strokeLinecap="round"
@@ -3897,7 +3909,7 @@ function AppMain() {
                       flex: 1,
                       paddingTop: SP.md - 3,
                       paddingHorizontal: SP.md,
-                      backgroundColor: C.bg,
+                      backgroundColor: C.elevated,
                     },
                   ]}
                   value={queueInput}
@@ -4406,7 +4418,7 @@ function AppMain() {
               maxHeight:
                 SCREEN_HEIGHT -
                 (Platform.OS === "android" ? StatusBar.currentHeight || 0 : 0) -
-                120,
+                100,
             }}
           >
             <View
@@ -4859,7 +4871,7 @@ function AppMain() {
                   <Text
                     style={{ color: C.sub, fontSize: F.xs, fontWeight: "600" }}
                   >
-                    Loading high resolution…
+                    High resolution
                   </Text>
                 </View>
               )}
@@ -5871,7 +5883,7 @@ const s = StyleSheet.create({
     backgroundColor: C.elevated,
     borderWidth: 1,
     borderColor: C.border,
-    borderRadius: R.md,
+    borderRadius: R.sm,
   },
   keyboardTextarea: {
     minHeight: 130,
