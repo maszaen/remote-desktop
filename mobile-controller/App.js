@@ -1134,7 +1134,8 @@ function AppMain() {
   const terminalKb = useAnimatedKeyboard();
   const terminalCardAnimStyle = useAnimatedStyle(() => {
     "worklet";
-    return { paddingBottom: terminalKb.height.value };
+    // Base margin (SP.md=16) + keyboard height so card always has bottom gap
+    return { paddingBottom: 16 + terminalKb.height.value };
   });
 
   // Files browser state
@@ -3275,7 +3276,10 @@ function AppMain() {
         {/* Terminal Access row */}
         <TouchableOpacity
           style={s.menuRow}
-          onPress={() => setTerminalSheetOpen(true)}
+          onPress={() => {
+            setTerminalSheetOpen(true);
+            fetchTerminalCwd();
+          }}
           activeOpacity={0.6}
         >
           <View style={[s.menuRowIcon, { backgroundColor: C.primaryDim }]}>
@@ -5453,7 +5457,6 @@ function AppMain() {
               {
                 flex: 1,
                 paddingHorizontal: SP.md,
-                paddingBottom: SP.md,
               },
               terminalCardAnimStyle,
             ]}
