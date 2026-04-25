@@ -1915,6 +1915,12 @@ function AppMain() {
   // ── Terminal helpers ──
   const terminalExec = async (cmd) => {
     if (!cmd.trim() || terminalRunning) return;
+    // Handle "clear" command locally — clears history without sending to server
+    if (cmd.trim().toLowerCase() === "clear") {
+      setTerminalHistory([]);
+      setTerminalInput("");
+      return;
+    }
     setTerminalRunning(true);
     setTerminalHistory((h) => [
       ...h,
@@ -5400,64 +5406,54 @@ function AppMain() {
         contentInsetTop={keyboardModalTopInset}
       >
         <View style={{ flex: 1, backgroundColor: C.bg }}>
-          {/* HEADER — title + clear */}
+          {/* HEADER — path + always-visible clear button */}
           <View
             style={{
               flexDirection: "row",
-              alignItems: "flex-start",
+              alignItems: "center",
               justifyContent: "space-between",
               paddingTop: SP.md,
               paddingBottom: SP.sm,
               paddingHorizontal: SP.lg,
             }}
           >
-            <View style={{ flex: 1 }}>
-              <Text
-                style={{
-                  fontSize: F.xl,
-                  fontWeight: "700",
-                  color: C.text,
-                  letterSpacing: -0.5,
-                }}
-              >
-                Terminal
-              </Text>
-              <Text
-                numberOfLines={1}
-                style={{
-                  fontSize: F.xs,
-                  color: C.muted,
-                  marginTop: 2,
-                  fontFamily:
-                    Platform.OS === "ios" ? "Menlo" : "monospace",
-                }}
-              >
-                {terminalCwd || "PowerShell"}
-              </Text>
-            </View>
-            {terminalHistory.length > 0 && (
-              <TouchableOpacity
-                onPress={() => setTerminalHistory([])}
-                activeOpacity={0.6}
-                style={{
-                  paddingHorizontal: SP.sm,
-                  paddingVertical: SP.xs,
-                  borderRadius: R.sm,
-                  backgroundColor: C.elevated,
-                }}
-              >
-                <Text style={{ fontSize: F.xs, color: C.sub }}>Clear</Text>
-              </TouchableOpacity>
-            )}
+            <Text
+              numberOfLines={1}
+              style={{
+                flex: 1,
+                fontSize: F.sm,
+                color: C.muted,
+                fontFamily:
+                  Platform.OS === "ios" ? "Menlo" : "monospace",
+                marginRight: SP.sm,
+              }}
+            >
+              {terminalCwd || "PowerShell"}
+            </Text>
+            {/* Clear button — always visible, disabled when empty */}
+            <TouchableOpacity
+              onPress={() => setTerminalHistory([])}
+              activeOpacity={0.6}
+              disabled={terminalHistory.length === 0}
+              style={{
+                paddingHorizontal: SP.sm,
+                paddingVertical: SP.xs,
+                borderRadius: R.sm,
+                backgroundColor: C.elevated,
+                opacity: terminalHistory.length === 0 ? 0.4 : 1,
+              }}
+            >
+              <Text style={{ fontSize: F.xs, color: C.sub }}>Clear</Text>
+            </TouchableOpacity>
           </View>
 
-          {/* MAIN CONTAINER — padded wrapper, same pattern as Files/Keyboard */}
+          {/* MAIN CONTAINER — padded wrapper with animated paddingBottom for keyboard */}
           <AnimatedRe.View
             style={[
               {
                 flex: 1,
                 paddingHorizontal: SP.md,
-                paddingBottom: SP.xl,
+                paddingBottom: SP.md,
               },
               terminalCardAnimStyle,
             ]}
@@ -5600,7 +5596,7 @@ function AppMain() {
                 )}
               </ScrollView>
 
-              {/* INPUT BAR — in flow at bottom of card, follows card size */}
+              {/* INPUT BAR — in flow at bottom of card, taller for easy touch */}
               <View
                 style={{
                   flexDirection: "row",
@@ -5616,12 +5612,12 @@ function AppMain() {
                     flexDirection: "row",
                     alignItems: "center",
                     backgroundColor: C.bg,
-                    borderRadius: 22,
+                    borderRadius: 24,
                     borderWidth: 1,
                     borderColor: C.border,
-                    paddingVertical: 4,
-                    paddingLeft: 13,
-                    paddingRight: 4,
+                    paddingVertical: 6,
+                    paddingLeft: 14,
+                    paddingRight: 5,
                   }}
                 >
                   <TextInput
@@ -5629,8 +5625,8 @@ function AppMain() {
                       flex: 1,
                       color: C.text,
                       fontSize: F.md,
-                      paddingVertical: 3,
-                      lineHeight: 20,
+                      paddingVertical: 6,
+                      lineHeight: 22,
                     }}
                     value={terminalInput}
                     onChangeText={setTerminalInput}
@@ -5645,9 +5641,9 @@ function AppMain() {
                   />
                   <TouchableOpacity
                     style={{
-                      width: 34,
-                      height: 34,
-                      borderRadius: 28,
+                      width: 38,
+                      height: 38,
+                      borderRadius: 19,
                       backgroundColor: terminalInput.trim()
                         ? C.primary
                         : C.surface,
@@ -5662,7 +5658,7 @@ function AppMain() {
                       name={
                         terminalRunning ? "hourglass-outline" : "arrow-up"
                       }
-                      size={18}
+                      size={20}
                       color={terminalInput.trim() ? "#fff" : C.muted}
                     />
                   </TouchableOpacity>
