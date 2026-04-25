@@ -762,83 +762,75 @@ const ZoomableImage = ({
   );
 };
 
-// ─── ANIMATED HELPERS ─────────────────────────────────────────────────────────
+// ─── PULSE RING (Epic Edition) ────────────────────────────────────────────────
 const PulseRing = ({ color = C.primary, size = 96 }) => {
-  const s1 = useRef(new Animated.Value(1)).current;
-  const o1 = useRef(new Animated.Value(0.5)).current;
-  const s2 = useRef(new Animated.Value(1)).current;
-  const o2 = useRef(new Animated.Value(0.25)).current;
+  const RINGS    = 5;
+  const DURATION = 2600; // ms per cycle
+  const STAGGER  = DURATION / RINGS; // 800ms offset antar ring
+
+  const anims = useRef(
+    Array.from({ length: RINGS }, () => new Animated.Value(0))
+  ).current;
 
   useEffect(() => {
-    const pulse = (sv, ov, delay) =>
-      Animated.loop(
-        Animated.sequence([
-          Animated.delay(delay),
-          Animated.parallel([
-            Animated.timing(sv, {
-              toValue: 1.65,
-              duration: 1800,
-              easing: Easing.out(Easing.ease),
-              useNativeDriver: true,
-            }),
-            Animated.timing(ov, {
-              toValue: 0,
-              duration: 1800,
-              easing: Easing.out(Easing.ease),
-              useNativeDriver: true,
-            }),
-          ]),
-          Animated.parallel([
-            Animated.timing(sv, {
+    anims.forEach((anim, i) => {
+      Animated.sequence([
+        // Initial offset — hanya jalan sekali, lalu loop selamanya
+        Animated.delay(STAGGER * i),
+        Animated.loop(
+          Animated.sequence([
+            Animated.timing(anim, {
               toValue: 1,
+              duration: DURATION,
+              easing: Easing.out(Easing.quad), // fast expand → slow fade, feels satisfying
+              useNativeDriver: true,
+            }),
+            // Snap balik ke 0 — AMAN karena opacity udah 0 di inputRange: 1
+            Animated.timing(anim, {
+              toValue: 0,
               duration: 0,
               useNativeDriver: true,
             }),
-            Animated.timing(ov, {
-              toValue: delay === 0 ? 0.5 : 0.25,
-              duration: 0,
-              useNativeDriver: true,
-            }),
-          ]),
-        ]),
-      ).start();
-    pulse(s1, o1, 0);
-    pulse(s2, o2, 900);
+          ])
+        ),
+      ]).start();
+    });
+
+    return () => anims.forEach(a => a.stopAnimation());
   }, []);
 
   return (
-    <View
-      style={{
-        width: size,
-        height: size,
-        alignItems: "center",
-        justifyContent: "center",
-      }}
-    >
-      <Animated.View
-        style={{
-          position: "absolute",
-          width: size,
-          height: size,
-          borderRadius: size / 2,
-          borderWidth: 1.5,
-          borderColor: color,
-          transform: [{ scale: s1 }],
-          opacity: o1,
-        }}
-      />
-      <Animated.View
-        style={{
-          position: "absolute",
-          width: size,
-          height: size,
-          borderRadius: size / 2,
-          borderWidth: 1,
-          borderColor: color,
-          transform: [{ scale: s2 }],
-          opacity: o2,
-        }}
-      />
+    <View style={{ width: size, height: size, alignItems: 'center', justifyContent: 'center' }}>
+      {anims.map((anim, i) => {
+        // Scale: 1 → 1.9 secara linear (easing udah di timing-nya)
+        const scale = anim.interpolate({
+          inputRange: [0, 1],
+          outputRange: [1, 1.9],
+        });
+
+        // Opacity: flash masuk cepet (8% pertama), fade out perlahan
+        // Tiap ring makin transparan → efek depth
+        const opacity = anim.interpolate({
+          inputRange: [0, 0.08, 0.75, 1],
+          outputRange: [0, 0.7 - i * 0.15, 0.15, 0],
+        });
+
+        return (
+          <Animated.View
+            key={i}
+            style={{
+              position: 'absolute',
+              width: size,
+              height: size,
+              borderRadius: size / 2,
+              borderWidth: 1.5 - i * 0.25, // ring terluar paling tipis
+              borderColor: color,
+              transform: [{ scale }],
+              opacity,
+            }}
+          />
+        );
+      })}
     </View>
   );
 };
@@ -909,6 +901,65 @@ const SpinningIcon = ({ name, size, color, spinning }) => {
     <Animated.View style={{ transform: [{ rotate }] }}>
       <Ionicons name={name} size={size} color={color} />
     </Animated.View>
+  );
+};
+
+// ─── ANIMATED SYSTEM STATS ──────────────────────────────────────────────────
+const AnimatedNumber = ({ value, style, suffix = "" }) => {
+  const [display, setDisplay] = useState(value);
+  const animState = useRef({ target: value, current: value, raf: null }).current;
+
+  useEffect(() => {
+    animState.target = value;
+    const animate = () => {
+      const diff = animState.target - animState.current;
+      if (Math.abs(diff) < 0.5) {
+        animState.current = animState.target;
+        setDisplay(Math.round(animState.target));
+        return;
+      }
+      animState.current += diff * 0.15;
+      setDisplay(Math.round(animState.current));
+      animState.raf = requestAnimationFrame(animate);
+    };
+    cancelAnimationFrame(animState.raf);
+    animState.raf = requestAnimationFrame(animate);
+    return () => cancelAnimationFrame(animState.raf);
+  }, [value]);
+
+  return (
+    <Text style={style}>
+      {display}
+      {suffix}
+    </Text>
+  );
+};
+
+const AnimatedProgressBar = ({ percent, color, style }) => {
+  const animValue = useRef(new Animated.Value(percent)).current;
+
+  useEffect(() => {
+    Animated.timing(animValue, {
+      toValue: Math.min(100, Math.max(0, percent)),
+      duration: 800,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: false,
+    }).start();
+  }, [percent]);
+
+  return (
+    <Animated.View
+      style={[
+        style,
+        {
+          width: animValue.interpolate({
+            inputRange: [0, 100],
+            outputRange: ["0%", "100%"],
+          }),
+          backgroundColor: color,
+        },
+      ]}
+    />
   );
 };
 
@@ -2313,10 +2364,10 @@ function AppMain() {
             <View style={s.logoWrap}>
               <PulseRing color={C.primary} size={100} />
               <View style={s.logoCircle}>
-                <MaterialCommunityIcons
-                  name="remote-desktop"
-                  size={32}
-                  color={C.primary}
+                <Image 
+                  source={require("./assets/icon.png")}
+                  style={{ width: 62, height: 62, borderRadius: 31, overflow: "hidden" }}
+                  resizeMode="contain"
                 />
               </View>
             </View>
@@ -2936,21 +2987,19 @@ function AppMain() {
                     />
                     <Text style={s.hwLabel}>CPU</Text>
                   </View>
-                  <Text style={[s.usagePct, { color: cpuColor }]}>
-                    {stats.cpu_percent.toFixed(0)}%
-                  </Text>
+                  <AnimatedNumber
+                    value={stats.cpu_percent}
+                    style={[s.usagePct, { color: cpuColor }]}
+                    suffix="%"
+                  />
                   <Text style={s.usageCardSub} numberOfLines={1}>
                     {stats.cpu_name || "Processor"}
                   </Text>
                   <View style={s.hwTrack}>
-                    <View
-                      style={[
-                        s.hwFill,
-                        {
-                          width: `${Math.min(100, stats.cpu_percent)}%`,
-                          backgroundColor: cpuColor,
-                        },
-                      ]}
+                    <AnimatedProgressBar
+                      percent={stats.cpu_percent}
+                      color={cpuColor}
+                      style={s.hwFill}
                     />
                   </View>
                 </View>
@@ -2968,23 +3017,21 @@ function AppMain() {
                     <Ionicons name="server-outline" size={12} color={C.muted} />
                     <Text style={s.hwLabel}>RAM</Text>
                   </View>
-                  <Text style={[s.usagePct, { color: ramColor }]}>
-                    {stats.ram_percent.toFixed(0)}%
-                  </Text>
+                  <AnimatedNumber
+                    value={stats.ram_percent}
+                    style={[s.usagePct, { color: ramColor }]}
+                    suffix="%"
+                  />
                   <Text style={s.usageCardSub} numberOfLines={1}>
                     {stats.ram_used_gb
                       ? `${stats.ram_used_gb} / ${stats.ram_total_gb} GB`
                       : `${stats.ram_percent.toFixed(0)}% used`}
                   </Text>
                   <View style={s.hwTrack}>
-                    <View
-                      style={[
-                        s.hwFill,
-                        {
-                          width: `${Math.min(100, stats.ram_percent)}%`,
-                          backgroundColor: ramColor,
-                        },
-                      ]}
+                    <AnimatedProgressBar
+                      percent={stats.ram_percent}
+                      color={ramColor}
+                      style={s.hwFill}
                     />
                   </View>
                 </View>

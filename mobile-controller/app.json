@@ -23,6 +23,7 @@
     },
     "android": {
       "backgroundColor": "#000000",
+      "usesCleartextTraffic": true,
       "splash": {
         "image": "./assets/adaptive-icon.png",
         "resizeMode": "contain",
@@ -49,7 +50,8 @@
       }
     },
     "plugins": [
-      "expo-font"
+      "expo-font",
+      ["expo-build-properties", { "android": { "usesCleartextTraffic": true } }]
     ]
   }
 }
