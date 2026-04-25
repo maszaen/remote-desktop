@@ -5465,6 +5465,7 @@ function AppMain() {
                         color: C.muted,
                         marginTop: SP.md,
                         textAlign: "center",
+                        fontFamily: "Google Sans Code",
                       }}
                     >
                       Run commands on your PC
@@ -5475,6 +5476,7 @@ function AppMain() {
                         color: C.muted,
                         marginTop: SP.xs,
                         textAlign: "center",
+                        fontFamily: "Google Sans Code",
                       }}
                     >
                       PowerShell session
@@ -5495,9 +5497,8 @@ function AppMain() {
                       >
                         <Text
                           style={{
-                            fontFamily:
-                              Platform.OS === "ios" ? "Menlo" : "monospace",
-                            fontSize: F.sm,
+                            fontFamily: "Google Sans Code",
+                            fontSize: F.xs - 2,
                             color: C.primary,
                             marginRight: SP.xs,
                           }}
@@ -5507,9 +5508,8 @@ function AppMain() {
                         <Text
                           selectable
                           style={{
-                            fontFamily:
-                              Platform.OS === "ios" ? "Menlo" : "monospace",
-                            fontSize: F.sm,
+                            fontFamily: "Google Sans Code",
+                            fontSize: F.xs - 2,
                             color: C.text,
                             flex: 1,
                           }}
@@ -5521,11 +5521,11 @@ function AppMain() {
                       <Text
                         selectable
                         style={{
-                          fontFamily:
-                            Platform.OS === "ios" ? "Menlo" : "monospace",
-                          fontSize: F.xs,
+                          fontFamily: "Google Sans Code",
+                          fontSize: F.xs - 2,
+                          lineHeight: 15,
+                          letterSpacing: 0.25,
                           color: entry.isError ? C.danger : C.sub,
-                          lineHeight: 18,
                         }}
                       >
                         {entry.text}
@@ -5549,8 +5549,7 @@ function AppMain() {
                         fontSize: F.sm,
                         color: C.sub,
                         marginLeft: SP.sm,
-                        fontFamily:
-                          Platform.OS === "ios" ? "Menlo" : "monospace",
+                        fontFamily: "Google Sans Code",
                       }}
                     >
                       Running...
@@ -5577,6 +5576,7 @@ function AppMain() {
                     paddingTop: SP.sm,
                     paddingBottom: SP.xs,
                     paddingHorizontal: SP.md,
+                    paddingRight: SP.sm,
                     backgroundColor: C.elevated,
                   }}
                 >
@@ -5586,8 +5586,7 @@ function AppMain() {
                       flex: 1,
                       fontSize: F.sm,
                       color: C.muted,
-                      fontFamily:
-                        Platform.OS === "ios" ? "Menlo" : "monospace",
+                      fontFamily: "Google Sans Code",
                       marginRight: SP.sm,
                     }}
                   >
@@ -5599,16 +5598,16 @@ function AppMain() {
                     activeOpacity={0.6}
                     disabled={terminalHistory.length === 0}
                     style={{
-                      paddingHorizontal: SP.sm,
-                      paddingVertical: SP.xs,
-                      borderRadius: R.sm,
+                      paddingHorizontal: SP.sm + 2,
+                      // paddingVertical: SP.xs,
+                      borderRadius: R.full,
                       backgroundColor: C.bg,
+                      borderWidth: 0.5,
+                      borderColor: C.muted,
                       opacity: terminalHistory.length === 0 ? 0.4 : 1,
                     }}
                   >
-                    <Text style={{ fontSize: F.xs, color: C.sub }}>
-                      Clear
-                    </Text>
+                    <Text style={{ fontSize: F.sm, color: C.muted, fontFamily: "Google Sans Code", }}>Clear</Text>
                   </TouchableOpacity>
                 </View>
                 {/* Gradient fade below header */}
@@ -5663,6 +5662,7 @@ function AppMain() {
                       fontSize: F.md,
                       paddingVertical: 6,
                       lineHeight: 22,
+                      fontFamily: "Google Sans Code",
                     }}
                     value={terminalInput}
                     onChangeText={setTerminalInput}
@@ -5691,9 +5691,7 @@ function AppMain() {
                     activeOpacity={0.7}
                   >
                     <Ionicons
-                      name={
-                        terminalRunning ? "hourglass-outline" : "arrow-up"
-                      }
+                      name={terminalRunning ? "hourglass-outline" : "arrow-up"}
                       size={20}
                       color={terminalInput.trim() ? "#fff" : C.muted}
                     />
@@ -5869,7 +5867,17 @@ function AppMain() {
   );
 }
 
+import { useFonts } from "expo-font";
+
 export default function App() {
+  const [fontsLoaded] = useFonts({
+    "Google Sans Code": require("./assets/font/GoogleSansCode-Regular.ttf"),
+  });
+
+  if (!fontsLoaded) {
+    return null;
+  }
+
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <AppMain />
