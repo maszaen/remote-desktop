@@ -5410,53 +5410,13 @@ function AppMain() {
         contentInsetTop={keyboardModalTopInset}
       >
         <View style={{ flex: 1, backgroundColor: C.bg }}>
-          {/* HEADER — path + always-visible clear button */}
-          <View
-            style={{
-              flexDirection: "row",
-              alignItems: "center",
-              justifyContent: "space-between",
-              paddingTop: SP.md,
-              paddingBottom: SP.sm,
-              paddingHorizontal: SP.lg,
-            }}
-          >
-            <Text
-              numberOfLines={1}
-              style={{
-                flex: 1,
-                fontSize: F.sm,
-                color: C.muted,
-                fontFamily:
-                  Platform.OS === "ios" ? "Menlo" : "monospace",
-                marginRight: SP.sm,
-              }}
-            >
-              {terminalCwd || "PowerShell"}
-            </Text>
-            {/* Clear button — always visible, disabled when empty */}
-            <TouchableOpacity
-              onPress={() => setTerminalHistory([])}
-              activeOpacity={0.6}
-              disabled={terminalHistory.length === 0}
-              style={{
-                paddingHorizontal: SP.sm,
-                paddingVertical: SP.xs,
-                borderRadius: R.sm,
-                backgroundColor: C.elevated,
-                opacity: terminalHistory.length === 0 ? 0.4 : 1,
-              }}
-            >
-              <Text style={{ fontSize: F.xs, color: C.sub }}>Clear</Text>
-            </TouchableOpacity>
-          </View>
-
           {/* MAIN CONTAINER — padded wrapper with animated paddingBottom for keyboard */}
           <AnimatedRe.View
             style={[
               {
                 flex: 1,
                 paddingHorizontal: SP.md,
+                paddingTop: SP.md,
               },
               terminalCardAnimStyle,
             ]}
@@ -5478,7 +5438,7 @@ function AppMain() {
                 style={{ flex: 1 }}
                 contentContainerStyle={{
                   paddingHorizontal: SP.md,
-                  paddingTop: SP.md,
+                  paddingTop: 44,
                   paddingBottom: SP.sm,
                   flexGrow: 1,
                 }}
@@ -5598,6 +5558,80 @@ function AppMain() {
                   </View>
                 )}
               </ScrollView>
+
+              {/* FLOATING HEADER — path + clear, absolute top inside card */}
+              <View
+                style={{
+                  position: "absolute",
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  zIndex: 10,
+                }}
+              >
+                <View
+                  style={{
+                    flexDirection: "row",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    paddingTop: SP.sm,
+                    paddingBottom: SP.xs,
+                    paddingHorizontal: SP.md,
+                    backgroundColor: C.elevated,
+                  }}
+                >
+                  <Text
+                    numberOfLines={1}
+                    style={{
+                      flex: 1,
+                      fontSize: F.sm,
+                      color: C.muted,
+                      fontFamily:
+                        Platform.OS === "ios" ? "Menlo" : "monospace",
+                      marginRight: SP.sm,
+                    }}
+                  >
+                    {terminalCwd || "PowerShell"}
+                  </Text>
+                  {/* Clear button — always visible, disabled when empty */}
+                  <TouchableOpacity
+                    onPress={() => setTerminalHistory([])}
+                    activeOpacity={0.6}
+                    disabled={terminalHistory.length === 0}
+                    style={{
+                      paddingHorizontal: SP.sm,
+                      paddingVertical: SP.xs,
+                      borderRadius: R.sm,
+                      backgroundColor: C.bg,
+                      opacity: terminalHistory.length === 0 ? 0.4 : 1,
+                    }}
+                  >
+                    <Text style={{ fontSize: F.xs, color: C.sub }}>
+                      Clear
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+                {/* Gradient fade below header */}
+                <LinearGradient
+                  colors={[C.elevated, "transparent"]}
+                  style={{ height: 20 }}
+                  pointerEvents="none"
+                />
+              </View>
+
+              {/* Gradient fade above input bar */}
+              <LinearGradient
+                colors={["transparent", C.elevated]}
+                style={{
+                  position: "absolute",
+                  bottom: 56,
+                  left: 0,
+                  right: 0,
+                  height: 20,
+                  zIndex: 5,
+                }}
+                pointerEvents="none"
+              />
 
               {/* INPUT BAR — in flow at bottom of card, taller for easy touch */}
               <View
