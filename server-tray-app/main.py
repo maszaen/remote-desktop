@@ -13,7 +13,16 @@ import random
 import ctypes
 import queue as _stdlib_queue
 from typing import Optional, List
-from fastapi import FastAPI, Response, HTTPException, Depends, Header, UploadFile, File, Form
+from fastapi import (
+    FastAPI,
+    Response,
+    HTTPException,
+    Depends,
+    Header,
+    UploadFile,
+    File,
+    Form,
+)
 import time
 from pydantic import BaseModel
 from pystray import Icon, Menu, MenuItem
@@ -187,6 +196,7 @@ def get_volume_interface():
 class VolumeControl(BaseModel):
     volume: int
 
+
 class ClipboardRequest(BaseModel):
     content: str
 
@@ -235,32 +245,52 @@ def normalize_key(key: str) -> str:
 
 
 SHIFT_CHARS = {
-    '~': '`', '!': '1', '@': '2', '#': '3', '$': '4', '%': '5',
-    '^': '6', '&': '7', '*': '8', '(': '9', ')': '0', '_': '-',
-    '+': '=', '{': '[', '}': ']', '|': '\\', ':': ';', '"': "'",
-    '<': ',', '>': '.', '?': '/'
+    "~": "`",
+    "!": "1",
+    "@": "2",
+    "#": "3",
+    "$": "4",
+    "%": "5",
+    "^": "6",
+    "&": "7",
+    "*": "8",
+    "(": "9",
+    ")": "0",
+    "_": "-",
+    "+": "=",
+    "{": "[",
+    "}": "]",
+    "|": "\\",
+    ":": ";",
+    '"': "'",
+    "<": ",",
+    ">": ".",
+    "?": "/",
 }
+
 
 def tap_key(key: str, hold_ms: int = 30):
     k = normalize_key(key)
     if not k:
         return
-        
+
     if len(key) == 1:
         if key.isupper():
-            pydirectinput.keyDown('shift')
+            pydirectinput.keyDown("shift")
             pydirectinput.write(key.lower(), interval=0)
-            pydirectinput.keyUp('shift')
+            pydirectinput.keyUp("shift")
         elif key in SHIFT_CHARS:
-            pydirectinput.keyDown('shift')
+            pydirectinput.keyDown("shift")
             pydirectinput.write(SHIFT_CHARS[key], interval=0)
-            pydirectinput.keyUp('shift')
+            pydirectinput.keyUp("shift")
         else:
             pydirectinput.write(key, interval=0)
     else:
         pydirectinput.keyDown(k)
         time.sleep(clamp_ms(hold_ms) / 1000.0)
         pydirectinput.keyUp(k)
+
+
 def set_queue_state(**updates):
     with KEYBOARD_QUEUE_LOCK:
         KEYBOARD_QUEUE_STATE.update(updates)
@@ -345,7 +375,9 @@ def run_keyboard_queue(
             set_queue_state(step_end_ts=time.time() + (delay_ms / 1000.0))
             end_ts = time.time() + (delay_ms / 1000.0)
             while time.time() < end_ts and not KEYBOARD_QUEUE_STOP.is_set():
-                while KEYBOARD_QUEUE_PAUSE.is_set() and not KEYBOARD_QUEUE_STOP.is_set():
+                while (
+                    KEYBOARD_QUEUE_PAUSE.is_set() and not KEYBOARD_QUEUE_STOP.is_set()
+                ):
                     set_queue_state(paused=True, step_end_ts=None)
                     time.sleep(0.05)
                     end_ts += 0.05
@@ -714,9 +746,9 @@ def keyboard_realtime(req: RealtimeKeyboardRequest):
         if req.text is not None:
             for char in req.text:
                 if char.isupper():
-                    pydirectinput.keyDown('shift')
+                    pydirectinput.keyDown("shift")
                     pydirectinput.write(char.lower(), interval=0)
-                    pydirectinput.keyUp('shift')
+                    pydirectinput.keyUp("shift")
                 else:
                     pydirectinput.write(char, interval=0)
             return {"status": "success", "mode": "text", "length": len(req.text)}
@@ -972,6 +1004,7 @@ def get_stats():
 class ShortcutRequest(BaseModel):
     shortcut: str  # alt-tab, alt-shift-tab, ctrl-s, win-d
 
+
 # Precise key mapping using ctypes to avoid pyautogui generic key bugs
 # Map format: "key": (VirtualKeyCode, HardwareScanCode, IsExtendedKey)
 VK_MAP = {
@@ -1001,9 +1034,10 @@ VK_MAP = {
 KEYEVENTF_KEYUP = 0x0002
 KEYEVENTF_EXTENDEDKEY = 0x0001
 
+
 def execute_hotkey(*keys):
     pressed = []
-    
+
     # 1. Press each key sequentially, waiting before pressing the next
     for key in keys:
         mapping = VK_MAP.get(key)
@@ -1015,10 +1049,10 @@ def execute_hotkey(*keys):
             ctypes.windll.user32.keybd_event(vk, scan, flags, 0)
             pressed.append((vk, scan, ext))
             time.sleep(0.052)  # Delay between individual down strokes
-            
+
     # 2. Hold everything together slightly to ensure the OS registers the combo
     time.sleep(0.052)
-    
+
     # 3. Release in reverse order with delays
     for vk, scan, ext in reversed(pressed):
         flags = KEYEVENTF_KEYUP
@@ -1033,23 +1067,24 @@ def send_shortcut(req: ShortcutRequest):
     shortcut = req.shortcut.lower().strip()
     try:
         # Split shortcut string into individual keys
-        keys = shortcut.split('-')
-        
+        keys = shortcut.split("-")
+
         # Map common modifiers to their left-side equivalents
         modifier_map = {
             "ctrl": "ctrlleft",
             "alt": "altleft",
             "shift": "shiftleft",
-            "win": "winleft"
+            "win": "winleft",
         }
-        
+
         mapped_keys = [modifier_map.get(k, k) for k in keys]
-        
+
         # Unpack the mapped keys and pass them to execute_hotkey
         execute_hotkey(*mapped_keys)
         return {"status": "success", "shortcut": shortcut}
     except Exception as e:
         return {"error": str(e)}
+
 
 # ── Clipboard Sync ──
 @app.get("/clipboard", dependencies=[Depends(verify_pin)])
@@ -1060,6 +1095,7 @@ def get_clipboard():
     except Exception as e:
         print(f"[CLIPBOARD] Error reading: {e}")
         return {"error": str(e)}
+
 
 @app.post("/clipboard", dependencies=[Depends(verify_pin)])
 def set_clipboard(req: ClipboardRequest):
@@ -1180,21 +1216,27 @@ def _init_allowed_roots():
     for label, p in candidates:
         if os.path.isdir(p):
             ALLOWED_ROOTS[label] = os.path.realpath(p)
-            
+
     # Auto-detect Windows drives
     import string
+
     for letter in string.ascii_uppercase:
         drive = f"{letter}:\\"
         if os.path.exists(drive):
             try:
                 import ctypes
+
                 kernel32 = ctypes.windll.kernel32
                 volumeNameBuffer = ctypes.create_unicode_buffer(1024)
                 rc = kernel32.GetVolumeInformationW(
                     ctypes.c_wchar_p(drive),
                     volumeNameBuffer,
                     ctypes.sizeof(volumeNameBuffer),
-                    None, None, None, None, 0
+                    None,
+                    None,
+                    None,
+                    None,
+                    0,
                 )
                 if rc:
                     name = volumeNameBuffer.value
@@ -1204,6 +1246,7 @@ def _init_allowed_roots():
             except Exception:
                 label = f"Local Disk ({letter}:)"
             ALLOWED_ROOTS[label] = drive
+
 
 _init_allowed_roots()
 
@@ -1315,7 +1358,12 @@ async def files_upload(
         size = os.path.getsize(target)
     except Exception:
         size = 0
-    return {"status": "success", "path": target, "name": os.path.basename(target), "size": size}
+    return {
+        "status": "success",
+        "path": target,
+        "name": os.path.basename(target),
+        "size": size,
+    }
 
 
 # ── Pen Overlay (transparent click-through canvas) ──
@@ -1362,7 +1410,9 @@ def _overlay_worker(q, info):
         except Exception as e:
             print(f"[OVERLAY] click-through setup failed: {e}")
 
-        canvas = tk.Canvas(root, bg=TRANSPARENT_KEY, highlightthickness=0, cursor="none")
+        canvas = tk.Canvas(
+            root, bg=TRANSPARENT_KEY, highlightthickness=0, cursor="none"
+        )
         canvas.pack(fill="both", expand=True)
 
         info["width"] = sw
@@ -1398,7 +1448,10 @@ def _overlay_worker(q, info):
                     if last["pt"] is not None:
                         px, py = last["pt"]
                         canvas.create_line(
-                            px, py, x, y,
+                            px,
+                            py,
+                            x,
+                            y,
                             fill=color,
                             width=width_px,
                             capstyle=tk.ROUND,
@@ -1407,8 +1460,12 @@ def _overlay_worker(q, info):
                     else:
                         r = max(1, width_px / 2)
                         canvas.create_oval(
-                            x - r, y - r, x + r, y + r,
-                            fill=color, outline=color,
+                            x - r,
+                            y - r,
+                            x + r,
+                            y + r,
+                            fill=color,
+                            outline=color,
                         )
                 except tk.TclError:
                     # Window torn down mid-replay.
@@ -1483,7 +1540,12 @@ def _overlay_worker(q, info):
                             else:
                                 r = max(1, width_px / 2)
                                 canvas.create_oval(
-                                    x - r, y - r, x + r, y + r, fill=color, outline=color
+                                    x - r,
+                                    y - r,
+                                    x + r,
+                                    y + r,
+                                    fill=color,
+                                    outline=color,
                                 )
                             state["last_point"] = (x, y)
                         if msg.get("end"):
@@ -1680,6 +1742,15 @@ def setup_tray_icon():
             try:
                 import qrcode
                 import json
+                import tkinter as tk
+                from PIL import Image, ImageTk, ImageDraw
+                import ctypes
+                import math
+
+                W, H = 260, 260
+                TRANS = "#000001"
+                BORDER_TRACK = "#E5E7EB"
+                BORDER_ACTIVE = "#4F46E5"
 
                 payload = json.dumps(
                     {
@@ -1688,11 +1759,166 @@ def setup_tray_icon():
                         "hostname": socket.gethostname(),
                     }
                 )
-                qr = qrcode.QRCode(version=1, box_size=10, border=4)
+
+                QR_SZ = 220
+                R = 20
+
+                qr = qrcode.QRCode(version=1, box_size=10, border=3)
                 qr.add_data(payload)
                 qr.make(fit=True)
-                img = qr.make_image(fill_color="black", back_color="white")
-                img.show(title="Nexus PC Connect QR")
+                _raw = qr.make_image(fill_color="#000000", back_color="#FFFFFF")
+                qr_img = _raw.convert("RGBA").resize(
+                    (QR_SZ, QR_SZ), Image.Resampling.LANCZOS
+                )
+
+                scale = 4
+                mask_hr = Image.new("L", (QR_SZ * scale, QR_SZ * scale), 0)
+                draw_hr = ImageDraw.Draw(mask_hr)
+                draw_hr.rounded_rectangle(
+                    [0, 0, QR_SZ * scale, QR_SZ * scale], radius=R * scale, fill=255
+                )
+                mask = mask_hr.resize((QR_SZ, QR_SZ), Image.Resampling.LANCZOS)
+                qr_img.putalpha(mask)
+
+                root = tk.Tk()
+                root.overrideredirect(True)
+                root.attributes("-topmost", True)
+                try:
+                    root.wm_attributes("-transparentcolor", TRANS)
+                except Exception:
+                    pass
+                root.configure(bg=TRANS)
+
+                sw, sh = root.winfo_screenwidth(), root.winfo_screenheight()
+                root.geometry(f"{W}x{H}+{sw-W-24}+{sh-H-60}")
+
+                canvas = tk.Canvas(
+                    root, width=W, height=H, bg=TRANS, highlightthickness=0
+                )
+                canvas.pack()
+
+                qr_tk = ImageTk.PhotoImage(qr_img)
+                canvas.create_image(W // 2, H // 2, anchor="center", image=qr_tk)
+
+                def get_rounded_rect_points(x0, y0, x1, y1, r, num_points=400):
+                    w, h = x1 - x0, y1 - y0
+                    l_top, l_right, l_bottom, l_left = (
+                        w - 2 * r,
+                        h - 2 * r,
+                        w - 2 * r,
+                        h - 2 * r,
+                    )
+                    l_arc = (math.pi * r) / 2
+                    total_len = l_top + l_right + l_bottom + l_left + 4 * l_arc
+                    pts = []
+
+                    def add_seg(length, gen):
+                        n = max(2, int((length / total_len) * num_points))
+                        for i in range(n):
+                            pts.append(gen(i / (n - 1)))
+
+                    add_seg(l_top / 2, lambda t: (x0 + w / 2 + (l_top / 2) * t, y0))
+                    add_seg(
+                        l_arc,
+                        lambda t: (
+                            x1 - r + r * math.cos(math.radians(-90 + 90 * t)),
+                            y0 + r + r * math.sin(math.radians(-90 + 90 * t)),
+                        ),
+                    )
+                    add_seg(l_right, lambda t: (x1, y0 + r + l_right * t))
+                    add_seg(
+                        l_arc,
+                        lambda t: (
+                            x1 - r + r * math.cos(math.radians(0 + 90 * t)),
+                            y1 - r + r * math.sin(math.radians(0 + 90 * t)),
+                        ),
+                    )
+                    add_seg(l_bottom, lambda t: (x1 - r - l_bottom * t, y1))
+                    add_seg(
+                        l_arc,
+                        lambda t: (
+                            x0 + r + r * math.cos(math.radians(90 + 90 * t)),
+                            y1 - r + r * math.sin(math.radians(90 + 90 * t)),
+                        ),
+                    )
+                    add_seg(l_left, lambda t: (x0, y1 - r - l_left * t))
+                    add_seg(
+                        l_arc,
+                        lambda t: (
+                            x0 + r + r * math.cos(math.radians(180 + 90 * t)),
+                            y0 + r + r * math.sin(math.radians(180 + 90 * t)),
+                        ),
+                    )
+                    add_seg(l_top / 2, lambda t: (x0 + r + (l_top / 2) * t, y0))
+                    pts.append(pts[0])
+                    return pts
+
+                x0, y0 = (W - QR_SZ) // 2, (H - QR_SZ) // 2
+                x1, y1 = x0 + QR_SZ, y0 + QR_SZ
+                border_pts = get_rounded_rect_points(x0, y0, x1, y1, R, 400)
+                flat_all = [c for p in border_pts for c in p]
+
+                canvas.create_line(
+                    *flat_all,
+                    width=6,
+                    fill=BORDER_TRACK,
+                    joinstyle=tk.ROUND,
+                    capstyle=tk.ROUND,
+                )
+
+                loader_id = canvas.create_line(
+                    flat_all[0],
+                    flat_all[1],
+                    flat_all[2],
+                    flat_all[3],
+                    width=6,
+                    fill=BORDER_ACTIVE,
+                    joinstyle=tk.ROUND,
+                    capstyle=tk.ROUND,
+                )
+
+                TOTAL_MS = 10000
+                STEPS = len(border_pts)
+                TICK_MS = TOTAL_MS // STEPS
+
+                def _tick(n=0):
+                    if n >= len(border_pts) - 2:
+                        root.destroy()
+                        return
+
+                    sliced = border_pts[n:]
+                    flat_sliced = [c for p in sliced for c in p]
+                    if len(flat_sliced) >= 4:
+                        canvas.coords(loader_id, *flat_sliced)
+
+                    root.after(TICK_MS, _tick, n + 1)
+
+                root.after(TICK_MS, _tick, 1)
+
+                _d = {}
+
+                def _dp(e):
+                    _d["x"], _d["y"] = e.x, e.y
+
+                def _dm(e):
+                    if "x" in _d:
+                        setattr(root, "_dragged", True)
+                        root.geometry(
+                            f"+{root.winfo_x() + e.x - _d['x']}+{root.winfo_y() + e.y - _d['y']}"
+                        )
+
+                canvas.bind("<ButtonPress-1>", _dp)
+                canvas.bind("<B1-Motion>", _dm)
+                canvas.bind(
+                    "<ButtonRelease-1>",
+                    lambda e: (
+                        root.destroy()
+                        if getattr(root, "_dragged", False) is False
+                        else setattr(root, "_dragged", False)
+                    ),
+                )
+
+                root.mainloop()
             except Exception as e:
                 print(f"Error showing QR: {e}")
                 pass
@@ -1740,8 +1966,42 @@ def setup_tray_icon():
             winreg.SetValueEx(key, "NexusServer", 0, winreg.REG_SZ, f'"{exe_path}"')
         winreg.CloseKey(key)
 
+    def get_local_ip():
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(("8.8.8.8", 80))
+            ip = s.getsockname()[0]
+            s.close()
+            return ip
+        except Exception:
+            pass
+
+        try:
+            hostname = socket.gethostname()
+            ips = socket.gethostbyname_ex(hostname)[2]
+            for ip in ips:
+                if ip.startswith("192.168."):
+                    return ip
+            if ips:
+                return ips[0]
+        except Exception:
+            pass
+        return "127.0.0.1"
+
+    IP = get_local_ip()
+
     menu = Menu(
-        MenuItem("Status: Monitoring Local Network", lambda x: None, enabled=False),
+        MenuItem(
+            "Local Network Monitoring",
+            lambda x: None,
+            enabled=False,
+            checked=lambda item: True,
+        ),
+        MenuItem(
+            f"{IP} (8000)",
+            lambda x: None,
+            enabled=False,
+        ),
         Menu.SEPARATOR,
         MenuItem("Pair New Device (QR)", show_qr_code),
         MenuItem("Show Pairing OTP Code", show_pin_code),
@@ -1751,18 +2011,9 @@ def setup_tray_icon():
             toggle_autostart,
             checked=lambda item: is_autostart_enabled(),
         ),
-        MenuItem("Quit Backend", on_quit),
+        MenuItem("Turn-off Server", on_quit),
     )
     icon = Icon("PCRemote", image, "Nexus PC Controller Server", menu=menu)
-
-    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    try:
-        s.connect(("10.255.255.255", 1))
-        IP = s.getsockname()[0]
-    except:
-        IP = "127.0.0.1"
-    finally:
-        s.close()
 
     print(f"=====================================")
     print(f"NEXUS TRAY SERVER RUNNING")

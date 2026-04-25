@@ -2562,6 +2562,8 @@ function AppMain() {
             refreshing={refreshing}
             onRefresh={onRefresh}
             tintColor={C.primary}
+            colors={[C.primary]}
+            progressBackgroundColor={C.elevated}
           />
         }
       >
@@ -2835,24 +2837,10 @@ function AppMain() {
                   borderWidth: 1,
                   borderColor: C.border,
                   paddingHorizontal: SP.md,
-                  paddingVertical: SP.sm,
-                  paddingBottom: SP.xs,
+                  paddingTop: SP.md - 2,
+                  paddingBottom: 0,
                 }}
               >
-                <View style={s.procHeader}>
-                  {visibleApps.length > 5 && (
-                    <TouchableOpacity
-                      onPress={() => setShowAllProcesses(!showAllProcesses)}
-                      activeOpacity={0.7}
-                    >
-                      <Text style={s.procToggle}>
-                        {showAllProcesses
-                          ? "Show Less"
-                          : `View All (${visibleApps.length})`}
-                      </Text>
-                    </TouchableOpacity>
-                  )}
-                </View>
                 <View style={s.tableHead}>
                   <Text style={[s.thCell, { flex: 3 }]}>App</Text>
                   <Text style={[s.thCell, { flex: 1.5, textAlign: "right" }]}>
@@ -2860,6 +2848,7 @@ function AppMain() {
                   </Text>
                   <View style={{ width: 26 + SP.sm }} />
                 </View>
+
                 {(showAllProcesses ? visibleApps : visibleApps.slice(0, 5)).map(
                   (app) => {
                     const normalizedAppName = app.name
@@ -2953,6 +2942,20 @@ function AppMain() {
                     <Text style={s.placeholderText}>No visible apps</Text>
                   </View>
                 )}
+                <View style={s.procHeader}>
+                  {visibleApps.length > 5 && (
+                    <TouchableOpacity
+                      onPress={() => setShowAllProcesses(!showAllProcesses)}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={s.procToggle}>
+                        {showAllProcesses
+                          ? "Show Less"
+                          : `View All (${visibleApps.length})`}
+                      </Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
               </View>
             </>
           ) : (
@@ -4074,7 +4077,9 @@ function AppMain() {
                   </View>
                   <View style={{ flex: 1 }}>
                     <Text style={s.powerRowTitle}>F12</Text>
-                    <Text style={s.powerRowSub}>Inspect Element / DevTools</Text>
+                    <Text style={s.powerRowSub}>
+                      Inspect Element / DevTools
+                    </Text>
                   </View>
                 </TouchableOpacity>
                 <View style={[s.sep, { marginLeft: 56, marginVertical: 0 }]} />
@@ -5820,7 +5825,7 @@ const s = StyleSheet.create({
   hwValue: { fontSize: F.lg, fontWeight: "800" },
   hwTrack: {
     height: 3,
-    backgroundColor: C.elevated,
+    backgroundColor: C.border,
     borderRadius: R.full,
     overflow: "hidden",
   },
@@ -5894,9 +5899,15 @@ const s = StyleSheet.create({
     justifyContent: "space-between",
     alignItems: "center",
     marginBottom: SP.sm,
+    marginTop: SP.xs,
   },
   procTitle: { fontSize: F.md, fontWeight: "700", color: C.text },
-  procToggle: { fontSize: F.sm, color: C.primary, fontWeight: "700" },
+  procToggle: {
+    fontSize: F.sm,
+    color: C.primary,
+    fontWeight: "700",
+    marginBottom: SP.sm,
+  },
   tableHead: {
     flexDirection: "row",
     paddingBottom: SP.sm,
@@ -6057,7 +6068,7 @@ const s = StyleSheet.create({
   volBarWrap: {
     flex: 1,
     height: 8,
-    backgroundColor: C.elevated,
+    backgroundColor: C.border,
     borderRadius: R.full,
     overflow: "hidden",
   },
