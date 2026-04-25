@@ -1719,6 +1719,9 @@ def terminal_exec(req: TerminalExecRequest):
         parts = cmd.split(None, 1)
         target = parts[1].strip().strip('"').strip("'") if len(parts) > 1 else os.path.expanduser("~")
         try:
+            # Bare drive letter "D:" → "D:\" so we go to root, not last cwd on that drive
+            if len(target) == 2 and target[1] == ':' and target[0].isalpha():
+                target = target + '\\'
             new_cwd = os.path.normpath(os.path.join(cwd, target))
             if os.path.isdir(new_cwd):
                 with TERMINAL_CWD_LOCK:
