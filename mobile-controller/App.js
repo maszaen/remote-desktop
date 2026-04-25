@@ -5624,7 +5624,7 @@ function AppMain() {
                 colors={["transparent", C.elevated]}
                 style={{
                   position: "absolute",
-                  bottom: 56,
+                  bottom: 60,
                   left: 0,
                   right: 0,
                   height: 20,
@@ -5639,7 +5639,6 @@ function AppMain() {
                   flexDirection: "row",
                   alignItems: "center",
                   paddingHorizontal: SP.sm,
-                  paddingTop: SP.xs,
                   paddingBottom: SP.sm,
                 }}
               >
