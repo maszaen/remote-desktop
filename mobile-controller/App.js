@@ -3429,6 +3429,127 @@ function AppMain() {
                 }}
                 showsVerticalScrollIndicator={false}
               >
+                {/* ── System & Windows ── */}
+                <Text
+                  style={{
+                    fontSize: F.sm,
+                    fontWeight: "700",
+                    color: C.sub,
+                    marginTop: SP.sm,
+                    marginBottom: SP.xs,
+                    marginLeft: SP.md,
+                    textTransform: "uppercase",
+                    letterSpacing: 0.5,
+                  }}
+                >
+                  System & Windows
+                </Text>
+
+                <TouchableOpacity
+                  style={s.powerRow}
+                  onPress={() => sendShortcut("win")}
+                  activeOpacity={0.7}
+                >
+                  <View
+                    style={[s.powerRowIcon, { backgroundColor: C.primaryDim }]}
+                  >
+                    <Ionicons name="logo-windows" size={22} color={C.primary} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={s.powerRowTitle}>Windows</Text>
+                    <Text style={s.powerRowSub}>Show/Hide Start Menu</Text>
+                  </View>
+                </TouchableOpacity>
+                <View style={[s.sep, { marginLeft: 56, marginVertical: 0 }]} />
+
+                <TouchableOpacity
+                  style={s.powerRow}
+                  onPress={() => sendShortcut("win-d")}
+                  activeOpacity={0.7}
+                >
+                  <View
+                    style={[s.powerRowIcon, { backgroundColor: C.primaryDim }]}
+                  >
+                    <Ionicons
+                      name="desktop-outline"
+                      size={22}
+                      color={C.primary}
+                    />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={s.powerRowTitle}>Windows + D</Text>
+                    <Text style={s.powerRowSub}>
+                      Show Desktop or Minimize Apps
+                    </Text>
+                  </View>
+                </TouchableOpacity>
+                <View style={[s.sep, { marginLeft: 56, marginVertical: 0 }]} />
+
+                <TouchableOpacity
+                  style={s.powerRow}
+                  onPress={() => sendShortcut("win-a")}
+                  activeOpacity={0.7}
+                >
+                  <View
+                    style={[s.powerRowIcon, { backgroundColor: C.primaryDim }]}
+                  >
+                    <Ionicons
+                      name="options-outline"
+                      size={22}
+                      color={C.primary}
+                    />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={s.powerRowTitle}>Windows + A</Text>
+                    <Text style={s.powerRowSub}>Open Control Center</Text>
+                  </View>
+                </TouchableOpacity>
+                <View style={[s.sep, { marginLeft: 56, marginVertical: 0 }]} />
+
+                <TouchableOpacity
+                  style={s.powerRow}
+                  onPress={() => sendShortcut("win-n")}
+                  activeOpacity={0.7}
+                >
+                  <View
+                    style={[s.powerRowIcon, { backgroundColor: C.primaryDim }]}
+                  >
+                    <Ionicons
+                      name="notifications-outline"
+                      size={22}
+                      color={C.primary}
+                    />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={s.powerRowTitle}>Windows + N</Text>
+                    <Text style={s.powerRowSub}>Open Notification Panel</Text>
+                  </View>
+                </TouchableOpacity>
+                <View style={[s.sep, { marginLeft: 56, marginVertical: 0 }]} />
+
+                <TouchableOpacity
+                  style={s.powerRow}
+                  onPress={() => sendShortcut("win-tab")}
+                  activeOpacity={0.7}
+                >
+                  <View
+                    style={[s.powerRowIcon, { backgroundColor: C.primaryDim }]}
+                  >
+                    <Ionicons
+                      name="albums-outline"
+                      size={22}
+                      color={C.primary}
+                    />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={s.powerRowTitle}>Windows + Tab</Text>
+                    <Text style={s.powerRowSub}>
+                      Task View / Switch Workspaces
+                    </Text>
+                  </View>
+                </TouchableOpacity>
+                <View style={[s.sep, { marginLeft: 56, marginVertical: 0 }]} />
+
                 <TouchableOpacity
                   style={s.powerRow}
                   onPress={() => sendShortcut("alt-tab")}
@@ -3450,7 +3571,6 @@ function AppMain() {
                     </Text>
                   </View>
                 </TouchableOpacity>
-
                 <View style={[s.sep, { marginLeft: 56, marginVertical: 0 }]} />
 
                 <TouchableOpacity
@@ -3473,25 +3593,234 @@ function AppMain() {
                     <Text style={s.powerRowSub}>Switch to Previous App</Text>
                   </View>
                 </TouchableOpacity>
-
                 <View style={[s.sep, { marginLeft: 56, marginVertical: 0 }]} />
 
                 <TouchableOpacity
                   style={s.powerRow}
-                  onPress={() => sendShortcut("ctrl-shift-left")}
+                  onPress={() => sendShortcut("win-up")}
                   activeOpacity={0.7}
                 >
                   <View
                     style={[s.powerRowIcon, { backgroundColor: C.primaryDim }]}
                   >
-                    <Ionicons name="arrow-back" size={22} color={C.primary} />
+                    <Ionicons
+                      name="caret-up-circle-outline"
+                      size={22}
+                      color={C.primary}
+                    />
                   </View>
                   <View style={{ flex: 1 }}>
-                    <Text style={s.powerRowTitle}>Ctrl + Shift + Left</Text>
-                    <Text style={s.powerRowSub}>Select Text Left</Text>
+                    <Text style={s.powerRowTitle}>Windows + Up</Text>
+                    <Text style={s.powerRowSub}>Maximize Window</Text>
+                  </View>
+                </TouchableOpacity>
+                <View style={[s.sep, { marginLeft: 56, marginVertical: 0 }]} />
+
+                <TouchableOpacity
+                  style={s.powerRow}
+                  onPress={() => sendShortcut("win-down")}
+                  activeOpacity={0.7}
+                >
+                  <View
+                    style={[s.powerRowIcon, { backgroundColor: C.primaryDim }]}
+                  >
+                    <Ionicons
+                      name="caret-down-circle-outline"
+                      size={22}
+                      color={C.primary}
+                    />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={s.powerRowTitle}>Windows + Down</Text>
+                    <Text style={s.powerRowSub}>Minimize Window</Text>
+                  </View>
+                </TouchableOpacity>
+                <View style={[s.sep, { marginLeft: 56, marginVertical: 0 }]} />
+
+                <TouchableOpacity
+                  style={s.powerRow}
+                  onPress={() => sendShortcut("alt-f4")}
+                  activeOpacity={0.7}
+                >
+                  <View
+                    style={[s.powerRowIcon, { backgroundColor: C.dangerDim }]}
+                  >
+                    <Ionicons name="close-outline" size={22} color={C.danger} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={s.powerRowTitle}>Alt + F4</Text>
+                    <Text style={s.powerRowSub}>Close Window / App</Text>
                   </View>
                 </TouchableOpacity>
 
+                {/* ── Captures & Screen ── */}
+                <Text
+                  style={{
+                    fontSize: F.sm,
+                    fontWeight: "700",
+                    color: C.sub,
+                    marginTop: SP.lg,
+                    marginBottom: SP.xs,
+                    marginLeft: SP.md,
+                    textTransform: "uppercase",
+                    letterSpacing: 0.5,
+                  }}
+                >
+                  Captures & Screen
+                </Text>
+
+                <TouchableOpacity
+                  style={s.powerRow}
+                  onPress={() => sendShortcut("win-shift-s")}
+                  activeOpacity={0.7}
+                >
+                  <View
+                    style={[s.powerRowIcon, { backgroundColor: C.primaryDim }]}
+                  >
+                    <Ionicons name="crop-outline" size={22} color={C.primary} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={s.powerRowTitle}>Win + Shift + S</Text>
+                    <Text style={s.powerRowSub}>Take a Screenshot</Text>
+                  </View>
+                </TouchableOpacity>
+                <View style={[s.sep, { marginLeft: 56, marginVertical: 0 }]} />
+
+                <TouchableOpacity
+                  style={s.powerRow}
+                  onPress={() => sendShortcut("win-shift-r")}
+                  activeOpacity={0.7}
+                >
+                  <View
+                    style={[s.powerRowIcon, { backgroundColor: C.warningDim }]}
+                  >
+                    <Ionicons
+                      name="recording-outline"
+                      size={22}
+                      color={C.warning}
+                    />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={s.powerRowTitle}>Win + Shift + R</Text>
+                    <Text style={s.powerRowSub}>Record Screen</Text>
+                  </View>
+                </TouchableOpacity>
+
+                {/* ── Text & Editing ── */}
+                <Text
+                  style={{
+                    fontSize: F.sm,
+                    fontWeight: "700",
+                    color: C.sub,
+                    marginTop: SP.lg,
+                    marginBottom: SP.xs,
+                    marginLeft: SP.md,
+                    textTransform: "uppercase",
+                    letterSpacing: 0.5,
+                  }}
+                >
+                  Text & Editing
+                </Text>
+
+                <TouchableOpacity
+                  style={s.powerRow}
+                  onPress={() => sendShortcut("left")}
+                  activeOpacity={0.7}
+                >
+                  <View
+                    style={[s.powerRowIcon, { backgroundColor: C.primaryDim }]}
+                  >
+                    <Ionicons
+                      name="arrow-back-outline"
+                      size={22}
+                      color={C.primary}
+                    />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={s.powerRowTitle}>Left Arrow</Text>
+                    <Text style={s.powerRowSub}>Move Cursor Left</Text>
+                  </View>
+                </TouchableOpacity>
+                <View style={[s.sep, { marginLeft: 56, marginVertical: 0 }]} />
+
+                <TouchableOpacity
+                  style={s.powerRow}
+                  onPress={() => sendShortcut("right")}
+                  activeOpacity={0.7}
+                >
+                  <View
+                    style={[s.powerRowIcon, { backgroundColor: C.primaryDim }]}
+                  >
+                    <Ionicons
+                      name="arrow-forward-outline"
+                      size={22}
+                      color={C.primary}
+                    />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={s.powerRowTitle}>Right Arrow</Text>
+                    <Text style={s.powerRowSub}>Move Cursor Right</Text>
+                  </View>
+                </TouchableOpacity>
+                <View style={[s.sep, { marginLeft: 56, marginVertical: 0 }]} />
+
+                <TouchableOpacity
+                  style={s.powerRow}
+                  onPress={() => sendShortcut("up")}
+                  activeOpacity={0.7}
+                >
+                  <View
+                    style={[s.powerRowIcon, { backgroundColor: C.primaryDim }]}
+                  >
+                    <Ionicons
+                      name="arrow-up-outline"
+                      size={22}
+                      color={C.primary}
+                    />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={s.powerRowTitle}>Up Arrow</Text>
+                    <Text style={s.powerRowSub}>Move Cursor Up</Text>
+                  </View>
+                </TouchableOpacity>
+                <View style={[s.sep, { marginLeft: 56, marginVertical: 0 }]} />
+
+                <TouchableOpacity
+                  style={s.powerRow}
+                  onPress={() => sendShortcut("down")}
+                  activeOpacity={0.7}
+                >
+                  <View
+                    style={[s.powerRowIcon, { backgroundColor: C.primaryDim }]}
+                  >
+                    <Ionicons
+                      name="arrow-down-outline"
+                      size={22}
+                      color={C.primary}
+                    />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={s.powerRowTitle}>Down Arrow</Text>
+                    <Text style={s.powerRowSub}>Move Cursor Down</Text>
+                  </View>
+                </TouchableOpacity>
+                <View style={[s.sep, { marginLeft: 56, marginVertical: 0 }]} />
+
+                <TouchableOpacity
+                  style={s.powerRow}
+                  onPress={() => sendShortcut("ctrl-a")}
+                  activeOpacity={0.7}
+                >
+                  <View
+                    style={[s.powerRowIcon, { backgroundColor: C.primaryDim }]}
+                  >
+                    <Ionicons name="scan-outline" size={22} color={C.primary} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={s.powerRowTitle}>Ctrl + A</Text>
+                    <Text style={s.powerRowSub}>Select All</Text>
+                  </View>
+                </TouchableOpacity>
                 <View style={[s.sep, { marginLeft: 56, marginVertical: 0 }]} />
 
                 <TouchableOpacity
@@ -3509,74 +3838,66 @@ function AppMain() {
                     <Text style={s.powerRowSub}>Copy Selection</Text>
                   </View>
                 </TouchableOpacity>
-
                 <View style={[s.sep, { marginLeft: 56, marginVertical: 0 }]} />
 
                 <TouchableOpacity
                   style={s.powerRow}
-                  onPress={() => sendShortcut("ctrl-s")}
+                  onPress={() => sendShortcut("ctrl-shift-left")}
+                  activeOpacity={0.7}
+                >
+                  <View
+                    style={[s.powerRowIcon, { backgroundColor: C.primaryDim }]}
+                  >
+                    <Ionicons name="arrow-back" size={22} color={C.primary} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={s.powerRowTitle}>Ctrl + Shift + Left</Text>
+                    <Text style={s.powerRowSub}>Select Text Left</Text>
+                  </View>
+                </TouchableOpacity>
+                <View style={[s.sep, { marginLeft: 56, marginVertical: 0 }]} />
+
+                <TouchableOpacity
+                  style={s.powerRow}
+                  onPress={() => sendShortcut("tab")}
                   activeOpacity={0.7}
                 >
                   <View
                     style={[s.powerRowIcon, { backgroundColor: C.primaryDim }]}
                   >
                     <Ionicons
-                      name="cloud-done-outline"
+                      name="arrow-forward-circle-outline"
                       size={22}
                       color={C.primary}
                     />
                   </View>
                   <View style={{ flex: 1 }}>
-                    <Text style={s.powerRowTitle}>Ctrl + S</Text>
-                    <Text style={s.powerRowSub}>Save Current Progress</Text>
+                    <Text style={s.powerRowTitle}>Tab</Text>
+                    <Text style={s.powerRowSub}>Next Focus / Indent</Text>
                   </View>
                 </TouchableOpacity>
-
                 <View style={[s.sep, { marginLeft: 56, marginVertical: 0 }]} />
 
                 <TouchableOpacity
                   style={s.powerRow}
-                  onPress={() => {
-                    sendShortcut("win-d");
-                  }}
+                  onPress={() => sendShortcut("shift-tab")}
                   activeOpacity={0.7}
                 >
                   <View
                     style={[s.powerRowIcon, { backgroundColor: C.primaryDim }]}
                   >
                     <Ionicons
-                      name="desktop-outline"
+                      name="arrow-back-circle-outline"
                       size={22}
                       color={C.primary}
                     />
                   </View>
                   <View style={{ flex: 1 }}>
-                    <Text style={s.powerRowTitle}>Windows + D</Text>
-                    <Text style={s.powerRowSub}>
-                      Show Desktop or Minimize Apps
-                    </Text>
+                    <Text style={s.powerRowTitle}>Shift + Tab</Text>
+                    <Text style={s.powerRowSub}>Previous Focus / Unindent</Text>
                   </View>
                 </TouchableOpacity>
-                <View style={[s.sep, { marginLeft: 56 }]} />
-
-                <TouchableOpacity
-                  style={s.powerRow}
-                  onPress={() => {
-                    sendShortcut("win");
-                  }}
-                  activeOpacity={0.7}
-                >
-                  <View
-                    style={[s.powerRowIcon, { backgroundColor: C.primaryDim }]}
-                  >
-                    <Ionicons name="logo-windows" size={22} color={C.primary} />
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={s.powerRowTitle}>Windows</Text>
-                    <Text style={s.powerRowSub}>Show/Hide Start Menu</Text>
-                  </View>
-                </TouchableOpacity>
-                <View style={[s.sep, { marginLeft: 56 }]} />
+                <View style={[s.sep, { marginLeft: 56, marginVertical: 0 }]} />
 
                 <TouchableOpacity
                   style={s.powerRow}
@@ -3597,8 +3918,28 @@ function AppMain() {
                     <Text style={s.powerRowSub}>Submit / Next Line</Text>
                   </View>
                 </TouchableOpacity>
+                <View style={[s.sep, { marginLeft: 56, marginVertical: 0 }]} />
 
-                <View style={[s.sep, { marginLeft: 56 }]} />
+                <TouchableOpacity
+                  style={s.powerRow}
+                  onPress={() => sendShortcut("shift-enter")}
+                  activeOpacity={0.7}
+                >
+                  <View
+                    style={[s.powerRowIcon, { backgroundColor: C.primaryDim }]}
+                  >
+                    <Ionicons
+                      name="return-up-back-sharp"
+                      size={22}
+                      color={C.primary}
+                    />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={s.powerRowTitle}>Shift + Enter</Text>
+                    <Text style={s.powerRowSub}>Soft Line Break / Submit</Text>
+                  </View>
+                </TouchableOpacity>
+                <View style={[s.sep, { marginLeft: 56, marginVertical: 0 }]} />
 
                 <TouchableOpacity
                   style={s.powerRow}
@@ -3606,12 +3947,12 @@ function AppMain() {
                   activeOpacity={0.7}
                 >
                   <View
-                    style={[s.powerRowIcon, { backgroundColor: C.primaryDim }]}
+                    style={[s.powerRowIcon, { backgroundColor: C.warningDim }]}
                   >
                     <Ionicons
                       name="backspace-outline"
                       size={22}
-                      color={C.primary}
+                      color={C.warning}
                     />
                   </View>
                   <View style={{ flex: 1 }}>
@@ -3619,44 +3960,44 @@ function AppMain() {
                     <Text style={s.powerRowSub}>Delete Last Character</Text>
                   </View>
                 </TouchableOpacity>
-
-                <View style={[s.sep, { marginLeft: 56 }]} />
-
-                <TouchableOpacity
-                  style={s.powerRow}
-                  onPress={() => sendShortcut("ctrl-l")}
-                  activeOpacity={0.7}
-                >
-                  <View
-                    style={[s.powerRowIcon, { backgroundColor: C.primaryDim }]}
-                  >
-                    <Ionicons name="link-outline" size={22} color={C.primary} />
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={s.powerRowTitle}>Ctrl + L</Text>
-                    <Text style={s.powerRowSub}>Focus Link / URL Bar</Text>
-                  </View>
-                </TouchableOpacity>
-
-                <View style={[s.sep, { marginLeft: 56 }]} />
+                <View style={[s.sep, { marginLeft: 56, marginVertical: 0 }]} />
 
                 <TouchableOpacity
                   style={s.powerRow}
-                  onPress={() => sendShortcut("ctrl-a")}
+                  onPress={() => sendShortcut("ctrl-s")}
                   activeOpacity={0.7}
                 >
                   <View
-                    style={[s.powerRowIcon, { backgroundColor: C.primaryDim }]}
+                    style={[s.powerRowIcon, { backgroundColor: C.warningDim }]}
                   >
-                    <Ionicons name="scan-outline" size={22} color={C.primary} />
+                    <Ionicons
+                      name="cloud-done-outline"
+                      size={22}
+                      color={C.warning}
+                    />
                   </View>
                   <View style={{ flex: 1 }}>
-                    <Text style={s.powerRowTitle}>Ctrl + A</Text>
-                    <Text style={s.powerRowSub}>Select All</Text>
+                    <Text style={s.powerRowTitle}>Ctrl + S</Text>
+                    <Text style={s.powerRowSub}>Save Current Progress</Text>
                   </View>
                 </TouchableOpacity>
-
                 <View style={[s.sep, { marginLeft: 56 }]} />
+
+                {/* ── Browser & Tabs ── */}
+                <Text
+                  style={{
+                    fontSize: F.sm,
+                    fontWeight: "700",
+                    color: C.sub,
+                    marginTop: SP.lg,
+                    marginBottom: SP.xs,
+                    marginLeft: SP.md,
+                    textTransform: "uppercase",
+                    letterSpacing: 0.5,
+                  }}
+                >
+                  Browser & Tabs
+                </Text>
 
                 <TouchableOpacity
                   style={s.powerRow}
@@ -3677,8 +4018,24 @@ function AppMain() {
                     <Text style={s.powerRowSub}>Open New Tab</Text>
                   </View>
                 </TouchableOpacity>
+                <View style={[s.sep, { marginLeft: 56, marginVertical: 0 }]} />
 
-                <View style={[s.sep, { marginLeft: 56 }]} />
+                <TouchableOpacity
+                  style={s.powerRow}
+                  onPress={() => sendShortcut("ctrl-l")}
+                  activeOpacity={0.7}
+                >
+                  <View
+                    style={[s.powerRowIcon, { backgroundColor: C.primaryDim }]}
+                  >
+                    <Ionicons name="link-outline" size={22} color={C.primary} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={s.powerRowTitle}>Ctrl + L</Text>
+                    <Text style={s.powerRowSub}>Select Address Bar</Text>
+                  </View>
+                </TouchableOpacity>
+                <View style={[s.sep, { marginLeft: 56, marginVertical: 0 }]} />
 
                 <TouchableOpacity
                   style={s.powerRow}
@@ -3697,6 +4054,48 @@ function AppMain() {
                   <View style={{ flex: 1 }}>
                     <Text style={s.powerRowTitle}>Ctrl + Shift + T</Text>
                     <Text style={s.powerRowSub}>Restore Closed Tab</Text>
+                  </View>
+                </TouchableOpacity>
+                <View style={[s.sep, { marginLeft: 56, marginVertical: 0 }]} />
+
+                <TouchableOpacity
+                  style={s.powerRow}
+                  onPress={() => sendShortcut("f12")}
+                  activeOpacity={0.7}
+                >
+                  <View
+                    style={[s.powerRowIcon, { backgroundColor: C.primaryDim }]}
+                  >
+                    <Ionicons
+                      name="code-slash-outline"
+                      size={22}
+                      color={C.primary}
+                    />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={s.powerRowTitle}>F12</Text>
+                    <Text style={s.powerRowSub}>Inspect Element / DevTools</Text>
+                  </View>
+                </TouchableOpacity>
+                <View style={[s.sep, { marginLeft: 56, marginVertical: 0 }]} />
+
+                <TouchableOpacity
+                  style={s.powerRow}
+                  onPress={() => sendShortcut("ctrl-w")}
+                  activeOpacity={0.7}
+                >
+                  <View
+                    style={[s.powerRowIcon, { backgroundColor: C.warningDim }]}
+                  >
+                    <Ionicons
+                      name="close-circle-outline"
+                      size={22}
+                      color={C.warning}
+                    />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={s.powerRowTitle}>Ctrl + W</Text>
+                    <Text style={s.powerRowSub}>Close Current Tab</Text>
                   </View>
                 </TouchableOpacity>
               </ScrollView>

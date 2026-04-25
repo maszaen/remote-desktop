@@ -986,9 +986,17 @@ VK_MAP = {
     "d": (0x44, 0x20, 0),
     "l": (0x4C, 0x26, 0),
     "a": (0x41, 0x1E, 0),
+    "n": (0x4E, 0x31, 0),
+    "r": (0x52, 0x13, 0),
     "t": (0x54, 0x14, 0),
+    "w": (0x57, 0x11, 0),
     "enter": (0x0D, 0x1C, 0),
     "backspace": (0x08, 0x0E, 0),
+    "up": (0x26, 0x48, 1),
+    "down": (0x28, 0x50, 1),
+    "right": (0x27, 0x4D, 1),
+    "f4": (0x73, 0x3E, 0),
+    "f12": (0x7B, 0x58, 0),
 }
 KEYEVENTF_KEYUP = 0x0002
 KEYEVENTF_EXTENDEDKEY = 0x0001
@@ -1024,34 +1032,21 @@ def execute_hotkey(*keys):
 def send_shortcut(req: ShortcutRequest):
     shortcut = req.shortcut.lower().strip()
     try:
-        if shortcut == "alt-tab":
-            execute_hotkey("altleft", "tab")
-        elif shortcut == "alt-shift-tab":
-            execute_hotkey("altleft", "shiftleft", "tab")
-        elif shortcut == "ctrl-shift-left":
-            execute_hotkey("ctrlleft", "shiftleft", "left")
-        elif shortcut == "ctrl-c":
-            execute_hotkey("ctrlleft", "c")
-        elif shortcut == "ctrl-s":
-            execute_hotkey("ctrlleft", "s")
-        elif shortcut == "win-d":
-            execute_hotkey("winleft", "d")
-        elif shortcut == "win":
-            execute_hotkey("winleft")
-        elif shortcut == "enter":
-            execute_hotkey("enter")
-        elif shortcut == "backspace":
-            execute_hotkey("backspace")
-        elif shortcut == "ctrl-l":
-            execute_hotkey("ctrlleft", "l")
-        elif shortcut == "ctrl-a":
-            execute_hotkey("ctrlleft", "a")
-        elif shortcut == "ctrl-t":
-            execute_hotkey("ctrlleft", "t")
-        elif shortcut == "ctrl-shift-t":
-            execute_hotkey("ctrlleft", "shiftleft", "t")
-        else:
-            return {"error": f"Unknown shortcut: {shortcut}"}
+        # Split shortcut string into individual keys
+        keys = shortcut.split('-')
+        
+        # Map common modifiers to their left-side equivalents
+        modifier_map = {
+            "ctrl": "ctrlleft",
+            "alt": "altleft",
+            "shift": "shiftleft",
+            "win": "winleft"
+        }
+        
+        mapped_keys = [modifier_map.get(k, k) for k in keys]
+        
+        # Unpack the mapped keys and pass them to execute_hotkey
+        execute_hotkey(*mapped_keys)
         return {"status": "success", "shortcut": shortcut}
     except Exception as e:
         return {"error": str(e)}
@@ -1192,9 +1187,20 @@ def _init_allowed_roots():
         drive = f"{letter}:\\"
         if os.path.exists(drive):
             try:
-                import win32api
-                name = win32api.GetVolumeInformation(drive)[0]
-                label = f"{name} ({letter}:)" if name else f"Local Disk ({letter}:)"
+                import ctypes
+                kernel32 = ctypes.windll.kernel32
+                volumeNameBuffer = ctypes.create_unicode_buffer(1024)
+                rc = kernel32.GetVolumeInformationW(
+                    ctypes.c_wchar_p(drive),
+                    volumeNameBuffer,
+                    ctypes.sizeof(volumeNameBuffer),
+                    None, None, None, None, 0
+                )
+                if rc:
+                    name = volumeNameBuffer.value
+                    label = f"{name} ({letter}:)" if name else f"Local Disk ({letter}:)"
+                else:
+                    label = f"Local Disk ({letter}:)"
             except Exception:
                 label = f"Local Disk ({letter}:)"
             ALLOWED_ROOTS[label] = drive
