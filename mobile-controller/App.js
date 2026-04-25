@@ -29,6 +29,7 @@ import { CameraView, useCameraPermissions } from "expo-camera";
 import { LinearGradient } from "expo-linear-gradient";
 import * as Clipboard from "expo-clipboard";
 import * as DocumentPicker from "expo-document-picker";
+import * as ScreenOrientation from "expo-screen-orientation";
 import {
   GestureHandlerRootView,
   GestureDetector,
@@ -2050,6 +2051,16 @@ function AppMain() {
   }, [imageModalOpen, liveScreenActive]);
 
   useEffect(() => {
+    if (imageModalOpen) {
+      ScreenOrientation.unlockAsync();
+    } else {
+      ScreenOrientation.lockAsync(
+        ScreenOrientation.OrientationLock.PORTRAIT_UP,
+      );
+    }
+  }, [imageModalOpen]);
+
+  useEffect(() => {
     if (!keyboardSheetOpen) {
       Keyboard.dismiss();
       setQueueInput("");
@@ -2838,7 +2849,7 @@ function AppMain() {
                   borderColor: C.border,
                   paddingHorizontal: SP.md,
                   paddingTop: SP.md - 2,
-                  paddingBottom: 0,
+                  paddingBottom: SP.sm - 2,
                 }}
               >
                 <View style={s.tableHead}>
@@ -2942,8 +2953,8 @@ function AppMain() {
                     <Text style={s.placeholderText}>No visible apps</Text>
                   </View>
                 )}
-                <View style={s.procHeader}>
-                  {visibleApps.length > 5 && (
+                {visibleApps.length > 5 && (
+                  <View style={s.procHeader}>
                     <TouchableOpacity
                       onPress={() => setShowAllProcesses(!showAllProcesses)}
                       activeOpacity={0.7}
@@ -2954,8 +2965,8 @@ function AppMain() {
                           : `View All (${visibleApps.length})`}
                       </Text>
                     </TouchableOpacity>
-                  )}
-                </View>
+                  </View>
+                )}
               </View>
             </>
           ) : (
@@ -5898,7 +5909,6 @@ const s = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    marginBottom: SP.sm,
     marginTop: SP.xs,
   },
   procTitle: { fontSize: F.md, fontWeight: "700", color: C.text },
