@@ -108,6 +108,10 @@ APP_LAUNCH_TARGETS = {
         "label": "Google Chrome",
         "target": "chrome",
     },
+    "affinity_designer": {
+        "label": "Affinity Designer",
+        "target": "shell:AppsFolder\\Canva.Affinity_8a0j1tnjnt4a4!Canva.Affinity",
+    },
 }
 
 

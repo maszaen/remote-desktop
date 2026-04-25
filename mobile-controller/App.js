@@ -85,6 +85,10 @@ const APP_ICONS = {
   spotify: { src: require("./assets/icon/spotify.png"), needCircle: true },
   steam: { src: require("./assets/icon/steam.jpeg"), needCircle: true },
   vscode: { src: require("./assets/icon/vscode.png"), needCircle: false },
+  affinity_designer: {
+    src: require("./assets/icon/affinity.png"),
+    needCircle: true,
+  },
 };
 
 // ─── ROOT / FOLDER ICON & COLOR MAPS ──────────────────────────────────────────
@@ -308,6 +312,7 @@ const ZoomableImage = ({
 }) => {
   const scale = useSharedValue(MIN_SCALE);
   const savedScale = useSharedValue(MIN_SCALE);
+  const [prevUri, setPrevUri] = useState(uri);
 
   const offsetBaseX = useSharedValue(0);
   const offsetBaseY = useSharedValue(0);
@@ -419,6 +424,7 @@ const ZoomableImage = ({
 
   const panGesture = Gesture.Pan()
     .averageTouches(true)
+    .minPointers(penMode ? 2 : 1)
     .onStart((e) => {
       cancelAnimation(offsetBaseX);
       cancelAnimation(offsetBaseY);
@@ -593,7 +599,7 @@ const ZoomableImage = ({
     });
 
   const composedGestures = penMode
-    ? Gesture.Simultaneous(pinchGesture, drawGesture)
+    ? Gesture.Simultaneous(pinchGesture, panGesture, drawGesture)
     : Gesture.Race(
         doubleTapGesture,
         Gesture.Simultaneous(pinchGesture, panGesture),
@@ -616,6 +622,19 @@ const ZoomableImage = ({
         ]}
       >
         <AnimatedRe.View style={animStyle}>
+          {prevUri && prevUri !== uri && (
+            <Image
+              source={{ uri: prevUri }}
+              style={{
+                position: "absolute",
+                width: IMG_W,
+                height: IMG_H,
+                borderRadius: R.md,
+              }}
+              resizeMode="contain"
+              fadeDuration={0}
+            />
+          )}
           <Image
             source={{ uri }}
             style={{ width: IMG_W, height: IMG_H, borderRadius: R.md }}
@@ -623,6 +642,7 @@ const ZoomableImage = ({
             fadeDuration={hasLoadedRef.current ? 0 : 300}
             onLoad={() => {
               hasLoadedRef.current = true;
+              setPrevUri(uri);
             }}
           />
           {/* Local pen canvas — renders completed strokes + the in-progress
@@ -2103,7 +2123,12 @@ function AppMain() {
     Chrome: "Google Chrome",
     Taskmgr: "Task Manager",
     Antigravity: "Google Antigravity",
-    "POWERPOINT.EXE": "Microsoft Powerpoint",
+    Pwsh: "Windows PowerShell",
+    Affinity: "Affinity Designer",
+    Obs64: "OBS Studio",
+    Zoom: "Zoom Workplace",
+    WindowsTerminal: "Command Prompt",
+    "POWERPOINT.EXE": "Microsoft PowerPoint",
     "ONENOTE.EXE": "Microsoft OneNote",
     Msedge: "Microsoft Edge",
   };
