@@ -1908,7 +1908,7 @@ function AppMain() {
   const terminalExec = async (cmd) => {
     if (!cmd.trim() || terminalRunning) return;
     setTerminalRunning(true);
-    setTerminalHistory((h) => [...h, { type: "cmd", text: cmd }]);
+    setTerminalHistory((h) => [...h, { type: "cmd", text: cmd, cwd: terminalCwd }]);
     setTerminalInput("");
     try {
       const r = await sendAction("/terminal/exec", "POST", { command: cmd });
@@ -5384,7 +5384,7 @@ function AppMain() {
       >
         <KeyboardAvoidingView
           style={{ flex: 1, backgroundColor: C.bg }}
-          behavior={Platform.OS === "ios" ? "padding" : "height"}
+          behavior="padding"
           keyboardVerticalOffset={keyboardModalTopInset}
         >
           {/* HEADER — title, cwd path, and clear action */}
@@ -5510,7 +5510,7 @@ function AppMain() {
                         marginRight: SP.xs,
                       }}
                     >
-                      PS&gt;
+                      {entry.cwd ? `PS ${entry.cwd}>` : "PS>"}
                     </Text>
                     <Text
                       selectable
@@ -5567,52 +5567,35 @@ function AppMain() {
             )}
           </ScrollView>
 
-          {/* INPUT BAR — fixed at bottom, follows keyboard */}
+          {/* INPUT BAR — clustrix ChatInput style, no prefix in form */}
           <View
             style={{
-              flexDirection: "row",
-              alignItems: "center",
               paddingHorizontal: SP.md,
-              paddingVertical: SP.sm,
-              paddingBottom:
-                Platform.OS === "ios" ? SP.lg : SP.sm,
+              paddingTop: SP.xs,
+              paddingBottom: SP.md,
               backgroundColor: C.bg,
             }}
           >
-            {/* Input container */}
             <View
               style={{
-                flex: 1,
                 flexDirection: "row",
                 alignItems: "center",
                 backgroundColor: C.elevated,
-                borderRadius: R.lg,
+                borderRadius: 22,
                 borderWidth: 1,
                 borderColor: C.border,
-                paddingLeft: SP.sm + 2,
-                paddingRight: SP.xs,
+                paddingVertical: 4,
+                paddingLeft: 13,
+                paddingRight: 4,
               }}
             >
-              <Text
-                style={{
-                  fontFamily:
-                    Platform.OS === "ios" ? "Menlo" : "monospace",
-                  fontSize: F.xs,
-                  color: C.primary,
-                  marginRight: SP.xs,
-                }}
-              >
-                PS&gt;
-              </Text>
               <TextInput
                 style={{
                   flex: 1,
-                  fontFamily:
-                    Platform.OS === "ios" ? "Menlo" : "monospace",
-                  fontSize: F.md,
                   color: C.text,
-                  paddingVertical:
-                    Platform.OS === "ios" ? SP.sm + 2 : SP.sm,
+                  fontSize: F.md,
+                  paddingVertical: 3,
+                  lineHeight: 20,
                 }}
                 value={terminalInput}
                 onChangeText={setTerminalInput}
@@ -5625,33 +5608,30 @@ function AppMain() {
                 onSubmitEditing={() => terminalExec(terminalInput)}
                 blurOnSubmit={false}
               />
+              <TouchableOpacity
+                style={{
+                  width: 34,
+                  height: 34,
+                  borderRadius: 28,
+                  backgroundColor: terminalInput.trim()
+                    ? C.primary
+                    : C.surface,
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+                onPress={() => terminalExec(terminalInput)}
+                disabled={!terminalInput.trim() || terminalRunning}
+                activeOpacity={0.7}
+              >
+                <Ionicons
+                  name={
+                    terminalRunning ? "hourglass-outline" : "arrow-up"
+                  }
+                  size={18}
+                  color={terminalInput.trim() ? "#fff" : C.muted}
+                />
+              </TouchableOpacity>
             </View>
-
-            {/* Send button */}
-            <TouchableOpacity
-              style={{
-                marginLeft: SP.sm,
-                width: 40,
-                height: 40,
-                borderRadius: 20,
-                backgroundColor: terminalInput.trim()
-                  ? C.primary
-                  : C.elevated,
-                alignItems: "center",
-                justifyContent: "center",
-              }}
-              onPress={() => terminalExec(terminalInput)}
-              disabled={!terminalInput.trim() || terminalRunning}
-              activeOpacity={0.7}
-            >
-              <Ionicons
-                name={
-                  terminalRunning ? "hourglass-outline" : "arrow-up"
-                }
-                size={18}
-                color={terminalInput.trim() ? "#fff" : C.muted}
-              />
-            </TouchableOpacity>
           </View>
         </KeyboardAvoidingView>
       </SlideLeftModal>
