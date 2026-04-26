@@ -2317,6 +2317,7 @@ function AppMain() {
   const ACTIVE_WINDOW_LABEL_MAP = {
     "System tray overflow window.": "System tray",
     "Program Manager": "Desktop",
+    "tk": "Nexus QR Code",
   };
 
   // Easy-to-edit display name mapping for process/app names.
