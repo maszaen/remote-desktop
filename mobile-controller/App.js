@@ -2073,7 +2073,7 @@ function AppMain() {
     const remoteUrl = `${serverUrl}/files/download?token=${encodeURIComponent(
       deviceId,
     )}&path=${encodeURIComponent(entry.path)}`;
-    const localUri = FileSystem.cacheDirectory + fileName;
+    const localUri = FileSystem.cacheDirectory + encodeURIComponent(fileName);
 
     setDownloadState({
       active: true,
@@ -2120,10 +2120,14 @@ function AppMain() {
 
       const canShare = await Sharing.isAvailableAsync();
       if (canShare) {
-        await Sharing.shareAsync(result.uri, {
-          mimeType: "application/octet-stream",
-          dialogTitle: `Save ${fileName}`,
-        });
+        try {
+          await Sharing.shareAsync(result.uri, {
+            mimeType: "application/octet-stream",
+            dialogTitle: `Save ${fileName}`,
+          });
+        } catch (_shareErr) {
+          // Sharing failed but download succeeded — don't overwrite done state
+        }
       }
     } catch (e) {
       downloadResumableRef.current = null;
