@@ -21,7 +21,6 @@ import {
   Easing,
   BackHandler,
   Pressable,
-  Linking,
   useWindowDimensions,
 } from "react-native";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
@@ -31,6 +30,8 @@ import { LinearGradient } from "expo-linear-gradient";
 import * as Clipboard from "expo-clipboard";
 import * as DocumentPicker from "expo-document-picker";
 import * as ScreenOrientation from "expo-screen-orientation";
+import * as FileSystem from "expo-file-system";
+import * as Sharing from "expo-sharing";
 import {
   GestureHandlerRootView,
   GestureDetector,
@@ -1197,6 +1198,17 @@ function AppMain() {
   const [filesLoading, setFilesLoading] = useState(false);
   const [filesUploading, setFilesUploading] = useState(false);
 
+  // Download progress state
+  const [downloadState, setDownloadState] = useState({
+    active: false,
+    fileName: "",
+    fileSize: 0,
+    progress: 0,
+    done: false,
+    error: null,
+  });
+  const downloadResumableRef = useRef(null);
+
   // Pen overlay (annotation on PC monitor)
   const [penModeActive, setPenModeActive] = useState(false);
   const [penStarting, setPenStarting] = useState(false);
@@ -2056,11 +2068,102 @@ function AppMain() {
     }
   };
 
-  const downloadFile = (entry) => {
-    const url = `${serverUrl}/files/download?token=${encodeURIComponent(
+  const downloadFile = async (entry) => {
+    const fileName = entry.name || "file";
+    const remoteUrl = `${serverUrl}/files/download?token=${encodeURIComponent(
       deviceId,
     )}&path=${encodeURIComponent(entry.path)}`;
-    Linking.openURL(url).catch((e) => Alert.alert("Download Error", e.message));
+    const localUri = FileSystem.cacheDirectory + fileName;
+
+    setDownloadState({
+      active: true,
+      fileName,
+      fileSize: entry.size || 0,
+      progress: 0,
+      done: false,
+      error: null,
+    });
+
+    try {
+      const onProgress = ({ totalBytesWritten, totalBytesExpectedToWrite }) => {
+        const pct =
+          totalBytesExpectedToWrite > 0
+            ? totalBytesWritten / totalBytesExpectedToWrite
+            : 0;
+        setDownloadState((prev) => ({ ...prev, progress: pct }));
+      };
+
+      const resumable = FileSystem.createDownloadResumable(
+        remoteUrl,
+        localUri,
+        {},
+        onProgress,
+      );
+      downloadResumableRef.current = resumable;
+
+      const result = await resumable.downloadAsync();
+      downloadResumableRef.current = null;
+
+      if (!result || !result.uri) {
+        setDownloadState((prev) => ({
+          ...prev,
+          error: "Download failed — no file returned.",
+        }));
+        return;
+      }
+
+      setDownloadState((prev) => ({
+        ...prev,
+        progress: 1,
+        done: true,
+      }));
+
+      const canShare = await Sharing.isAvailableAsync();
+      if (canShare) {
+        await Sharing.shareAsync(result.uri, {
+          mimeType: "application/octet-stream",
+          dialogTitle: `Save ${fileName}`,
+        });
+      }
+    } catch (e) {
+      downloadResumableRef.current = null;
+      if (e.message?.includes("aborted") || e.message?.includes("cancel")) {
+        setDownloadState((prev) => ({ ...prev, active: false }));
+        return;
+      }
+      setDownloadState((prev) => ({
+        ...prev,
+        error: e.message || "Download failed.",
+      }));
+    }
+  };
+
+  const cancelDownload = async () => {
+    try {
+      if (downloadResumableRef.current) {
+        await downloadResumableRef.current.pauseAsync();
+        downloadResumableRef.current = null;
+      }
+    } catch (_) {}
+    setDownloadState({
+      active: false,
+      fileName: "",
+      fileSize: 0,
+      progress: 0,
+      done: false,
+      error: null,
+    });
+  };
+
+  const dismissDownloadModal = () => {
+    setDownloadState({
+      active: false,
+      fileName: "",
+      fileSize: 0,
+      progress: 0,
+      done: false,
+      error: null,
+    });
   };
 
   const uploadFileToCurrent = async () => {
@@ -2541,28 +2644,31 @@ function AppMain() {
           visible={renameTarget !== null}
           transparent
           animationType="fade"
-          onRequestClose={() => setRenameTarget(null)}
+          onRequestClose={() => {
+            setRenameTarget(null);
+            setRenameValue("");
+          }}
         >
           <KeyboardAvoidingView
             behavior={Platform.OS === "ios" ? "padding" : "height"}
             style={s.modalOverlay}
           >
+            <Pressable
+              style={StyleSheet.absoluteFill}
+              onPress={() => {
+                Keyboard.dismiss();
+                setRenameTarget(null);
+                setRenameValue("");
+              }}
+            />
             <View style={s.modalBox}>
               <View style={[s.modalIcon, { backgroundColor: C.primaryDim }]}>
-                <Ionicons name="create" size={22} color={C.primary} />
+                <Ionicons name="create" size={24} color={C.primary} />
               </View>
               <Text style={s.modalTitle}>Rename Device</Text>
               <Text style={s.modalSub}>{renameTarget?.ip}</Text>
               <TextInput
-                style={[
-                  s.pinInput,
-                  {
-                    fontSize: 16,
-                    letterSpacing: 0,
-                    borderColor: C.primary,
-                    color: C.text,
-                  },
-                ]}
+                style={s.modalInput}
                 value={renameValue}
                 onChangeText={setRenameValue}
                 placeholder="e.g. My Desktop"
@@ -2641,15 +2747,26 @@ function AppMain() {
           visible={pairingModalOpen}
           transparent
           animationType="fade"
-          onRequestClose={() => setPairingModalOpen(false)}
+          onRequestClose={() => {
+            setPairingModalOpen(false);
+            setInputPin("");
+          }}
         >
           <KeyboardAvoidingView
             behavior={Platform.OS === "ios" ? "padding" : "height"}
             style={s.modalOverlay}
           >
+            <Pressable
+              style={StyleSheet.absoluteFill}
+              onPress={() => {
+                Keyboard.dismiss();
+                setPairingModalOpen(false);
+                setInputPin("");
+              }}
+            />
             <View style={s.modalBox}>
               <View style={[s.modalIcon, { backgroundColor: C.warningDim }]}>
-                <Ionicons name="lock-closed" size={22} color={C.warning} />
+                <Ionicons name="lock-closed" size={24} color={C.warning} />
               </View>
               <Text style={s.modalTitle}>Pairing Required</Text>
               <Text style={s.modalSub}>
@@ -5772,6 +5889,126 @@ function AppMain() {
         </View>
       </SlideLeftModal>
 
+      {/* ═══ DOWNLOAD PROGRESS MODAL ═══ */}
+      <Modal
+        visible={downloadState.active}
+        transparent
+        animationType="fade"
+        onRequestClose={() => {
+          if (downloadState.done || downloadState.error) dismissDownloadModal();
+          else cancelDownload();
+        }}
+      >
+        <View style={s.modalOverlay}>
+          <View style={s.modalBox}>
+            <View
+              style={[
+                s.modalIcon,
+                {
+                  backgroundColor: downloadState.error
+                    ? C.dangerDim
+                    : downloadState.done
+                      ? C.successDim
+                      : C.primaryDim,
+                },
+              ]}
+            >
+              <Ionicons
+                name={
+                  downloadState.error
+                    ? "alert-circle"
+                    : downloadState.done
+                      ? "checkmark-circle"
+                      : "arrow-down-circle"
+                }
+                size={24}
+                color={
+                  downloadState.error
+                    ? C.danger
+                    : downloadState.done
+                      ? C.success
+                      : C.primary
+                }
+              />
+            </View>
+            <Text style={s.modalTitle}>
+              {downloadState.error
+                ? "Download Failed"
+                : downloadState.done
+                  ? "Download Complete"
+                  : "Downloading"}
+            </Text>
+            <Text
+              style={[s.modalSub, { marginBottom: SP.md }]}
+              numberOfLines={2}
+            >
+              {downloadState.fileName}
+              {downloadState.fileSize > 0
+                ? ` · ${formatBytes(downloadState.fileSize)}`
+                : ""}
+            </Text>
+
+            {downloadState.error ? (
+              <Text
+                style={{
+                  fontSize: F.sm,
+                  color: C.danger,
+                  textAlign: "center",
+                  marginBottom: SP.lg,
+                }}
+              >
+                {downloadState.error}
+              </Text>
+            ) : (
+              <View style={{ width: "100%", marginBottom: SP.lg }}>
+                <View
+                  style={{
+                    height: 6,
+                    backgroundColor: C.border,
+                    borderRadius: 3,
+                    overflow: "hidden",
+                  }}
+                >
+                  <AnimatedProgressBar
+                    percent={downloadState.progress * 100}
+                    color={downloadState.done ? C.success : C.primary}
+                    style={{ height: 6, borderRadius: 3 }}
+                  />
+                </View>
+                <Text
+                  style={{
+                    fontSize: F.xs,
+                    color: C.muted,
+                    textAlign: "right",
+                    marginTop: SP.xs,
+                  }}
+                >
+                  {Math.round(downloadState.progress * 100)}%
+                </Text>
+              </View>
+            )}
+
+            <View style={s.modalBtnRow}>
+              {downloadState.done || downloadState.error ? (
+                <TouchableOpacity
+                  style={[s.btnPrimary, { flex: 1 }]}
+                  onPress={dismissDownloadModal}
+                >
+                  <Text style={s.btnPrimaryText}>Done</Text>
+                </TouchableOpacity>
+              ) : (
+                <TouchableOpacity
+                  style={[s.btnSecondary, { flex: 1 }]}
+                  onPress={cancelDownload}
+                >
+                  <Text style={s.btnSecondaryText}>Cancel</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          </View>
+        </View>
+      </Modal>
+
       {/* ═══ IMAGE DETAIL MODAL ═══ */}
       <Modal
         visible={imageModalOpen}
@@ -6127,12 +6364,12 @@ const s = StyleSheet.create({
   // ── Modals ──
   modalOverlay: {
     flex: 1,
-    backgroundColor: "rgba(0,0,0,0.85)",
+    backgroundColor: "rgba(0,0,0,0.7)",
     justifyContent: "center",
     padding: SP.lg,
   },
   modalBox: {
-    backgroundColor: C.elevated,
+    backgroundColor: C.surface,
     borderRadius: R.xl,
     padding: SP.xl,
     alignItems: "center",
@@ -6140,9 +6377,9 @@ const s = StyleSheet.create({
     borderColor: C.border,
   },
   modalIcon: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
+    width: 52,
+    height: 52,
+    borderRadius: 26,
     justifyContent: "center",
     alignItems: "center",
     marginBottom: SP.md,
@@ -6155,10 +6392,24 @@ const s = StyleSheet.create({
   },
   modalSub: {
     fontSize: F.sm,
-    color: C.muted,
+    color: C.sub,
     textAlign: "center",
     marginBottom: SP.lg,
     lineHeight: 20,
+  },
+  modalInput: {
+    width: "100%",
+    height: 52,
+    backgroundColor: C.elevated,
+    borderRadius: R.md,
+    borderWidth: 1.5,
+    borderColor: C.primary,
+    fontSize: F.md,
+    fontWeight: "600",
+    textAlign: "left",
+    paddingHorizontal: SP.md,
+    marginBottom: SP.lg,
+    color: C.text,
   },
   pinInput: {
     width: "100%",
