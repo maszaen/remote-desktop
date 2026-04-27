@@ -28,6 +28,7 @@ import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import { LinearGradient } from "expo-linear-gradient";
+import UIDialog from "./components/UIDialog";
 import * as Clipboard from "expo-clipboard";
 import * as DocumentPicker from "expo-document-picker";
 import * as ScreenOrientation from "expo-screen-orientation";
@@ -1158,6 +1159,12 @@ function AppMain() {
   const [isCapturing, setIsCapturing] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [loadingAction, setLoadingAction] = useState("");
+
+  // --- CUSTOM DIALOG STATE ---
+  const [appDialog, setAppDialog] = useState({ visible: false });
+  const showDialog = (config) => setAppDialog({ visible: true, ...config });
+  const closeDialog = () => setAppDialog((prev) => ({ ...prev, visible: false }));
+
   const [imageModalOpen, setImageModalOpen] = useState(false);
   const [hiResImage, setHiResImage] = useState(null);
   const [hiResLoading, setHiResLoading] = useState(false);
@@ -1263,32 +1270,59 @@ function AppMain() {
   // ── Storage ──────────────────────────────────────────────────
   const saveDevice = async (ip, hostname, pin) => {
     try {
-      const newDev = { ip, hostname, pin, lastSeen: Date.now() };
-      const updated = [newDev, ...savedDevices.filter((d) => d.ip !== ip)];
+      let currentDevices = savedDevices;
+      const targetHostname = hostname || ip;
+      
+      const existing = currentDevices.find((d) => (d.hostname || d.ip) === targetHostname);
+      let ips = existing && existing.ips ? [...existing.ips] : existing ? [existing.ip] : [];
+      
+      // Ensure the new IP is at the front of the list
+      ips = ips.filter((existingIp) => existingIp !== ip);
+      ips.unshift(ip);
+      
+      // Limit to 5 mostly recently used IPs
+      ips = ips.slice(0, 5);
+
+      const newDev = { 
+        ip, // Keep the latest primary IP for UI display
+        hostname: targetHostname, 
+        pin, 
+        ips, 
+        lastSeen: Date.now() 
+      };
+
+      const updated = [newDev, ...currentDevices.filter((d) => (d.hostname || d.ip) !== targetHostname)];
       setSavedDevices(updated);
       await AsyncStorage.setItem("nexus_devices_v2", JSON.stringify(updated));
     } catch (e) {}
   };
-  const removeSavedDevice = async (ip) => {
-    const updated = savedDevices.filter((d) => d.ip !== ip);
+
+  const removeSavedDevice = async (hostnameOrIp) => {
+    const updated = savedDevices.filter((d) => (d.hostname || d.ip) !== hostnameOrIp);
     setSavedDevices(updated);
     await AsyncStorage.setItem("nexus_devices_v2", JSON.stringify(updated));
   };
-  const renameSavedDevice = async (ip, newName) => {
+
+  const renameSavedDevice = async (hostname, newName) => {
     const updated = savedDevices.map((d) =>
-      d.ip === ip ? { ...d, hostname: newName } : d,
+      (d.hostname || d.ip) === hostname ? { ...d, hostname: newName } : d,
     );
     setSavedDevices(updated);
     await AsyncStorage.setItem("nexus_devices_v2", JSON.stringify(updated));
   };
+
   const handleDeviceLongPress = (dev) => {
-    Alert.alert(dev.hostname || dev.ip, `IP: ${dev.ip}`, [
-      { text: "Cancel", style: "cancel" },
-      {
-        text: "Rename",
-        onPress: () =>
-          Alert.prompt
-            ? Alert.prompt(
+    showDialog({
+      title: dev.hostname || dev.ip,
+      message: `Known IPs: ${(dev.ips || [dev.ip]).join(", ")}`,
+      type: "confirm",
+      buttons: [
+        {
+          text: "Rename",
+          onPress: () => {
+            closeDialog();
+            if (Alert.prompt) {
+              Alert.prompt(
                 "Rename",
                 "",
                 [
@@ -1296,23 +1330,28 @@ function AppMain() {
                   {
                     text: "Save",
                     onPress: (n) =>
-                      n?.trim() && renameSavedDevice(dev.ip, n.trim()),
+                      n?.trim() && renameSavedDevice(dev.hostname || dev.ip, n.trim()),
                   },
                 ],
                 "plain-text",
                 dev.hostname || "",
-              )
-            : (() => {
-                setRenameValue(dev.hostname || "");
-                setRenameTarget(dev);
-              })(),
-      },
-      {
-        text: "Remove",
-        style: "destructive",
-        onPress: () => removeSavedDevice(dev.ip),
-      },
-    ]);
+              );
+            } else {
+              setRenameValue(dev.hostname || "");
+              setRenameTarget(dev);
+            }
+          },
+        },
+        {
+          text: "Remove",
+          style: "destructive",
+          onPress: () => {
+            closeDialog();
+            removeSavedDevice(dev.hostname || dev.ip);
+          },
+        },
+      ],
+    });
   };
 
   // ── Network ──────────────────────────────────────────────────
@@ -1420,55 +1459,90 @@ function AppMain() {
   };
 
   const initiateConnect = async (
-    ip,
+    ipOrIps,
     hostname = "PC",
     savedPin = null,
     isAuto = false,
     forceId = null,
   ) => {
-    const raw = ip || ipAddress;
-    if (!raw?.trim()) return;
-    const cleanIp = raw
-      .trim()
-      .replace(/^https?:\/\//, "")
-      .replace(/:\d+$/, "")
-      .replace(/\/+$/, "");
-    const url = `http://${cleanIp}:8000`;
-    setLoadingAction(`connecting_${cleanIp}`);
+    let ipsToTry = Array.isArray(ipOrIps) ? ipOrIps : [ipOrIps];
+    ipsToTry = ipsToTry.filter((i) => i && i.trim());
+    
+    if (ipsToTry.length === 0) {
+      ipsToTry = [ipAddress].filter((i) => i && i.trim());
+    }
+    if (ipsToTry.length === 0) return;
+
+    setLoadingAction(`connecting_${ipsToTry[0]}`);
+
     try {
-      const data = await sendAction(
-        "/auth-check",
-        "GET",
-        null,
-        url,
-        savedPin,
-        forceId,
-      );
-      if (data?.error) {
-        if (!isAuto)
-          Alert.alert(
-            "Connection Failed",
-            formatConnectionError(`Could not reach ${cleanIp}`, data, url),
-          );
+      // Try to ping all IPs in parallel but resolve to the first successful one
+      let firstSuccessfulIp = null;
+      let firstResponse = null;
+
+      const pingPromises = ipsToTry.map(async (rawIp) => {
+        const cleanIp = rawIp
+          .trim()
+          .replace(/^https?:\/\//, "")
+          .replace(/:\d+$/, "")
+          .replace(/\/+$/, "");
+        const url = `http://${cleanIp}:8000`;
+        const data = await sendAction(
+          "/auth-check",
+          "GET",
+          null,
+          url,
+          savedPin,
+          forceId,
+        );
+        
+        if (data && !data.error) {
+          return { ip: cleanIp, url, data };
+        } else if (data && data.detail === "Invalid Nexus Pairing Code") {
+          return { ip: cleanIp, url, data }; // valid connection but wrong PIN
+        }
+        throw new Error("Cannot reach");
+      });
+
+      let winner;
+      try {
+        winner = await Promise.any(pingPromises);
+      } catch (allErrors) {
+        // If ALL promises reject / throw Error
+        winner = null;
+      }
+
+      if (!winner) {
+        if (!isAuto) {
+          showDialog({
+            title: "Connection Failed",
+            message: `Could not reach any of these IPs:\n${ipsToTry.join(', ')}`
+          });
+        }
+        setLoadingAction("");
         return;
       }
-      if (!data || data.detail === "Invalid Nexus Pairing Code" || !savedPin) {
-        setPairingIp(cleanIp);
+
+      const { ip: validIp, url: workingUrl, data: workingData } = winner;
+
+      if (!workingData || workingData.detail === "Invalid Nexus Pairing Code" || !savedPin) {
+        setPairingIp(validIp);
         setPairingHostname(hostname);
         setPairingModalOpen(true);
         setLoadingAction("");
         return;
       }
-      if (savedPin) await saveDevice(cleanIp, hostname, savedPin);
+
+      if (savedPin) await saveDevice(validIp, workingData?.hostname || hostname, savedPin);
       setActivePin(savedPin);
-      setServerUrl(url);
-      setConnectedHost(hostname || data?.hostname || cleanIp);
+      setServerUrl(workingUrl);
+      setConnectedHost(workingData?.hostname || hostname || validIp);
       setIsConnected(true);
-      fetchVolume(url, savedPin);
-      getStats(url, savedPin);
-      captureScreen(url, savedPin);
-      fetchApps(url, savedPin);
-      fetchConnectivity(url, savedPin);
+      fetchVolume(workingUrl, savedPin);
+      getStats(workingUrl, savedPin);
+      captureScreen(workingUrl, savedPin);
+      fetchApps(workingUrl, savedPin);
+      fetchConnectivity(workingUrl, savedPin);
     } catch (e) {
     } finally {
       setLoadingAction("");
@@ -1477,7 +1551,7 @@ function AppMain() {
 
   const handlePairingSubmit = async () => {
     if (inputPin.length !== 4)
-      return Alert.alert("Invalid PIN", "Enter the 4-digit Code.");
+      return showDialog({ title: "Invalid PIN", message: "Enter the 4-digit Code." });
     setLoadingAction("pairing");
     const url = `http://${pairingIp}:8000`;
     const res = await sendAction("/auth-check", "GET", null, url, inputPin);
@@ -1495,10 +1569,10 @@ function AppMain() {
       fetchApps(url, inputPin);
       fetchConnectivity(url, inputPin);
     } else
-      Alert.alert(
-        "Pairing Failed",
-        formatConnectionError("Incorrect code or server unreachable", res, url),
-      );
+      showDialog({
+        title: "Pairing Failed",
+        message: formatConnectionError("Incorrect code or server unreachable", res, url),
+      });
     setLoadingAction("");
   };
 
@@ -1506,10 +1580,10 @@ function AppMain() {
     if (!permission?.granted) {
       const r = await requestPermission();
       if (!r.granted) {
-        Alert.alert(
-          "Camera Required",
-          "Grant camera permission to scan QR codes.",
-        );
+        showDialog({
+          title: "Camera Required",
+          message: "Grant camera permission to scan QR codes.",
+        });
         return;
       }
     }
@@ -1527,9 +1601,9 @@ function AppMain() {
         initiateConnect(ip, p.hostname || "Nexus PC", p.pin);
       } else if (p.ip && p.pin) {
         initiateConnect(p.ip, p.hostname || "Nexus PC", p.pin);
-      } else Alert.alert("Invalid QR", "Not a valid Nexus QR code.");
+      } else showDialog({ title: "Invalid QR", message: "Not a valid Nexus QR code." });
     } catch {
-      Alert.alert("Invalid QR", "Could not parse QR data.");
+      showDialog({ title: "Invalid QR", message: "Could not parse QR data." });
     }
   };
   const disconnect = () => {
@@ -1615,10 +1689,10 @@ function AppMain() {
         return true;
       }
       if (isConnected) {
-        Alert.alert(
-          "Disconnect",
-          "Are you sure you want to close the connection?",
-          [
+        showDialog({
+          title: "Disconnect",
+          message: "Are you sure you want to close the connection?",
+          buttons: [
             {
               text: "Cancel",
               style: "cancel",
@@ -1628,7 +1702,7 @@ function AppMain() {
               onPress: () => disconnect(),
             },
           ],
-        );
+        });
         return true;
       }
       return false;
@@ -1768,43 +1842,51 @@ function AppMain() {
     setIsLoadingApps(false);
   };
   const handlePower = (action) =>
-    Alert.alert("Confirm", `${action.toUpperCase()} your PC? Runs in 5 sec.`, [
-      { text: "Cancel", style: "cancel" },
-      {
-        text: "Confirm",
-        style: "destructive",
-        onPress: async () => {
-          await sendAction(`/power/${action}`);
-          setStats(null);
+    showDialog({
+      title: "Confirm",
+      message: `${action.toUpperCase()} your PC? Runs in 5 sec.`,
+      buttons: [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Confirm",
+          style: "destructive",
+          onPress: async () => {
+            await sendAction(`/power/${action}`);
+            setStats(null);
+          },
         },
-      },
-    ]);
+      ],
+    });
   const cancelShutdown = async () => {
     await sendAction("/power/cancel");
-    Alert.alert("Aborted", "Shutdown/Restart cancelled.");
+    showDialog({ title: "Aborted", message: "Shutdown/Restart cancelled." });
   };
 
   const handleKillProcess = (app) => {
-    Alert.alert("End Task", `Force quit ${app.name}?\n\n"${app.title}"`, [
-      { text: "Cancel", style: "cancel" },
-      {
-        text: "Force Quit",
-        style: "destructive",
-        onPress: async () => {
-          const res = await sendAction("/process/kill", "POST", {
-            pid: app.pid,
-            name: app.name,
-          });
-          if (res?.error) {
-            Alert.alert("Failed", res.error);
-          }
-          setTimeout(() => {
-            fetchApps();
-            getStats();
-          }, 500);
+    showDialog({
+      title: "End Task",
+      message: `Force quit ${app.name}?\n\n"${app.title}"`,
+      buttons: [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Force Quit",
+          style: "destructive",
+          onPress: async () => {
+            const res = await sendAction("/process/kill", "POST", {
+              pid: app.pid,
+              name: app.name,
+            });
+            if (res?.error) {
+              showDialog({ title: "Failed", message: res.error });
+            }
+            setTimeout(() => {
+              fetchApps();
+              getStats();
+            }, 500);
+          },
         },
-      },
-    ]);
+      ],
+    });
   };
 
   // ── Keyboard Shortcuts ──
@@ -1824,7 +1906,7 @@ function AppMain() {
     setLaunchingKey(appKey);
     const r = await sendAction("/apps/launch", "POST", { app_key: appKey });
     if (r?.error) {
-      Alert.alert("Launch Failed", r.error);
+      showDialog({ title: "Launch Failed", message: r.error });
     }
     setLaunchingKey("");
   };
@@ -1841,7 +1923,7 @@ function AppMain() {
 
   const sendQueueToServer = async () => {
     if (!queueInput.trim()) {
-      Alert.alert("Kosong", "Tulis teks atau pola dulu.");
+      showDialog({ title: "Kosong", message: "Tulis teks atau pola dulu." });
       return;
     }
 
@@ -1856,7 +1938,7 @@ function AppMain() {
 
     const r = await sendAction("/keyboard/queue/start", "POST", payload);
     if (r?.error) {
-      Alert.alert("Gagal", r.error);
+      showDialog({ title: "Gagal", message: r.error });
     } else {
       setQueueInput(""); // Bersihkan setelah sukses
     }
@@ -1865,9 +1947,9 @@ function AppMain() {
   const stopServerQueue = async () => {
     const r = await sendAction("/keyboard/queue/stop", "POST");
     if (r?.error) {
-      Alert.alert("Gagal", r.error);
+      showDialog({ title: "Gagal", message: r.error });
     } else {
-      Alert.alert("Dihentikan", "Eksekusi antrian di PC telah dibatalkan.");
+      showDialog({ title: "Dihentikan", message: "Eksekusi antrian di PC telah dibatalkan." });
     }
   };
 
@@ -1885,10 +1967,11 @@ function AppMain() {
     const action = isCurrentlyActive ? "off" : "on";
 
     if (type === "wifi" && action === "off") {
-      Alert.alert(
-        "Turn Off Wi-Fi?",
-        "This will disable Wi-Fi on your PC. You will lose connection to Nexus Remote and won't be able to reconnect until Wi-Fi is turned back on manually.",
-        [
+      showDialog({
+        title: "Turn Off Wi-Fi?",
+        message:
+          "This will disable Wi-Fi on your PC. You will lose connection to Nexus Remote and won't be able to reconnect until Wi-Fi is turned back on manually.",
+        buttons: [
           { text: "Cancel", style: "cancel" },
           {
             text: "Turn Off",
@@ -1896,7 +1979,7 @@ function AppMain() {
             onPress: () => executeToggle(type, action),
           },
         ],
-      );
+      });
     } else {
       executeToggle(type, action);
     }
@@ -1920,15 +2003,15 @@ function AppMain() {
   const handleSendClipboard = async () => {
     try {
       const text = await Clipboard.getStringAsync();
-      if (!text) return Alert.alert("Empty Clipboard", "Nothing to send.");
+      if (!text) return showDialog({ title: "Empty Clipboard", message: "Nothing to send." });
       const r = await sendAction("/clipboard", "POST", { content: text });
       if (r && !r.error && r.status === "success") {
-        Alert.alert("Sent", "Clipboard text sent to PC.");
+        showDialog({ title: "Sent", message: "Clipboard text sent to PC." });
       } else {
-        Alert.alert("Error", "Failed to send clipboard.");
+        showDialog({ title: "Error", message: "Failed to send clipboard." });
       }
     } catch (e) {
-      Alert.alert("Error", e.message);
+      showDialog({ title: "Error", message: e.message });
     }
   };
 
@@ -1937,12 +2020,12 @@ function AppMain() {
       const r = await sendAction("/clipboard", "GET");
       if (r && !r.error && r.status === "success" && r.content) {
         await Clipboard.setStringAsync(r.content);
-        Alert.alert("Received", "PC clipboard copied to your phone.");
+        showDialog({ title: "Received", message: "PC clipboard copied to your phone." });
       } else {
-        Alert.alert("Empty or Error", "Could not get clipboard from PC.");
+        showDialog({ title: "Empty or Error", message: "Could not get clipboard from PC." });
       }
     } catch (e) {
-      Alert.alert("Error", e.message);
+      showDialog({ title: "Error", message: e.message });
     }
   };
 
@@ -2026,10 +2109,10 @@ function AppMain() {
         setFilesParent(null);
         setFilesEntries([]);
       } else {
-        Alert.alert("Error", "Failed to load folders");
+        showDialog({ title: "Error", message: "Failed to load folders" });
       }
     } catch (e) {
-      Alert.alert("Error", e.message);
+      showDialog({ title: "Error", message: e.message });
     } finally {
       setFilesLoading(false);
     }
@@ -2047,10 +2130,10 @@ function AppMain() {
         setFilesParent(r.parent);
         setFilesEntries(r.entries);
       } else {
-        Alert.alert("Error", r?.message || "Failed to load folder");
+        showDialog({ title: "Error", message: r?.message || "Failed to load folder" });
       }
     } catch (e) {
-      Alert.alert("Error", e.message);
+      showDialog({ title: "Error", message: e.message });
     } finally {
       setFilesLoading(false);
     }
@@ -2060,12 +2143,12 @@ function AppMain() {
     const url = `${serverUrl}/files/download?token=${encodeURIComponent(
       deviceId,
     )}&path=${encodeURIComponent(entry.path)}`;
-    Linking.openURL(url).catch((e) => Alert.alert("Download Error", e.message));
+    Linking.openURL(url).catch((e) => showDialog({ title: "Download Error", message: e.message }));
   };
 
   const uploadFileToCurrent = async () => {
     if (!filesCurrentPath) {
-      Alert.alert("Pick Folder", "Open a destination folder first.");
+      showDialog({ title: "Pick Folder", message: "Open a destination folder first." });
       return;
     }
     try {
@@ -2092,16 +2175,16 @@ function AppMain() {
       });
       const payload = await r.json().catch(() => null);
       if (!r.ok || !payload || payload.error) {
-        Alert.alert(
-          "Upload Failed",
-          payload?.detail || payload?.message || `HTTP ${r.status}`,
-        );
+        showDialog({
+          title: "Upload Failed",
+          message: payload?.detail || payload?.message || `HTTP ${r.status}`,
+        });
       } else {
         await browseFilesPath(filesCurrentPath);
-        Alert.alert("Uploaded", payload.name || "File sent to PC.");
+        showDialog({ title: "Uploaded", message: payload.name || "File sent to PC." });
       }
     } catch (e) {
-      Alert.alert("Upload Error", e.message);
+      showDialog({ title: "Upload Error", message: e.message });
     } finally {
       setFilesUploading(false);
     }
@@ -2122,10 +2205,10 @@ function AppMain() {
         setPenStrokes([]);
         setPenModeActive(true);
       } else {
-        Alert.alert("Pen Mode", "Failed to start overlay.");
+        showDialog({ title: "Pen Mode", message: "Failed to start overlay." });
       }
     } catch (e) {
-      Alert.alert("Pen Mode", e.message);
+      showDialog({ title: "Pen Mode", message: e.message });
     } finally {
       setPenStarting(false);
     }
@@ -2423,11 +2506,11 @@ function AppMain() {
             <FadeSlideIn delay={180} style={{ marginTop: SP.lg }}>
               <Text style={s.groupLabel}>PAIRED DEVICES</Text>
               {savedDevices.map((dev, i) => (
-                <View key={dev.ip}>
+                <View key={dev.hostname || dev.ip}>
                   <TouchableOpacity
                     style={s.menuRow}
                     onPress={() =>
-                      initiateConnect(dev.ip, dev.hostname || dev.ip, dev.pin)
+                      initiateConnect(dev.ips || [dev.ip], dev.hostname || dev.ip, dev.pin)
                     }
                     onLongPress={() => handleDeviceLongPress(dev)}
                     disabled={loadingAction.includes("connecting")}
@@ -2704,6 +2787,7 @@ function AppMain() {
             </View>
           </KeyboardAvoidingView>
         </Modal>
+        <UIDialog {...appDialog} onClose={closeDialog} />
       </View>
     );
   }
@@ -5932,6 +6016,8 @@ function AppMain() {
           </View>
         </GestureHandlerRootView>
       </Modal>
+
+      <UIDialog {...appDialog} onClose={closeDialog} />
     </View>
   );
 }
