@@ -20,6 +20,7 @@ import {
   BackHandler,
   Pressable,
   useWindowDimensions,
+  KeyboardAvoidingView,
 } from "react-native";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -1221,6 +1222,7 @@ function AppMain() {
   const [terminalCwd, setTerminalCwd] = useState("");
   const [terminalRunning, setTerminalRunning] = useState(false);
   const terminalScrollRef = useRef(null);
+  const loginScrollRef = useRef(null);
 
   // Smooth keyboard animation for terminal (Reanimated worklet, no re-renders)
   // Container shrinks from bottom by keyboard height — input just follows.
@@ -2780,7 +2782,12 @@ function AppMain() {
           translucent
           backgroundColor="transparent"
         />
+        <KeyboardAvoidingView
+          style={{ flex: 1 }}
+          behavior={Platform.OS === "ios" ? "padding" : "height"}
+        >
         <ScrollView
+          ref={loginScrollRef}
           contentContainerStyle={s.scrollLogin}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
@@ -2938,6 +2945,11 @@ function AppMain() {
                     onChangeText={setIpAddress}
                     keyboardType="default"
                     autoCapitalize="none"
+                    onFocus={() => {
+                      setTimeout(() => {
+                        loginScrollRef.current?.scrollToEnd({ animated: true });
+                      }, 300);
+                    }}
                   />
                 </View>
                 <TouchableOpacity
@@ -2960,6 +2972,7 @@ function AppMain() {
 
           <View style={{ height: 60 }} />
         </ScrollView>
+        </KeyboardAvoidingView>
 
         {/* Rename Modal */}
         <UIDialog
