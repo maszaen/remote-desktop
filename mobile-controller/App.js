@@ -3713,7 +3713,7 @@ function AppMain() {
             <Ionicons name="sunny" size={18} color="#FF9500" />
           </View>
           <View style={s.menuRowBody}>
-            <Text style={s.menuRowTitle}>Brightness</Text>
+            <Text style={s.menuRowTitle}>Screen Brightness</Text>
             <Text style={s.menuRowSub}>Adjust monitor brightness</Text>
           </View>
           <Ionicons
@@ -5270,8 +5270,7 @@ function AppMain() {
       <BottomSheet
         visible={brightnessSheetOpen}
         onClose={() => setBrightnessSheetOpen(false)}
-        title="Brightness"
-        subtitle="Adjust display brightness"
+        title="Screen Brightness"
       >
         <View style={s.sheetContent}>
           {brightnessLoading && brightnessMonitors.length === 0 ? (
@@ -5295,7 +5294,7 @@ function AppMain() {
             </View>
           ) : (
             brightnessMonitors.map((mon) => (
-              <View key={mon.index} style={{ paddingHorizontal: SP.md, marginBottom: SP.lg }}>
+              <View key={mon.index} style={{ paddingHorizontal: SP.md, marginBottom: SP.lg, marginTop: mon.index === 0 ? SP.lg : 0 }}>
                 <View style={{ flexDirection: "row", alignItems: "center", marginBottom: SP.sm }}>
                   <Ionicons
                     name={mon.type === "internal" ? "laptop-outline" : "desktop-outline"}
@@ -5327,7 +5326,7 @@ function AppMain() {
                         style={{
                           height: 6,
                           borderRadius: 3,
-                          backgroundColor: C.elevated,
+                          backgroundColor: C.border,
                           overflow: "hidden",
                         }}
                       >
@@ -6961,7 +6960,6 @@ const s = StyleSheet.create({
     fontWeight: "800",
     paddingLeft: SP.sm,
     color: C.muted,
-    letterSpacing: 1,
   },
 
   // ── Section header ──
