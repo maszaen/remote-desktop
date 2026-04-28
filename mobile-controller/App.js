@@ -1202,7 +1202,7 @@ function AppMain() {
   // BottomSheet shifts by max(0, kbHeight - offset).
   const tabsVisibleCount = Math.min(tabsList.length, TAB_LIST_MAX_ITEMS);
   const tabsKbOffset =
-    tabsVisibleCount * TAB_ITEM_H + SP.md + (Platform.OS === "ios" ? 34 : SP.xl);
+    tabsVisibleCount * TAB_ITEM_H + SP.sm + (Platform.OS === "ios" ? 34 : SP.xl);
   const [filesSheetOpen, setFilesSheetOpen] = useState(false);
   const [terminalSheetOpen, setTerminalSheetOpen] = useState(false);
 
@@ -3687,7 +3687,7 @@ function AppMain() {
           activeOpacity={0.6}
         >
           <View style={[s.menuRowIcon, { backgroundColor: C.primaryDim }]}>
-            <Ionicons name="file-tray-full" size={18} color={C.primary} />
+            <Ionicons name="file-tray-full" size={20} color={C.primary} />
           </View>
           <View style={s.menuRowBody}>
             <Text style={s.menuRowTitle}>Clipboard Access</Text>
@@ -3710,7 +3710,7 @@ function AppMain() {
           activeOpacity={0.6}
         >
           <View style={[s.menuRowIcon, { backgroundColor: "#FF9500" + "20" }]}>
-            <Ionicons name="sunny" size={18} color="#FF9500" />
+            <Ionicons name="sunny" size={22} color="#FF9500" />
           </View>
           <View style={s.menuRowBody}>
             <Text style={s.menuRowTitle}>Screen Brightness</Text>
@@ -5412,7 +5412,6 @@ function AppMain() {
           {/* Controls panel — dark container wrapping actions + URL bar */}
           <View
             style={{
-              marginHorizontal: SP.md,
               marginBottom: SP.md,
               backgroundColor: C.surface,
               borderRadius: R.md,
@@ -5575,7 +5574,8 @@ function AppMain() {
                       height: TAB_ITEM_H,
                       paddingHorizontal: SP.md,
                       borderBottomWidth: i < tabsList.length - 1 ? 1 : 0,
-                      borderBottomColor: C.border,
+                      borderBottomColor: isSelected ? "transparent" : C.border,
+                      borderRadius: R.sm,
                       backgroundColor: isSelected ? C.primary + "15" : "transparent",
                     }}
                     onPress={() => handleSwitchToTab(tab.hwnd)}
@@ -5594,7 +5594,7 @@ function AppMain() {
                       size={20}
                       color={isSelected ? C.primary : C.sub}
                     />
-                    <View style={{ flex: 1, marginLeft: SP.md }}>
+                    <View style={{ flex: 1, marginLeft: SP.md, marginRight: SP.md }}>
                       <Text
                         style={{
                           color: C.text,
@@ -7578,7 +7578,7 @@ const s = StyleSheet.create({
     color: C.text,
     marginBottom: 2,
   },
-  powerRowSub: { fontSize: F.xs, fontWeight: "500", color: C.muted },
+  powerRowSub: { fontSize: F.xs, fontWeight: "500", color: C.muted},
 
   // ── Custom Toggle ──
   customToggle: {
