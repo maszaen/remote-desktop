@@ -5865,7 +5865,7 @@ function AppMain() {
                 touchpadPrevY.current = e.nativeEvent.pageY;
                 if (Math.abs(dy) > 0.5) {
                   // Natural scroll: swipe down = scroll down (negative dy to pyautogui)
-                  touchpadScroll(Math.round(-dy * 0.3));
+                  touchpadScroll(Math.round(dy * touchpadSensitivity));
                 }
                 if (touchpadLastRef.current) touchpadLastRef.current.moved = true;
               } else {
