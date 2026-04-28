@@ -20,7 +20,6 @@ import {
   BackHandler,
   Pressable,
   useWindowDimensions,
-  KeyboardAvoidingView,
 } from "react-native";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -1223,6 +1222,22 @@ function AppMain() {
   const [terminalRunning, setTerminalRunning] = useState(false);
   const terminalScrollRef = useRef(null);
   const loginScrollRef = useRef(null);
+  const [loginKbHeight, setLoginKbHeight] = useState(0);
+
+  useEffect(() => {
+    const showEvent = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
+    const hideEvent = Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
+    const onShow = (e) => {
+      setLoginKbHeight(e.endCoordinates.height);
+      setTimeout(() => {
+        loginScrollRef.current?.scrollToEnd({ animated: true });
+      }, 100);
+    };
+    const onHide = () => setLoginKbHeight(0);
+    const sub1 = Keyboard.addListener(showEvent, onShow);
+    const sub2 = Keyboard.addListener(hideEvent, onHide);
+    return () => { sub1.remove(); sub2.remove(); };
+  }, []);
 
   // Smooth keyboard animation for terminal (Reanimated worklet, no re-renders)
   // Container shrinks from bottom by keyboard height — input just follows.
@@ -2782,10 +2797,6 @@ function AppMain() {
           translucent
           backgroundColor="transparent"
         />
-        <KeyboardAvoidingView
-          style={{ flex: 1 }}
-          behavior={Platform.OS === "ios" ? "padding" : "height"}
-        >
         <ScrollView
           ref={loginScrollRef}
           contentContainerStyle={s.scrollLogin}
@@ -2945,11 +2956,6 @@ function AppMain() {
                     onChangeText={setIpAddress}
                     keyboardType="default"
                     autoCapitalize="none"
-                    onFocus={() => {
-                      setTimeout(() => {
-                        loginScrollRef.current?.scrollToEnd({ animated: true });
-                      }, 300);
-                    }}
                   />
                 </View>
                 <TouchableOpacity
@@ -2970,9 +2976,8 @@ function AppMain() {
             )}
           </FadeSlideIn>
 
-          <View style={{ height: 60 }} />
+          <View style={{ height: loginKbHeight > 0 ? loginKbHeight : 60 }} />
         </ScrollView>
-        </KeyboardAvoidingView>
 
         {/* Rename Modal */}
         <UIDialog
