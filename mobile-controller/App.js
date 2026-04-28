@@ -2517,6 +2517,19 @@ function AppMain() {
           translucent
           backgroundColor="transparent"
         />
+        {/* Gradient fade bottom screen */}
+        <LinearGradient
+          colors={["transparent", C.warning]}
+          style={{
+            position: "absolute",
+            bottom: 60,
+            left: 0,
+            right: 0,
+            height: 20,
+            zIndex: 999,
+          }}
+          pointerEvents="none"
+        />
 
         <ScrollView
           contentContainerStyle={s.scrollLogin}
@@ -2927,23 +2940,53 @@ function AppMain() {
         }
       >
         {/* ── Media Controls ── */}
-        <View style={{ paddingBottom: SP.sm }}>
+        <View style={{ paddingBottom: SP.lg, paddingTop: SP.md }}>
           <View style={s.sectionHeaderRow}>
             <Text style={s.groupLabel}>MEDIA CONTROLS</Text>
-            <TouchableOpacity
-              onPress={() => getStats()}
-              disabled={mediaFetching}
-              style={s.refreshChip}
-              activeOpacity={0.7}
-            >
-              <SpinningIcon
-                name="sync-outline"
-                size={13}
-                color={C.sub}
-                spinning={mediaFetching}
-              />
-              <Text style={s.refreshChipText}> Refresh</Text>
-            </TouchableOpacity>
+            {/* System Volume chip — bottom-right */}
+            <View style={s.actionRow}>
+              <TouchableOpacity
+                style={s.mediaCardVolBtn}
+                onPress={() => setVolumeSheetOpen(true)}
+                activeOpacity={0.7}
+              >
+                <Ionicons
+                  name={
+                    isMuted || currentVolume === 0
+                      ? "volume-mute"
+                      : "volume-high"
+                  }
+                  size={14}
+                  color={isMuted ? C.danger : C.sub}
+                />
+                <Text
+                  style={[
+                    s.mediaCardVolText,
+                    isMuted && { color: C.danger },
+                  ]}
+                >
+                  {isMuted
+                    ? "Muted"
+                    : currentVolume !== undefined
+                      ? `${currentVolume}%`
+                      : "Vol"}
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => getStats()}
+                disabled={mediaFetching}
+                style={s.refreshChip}
+                activeOpacity={0.7}
+              >
+                <SpinningIcon
+                  name="sync-outline"
+                  size={13}
+                  color={C.sub}
+                  spinning={mediaFetching}
+                />
+                <Text style={s.refreshChipText}> Refresh</Text>
+              </TouchableOpacity>
+            </View>
           </View>
 
           <View style={s.mediaCard}>
@@ -3020,41 +3063,12 @@ function AppMain() {
                 <Ionicons name="play-skip-forward" size={20} color={C.text} />
               </TouchableOpacity>
             </View>
-
-            {/* System Volume chip — bottom-right */}
-            <TouchableOpacity
-              style={s.mediaCardVolBtn}
-              onPress={() => setVolumeSheetOpen(true)}
-              activeOpacity={0.7}
-            >
-              <Ionicons
-                name={
-                  isMuted || currentVolume === 0
-                    ? "volume-mute"
-                    : "volume-high"
-                }
-                size={14}
-                color={isMuted ? C.danger : C.sub}
-              />
-              <Text
-                style={[
-                  s.mediaCardVolText,
-                  isMuted && { color: C.danger },
-                ]}
-              >
-                {isMuted
-                  ? "Muted"
-                  : currentVolume !== undefined
-                    ? `${currentVolume}%`
-                    : "Vol"}
-              </Text>
-            </TouchableOpacity>
           </View>
         </View>
         <View style={[s.sep, { marginLeft: 0 }]} />
 
         {/* Live Desktop */}
-        <View style={{ paddingTop: SP.lg }}>
+        <View style={{ paddingTop: SP.md }}>
           <View style={s.sectionHeaderRow}>
             <Text style={s.groupLabel}>DESKTOP CAPTURE</Text>
             <TouchableOpacity
@@ -3157,9 +3171,9 @@ function AppMain() {
         <View style={[s.sep, { marginLeft: 0, marginTop: SP.lg }]} />
 
         {/* System Stats */}
-        <View style={{ paddingTop: SP.lg }}>
+        <View style={{ paddingTop: SP.md }}>
           <View style={s.sectionHeaderRow}>
-            <Text style={s.groupLabel}>SYSTEM</Text>
+            <Text style={s.groupLabel}>SYSTEM USAGE</Text>
             <TouchableOpacity
               onPress={() => {
                 getStats();
@@ -6265,6 +6279,13 @@ const s = StyleSheet.create({
     justifyContent: "space-between",
     marginBottom: SP.sm,
   },
+  actionRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    display: "flex",
+    gap: SP.sm,
+    justifyContent: "space-between",
+  },
   refreshChip: {
     flexDirection: "row",
     alignItems: "center",
@@ -6714,15 +6735,14 @@ const s = StyleSheet.create({
     borderRadius: R.sm,
     borderWidth: 1,
     borderColor: C.border,
-    paddingHorizontal: SP.md,
-    paddingTop: SP.md,
+    paddingTop: SP.sm,
     paddingBottom: SP.sm,
   },
   mediaCardTitle: {
     alignItems: "center",
     justifyContent: "center",
-    paddingVertical: SP.lg,
-    paddingHorizontal: SP.xl,
+    paddingVertical: SP.md,
+    paddingBottom: SP.sm,
   },
   mediaCardTrack: {
     fontSize: 56,
@@ -6735,7 +6755,7 @@ const s = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     gap: SP.xl,
-    paddingVertical: SP.lg + SP.sm,
+    paddingVertical: SP.md,
   },
   mediaCardBtnSm: {
     width: 58,
@@ -6763,15 +6783,13 @@ const s = StyleSheet.create({
   mediaCardVolBtn: {
     flexDirection: "row",
     alignItems: "center",
-    alignSelf: "flex-end",
-    gap: SP.xs,
+    backgroundColor: C.elevated,
+    gap: 4,
     paddingHorizontal: SP.sm + 2,
     paddingVertical: SP.xs + 2,
     borderRadius: R.full,
-    backgroundColor: C.surface,
     borderWidth: 1,
     borderColor: C.border,
-    marginTop: SP.sm,
   },
   mediaCardVolText: {
     fontSize: F.xs,
