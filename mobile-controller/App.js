@@ -3856,8 +3856,8 @@ function AppMain() {
           onPress={() => setTouchpadOpen(true)}
           activeOpacity={0.6}
         >
-          <View style={[s.menuRowIcon, { backgroundColor: C.successDim }]}>
-            <Ionicons name="hand-right" size={20} color={C.success} />
+          <View style={[s.menuRowIcon, { backgroundColor: C.primaryDim }]}>
+            <Ionicons name="hand-right" size={20} color={C.primary} />
           </View>
           <View style={s.menuRowBody}>
             <Text style={s.menuRowTitle}>Touchpad</Text>
