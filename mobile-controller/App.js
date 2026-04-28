@@ -4574,18 +4574,12 @@ function AppMain() {
         <View style={s.keyboardModalRoot}>
           <AnimatedRe.View
             style={[
-              { flex: 1 },
+              { flex: 1, display: "flex" },
               keyboardInjectAnimStyle,
             ]}
           >
-            <ScrollView
-              style={s.keyboardModalScroll}
-              contentContainerStyle={s.keyboardModalScrollContent}
-            showsVerticalScrollIndicator={false}
-            keyboardShouldPersistTaps="handled"
-          >
             {/* SETTINGS ROW */}
-            <View style={[s.queueSettingsRow, { marginTop: SP.xs }]}>
+            <View style={[s.queueSettingsRow, { marginTop: SP.xs, marginHorizontal: SP.md }]}>
               <View
                 style={[
                   s.queueSettingBox,
@@ -4678,7 +4672,7 @@ function AppMain() {
             <View
               style={[
                 s.keyboardPanel,
-                { backgroundColor: "transparent", borderWidth: 0, padding: 0, flex: 1 },
+                { backgroundColor: "transparent", borderWidth: 0, padding: 0, flex: 1, marginHorizontal: SP.md, marginBottom: SP.md },
               ]}
             >
               {/* MAIN TEXTAREA CARD - Matches Terminal Access structure */}
@@ -4686,7 +4680,8 @@ function AppMain() {
                 style={[
                   s.keyboardTextareaWrap,
                   {
-                    height: 250, // FIXED HEIGHT FORCES INTERNAL SCROLL
+                    flex: 1,
+                    minHeight: 0,
                     overflow: "hidden",
                     elevation: 2,
                     shadowColor: "#000",
@@ -4871,7 +4866,6 @@ function AppMain() {
                 </View>
               </View>
             </View>
-          </ScrollView>
           </AnimatedRe.View>
         </View>
       </SlideLeftModal>
