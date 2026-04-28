@@ -2960,7 +2960,12 @@ function AppMain() {
                   {stats.active_media}
                 </MarqueeText>
               ) : (
-                <Text style={[s.mediaCardTrack, { color: C.muted }]}>
+                <Text
+                  style={[
+                    s.mediaCardTrack,
+                    { color: C.muted, textAlign: "center" },
+                  ]}
+                >
                   {mediaFetching ? "Loading..." : "Not Playing"}
                 </Text>
               )}
@@ -2973,7 +2978,7 @@ function AppMain() {
                 onPress={() => mediaControl("prev")}
                 activeOpacity={0.7}
               >
-                <Ionicons name="play-skip-back" size={18} color={C.text} />
+                <Ionicons name="play-skip-back" size={20} color={C.text} />
               </TouchableOpacity>
               <TouchableOpacity
                 style={[s.mediaCardBtnLg, mediaCooldown && { opacity: 0.6 }]}
@@ -2992,7 +2997,7 @@ function AppMain() {
                       ? "pause"
                       : "play"
                   }
-                  size={28}
+                  size={37}
                   color={C.text}
                   style={
                     (
@@ -3002,7 +3007,7 @@ function AppMain() {
                           stats.active_media !== "Not Playing"
                     )
                       ? { paddingLeft: 0 }
-                      : { paddingLeft: 3 }
+                      : { paddingLeft: 5 }
                   }
                 />
               </TouchableOpacity>
@@ -3012,7 +3017,7 @@ function AppMain() {
                 disabled={mediaCooldown}
                 activeOpacity={0.7}
               >
-                <Ionicons name="play-skip-forward" size={18} color={C.text} />
+                <Ionicons name="play-skip-forward" size={20} color={C.text} />
               </TouchableOpacity>
             </View>
 
@@ -6716,24 +6721,25 @@ const s = StyleSheet.create({
   mediaCardTitle: {
     alignItems: "center",
     justifyContent: "center",
-    paddingBottom: SP.sm,
-    paddingHorizontal: SP.xs,
+    paddingVertical: SP.lg,
+    paddingHorizontal: SP.xl,
   },
   mediaCardTrack: {
-    fontSize: F.lg,
-    fontWeight: "700",
+    fontSize: 56,
+    fontWeight: "800",
     color: C.text,
+    lineHeight: 60,
   },
   mediaCardControls: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    gap: SP.lg,
-    paddingVertical: SP.sm,
+    gap: SP.xl,
+    paddingVertical: SP.lg + SP.sm,
   },
   mediaCardBtnSm: {
-    width: 44,
-    height: 44,
+    width: 58,
+    height: 58,
     borderRadius: R.full,
     backgroundColor: C.surface,
     justifyContent: "center",
@@ -6742,17 +6748,17 @@ const s = StyleSheet.create({
     borderColor: C.border,
   },
   mediaCardBtnLg: {
-    width: 56,
-    height: 56,
+    width: 76,
+    height: 76,
     borderRadius: R.full,
     backgroundColor: C.primary,
     justifyContent: "center",
     alignItems: "center",
     shadowColor: C.primary,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.35,
-    shadowRadius: 10,
-    elevation: 6,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.45,
+    shadowRadius: 14,
+    elevation: 10,
   },
   mediaCardVolBtn: {
     flexDirection: "row",
