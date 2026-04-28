@@ -1405,24 +1405,32 @@ def get_tabs():
         return {"error": str(e)}
 
 
+def _focus_browser_window(hwnd):
+    """Bring a browser window to foreground. Returns True on success."""
+    user32 = ctypes.windll.user32
+    if user32.IsIconic(hwnd):
+        user32.ShowWindow(hwnd, 9)  # SW_RESTORE
+    user32.SetForegroundWindow(hwnd)
+    time.sleep(0.15)
+    return True
+
+
 @app.post("/tabs/switch", dependencies=[Depends(verify_pin)])
 def switch_tab_window(hwnd: int):
     """Bring a specific browser window to the foreground."""
     try:
-        user32 = ctypes.windll.user32
-        # Restore if minimized
-        if user32.IsIconic(hwnd):
-            user32.ShowWindow(hwnd, 9)  # SW_RESTORE
-        user32.SetForegroundWindow(hwnd)
+        _focus_browser_window(hwnd)
         return {"status": "success"}
     except Exception as e:
         return {"error": str(e)}
 
 
 @app.post("/tabs/next", dependencies=[Depends(verify_pin)])
-def next_tab():
-    """Switch to next browser tab (Ctrl+Tab)."""
+def next_tab(hwnd: Optional[int] = None):
+    """Switch to next browser tab (Ctrl+Tab). Focuses target window first."""
     try:
+        if hwnd:
+            _focus_browser_window(hwnd)
         execute_hotkey("ctrlleft", "tab")
         return {"status": "success"}
     except Exception as e:
@@ -1430,9 +1438,11 @@ def next_tab():
 
 
 @app.post("/tabs/prev", dependencies=[Depends(verify_pin)])
-def prev_tab():
-    """Switch to previous browser tab (Ctrl+Shift+Tab)."""
+def prev_tab(hwnd: Optional[int] = None):
+    """Switch to previous browser tab (Ctrl+Shift+Tab). Focuses target window first."""
     try:
+        if hwnd:
+            _focus_browser_window(hwnd)
         execute_hotkey("ctrlleft", "shiftleft", "tab")
         return {"status": "success"}
     except Exception as e:
@@ -1440,9 +1450,11 @@ def prev_tab():
 
 
 @app.post("/tabs/close", dependencies=[Depends(verify_pin)])
-def close_tab():
-    """Close current browser tab (Ctrl+W)."""
+def close_tab(hwnd: Optional[int] = None):
+    """Close current browser tab (Ctrl+W). Focuses target window first."""
     try:
+        if hwnd:
+            _focus_browser_window(hwnd)
         execute_hotkey("ctrlleft", "w")
         return {"status": "success"}
     except Exception as e:
@@ -1450,9 +1462,11 @@ def close_tab():
 
 
 @app.post("/tabs/new", dependencies=[Depends(verify_pin)])
-def new_tab():
-    """Open a new browser tab (Ctrl+T)."""
+def new_tab(hwnd: Optional[int] = None):
+    """Open a new browser tab (Ctrl+T). Focuses target window first."""
     try:
+        if hwnd:
+            _focus_browser_window(hwnd)
         execute_hotkey("ctrlleft", "t")
         return {"status": "success"}
     except Exception as e:
@@ -1460,11 +1474,13 @@ def new_tab():
 
 
 @app.post("/tabs/goto", dependencies=[Depends(verify_pin)])
-def goto_tab(index: int):
-    """Jump to tab by index 1-9 (Ctrl+1 through Ctrl+9)."""
+def goto_tab(index: int, hwnd: Optional[int] = None):
+    """Jump to tab by index 1-9 (Ctrl+1 through Ctrl+9). Focuses target window first."""
     try:
         if index < 1 or index > 9:
             return {"error": "Tab index must be 1-9"}
+        if hwnd:
+            _focus_browser_window(hwnd)
         execute_hotkey("ctrlleft", str(index))
         return {"status": "success", "index": index}
     except Exception as e:
@@ -1472,9 +1488,11 @@ def goto_tab(index: int):
 
 
 @app.post("/tabs/navigate", dependencies=[Depends(verify_pin)])
-def navigate_tab(req: TabNavigateRequest):
-    """Navigate current tab to a URL (Ctrl+L, type URL, Enter)."""
+def navigate_tab(req: TabNavigateRequest, hwnd: Optional[int] = None):
+    """Navigate current tab to a URL (Ctrl+L, type URL, Enter). Focuses target window first."""
     try:
+        if hwnd:
+            _focus_browser_window(hwnd)
         execute_hotkey("ctrlleft", "l")
         time.sleep(0.15)
         pyautogui.typewrite(req.url, interval=0.01)
