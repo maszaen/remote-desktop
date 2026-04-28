@@ -9,5 +9,6 @@ psutil
 pystray
 Pillow
 qrcode
+browser-cookie3
 winrt-Windows.Devices.Radios
 winrt-Windows.Foundation.Collections

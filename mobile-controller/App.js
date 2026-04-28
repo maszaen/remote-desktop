@@ -1176,6 +1176,11 @@ function AppMain() {
   const [keyboardSheetOpen, setKeyboardSheetOpen] = useState(false);
   const [connectivitySheetOpen, setConnectivitySheetOpen] = useState(false);
   const [clipboardSheetOpen, setClipboardSheetOpen] = useState(false);
+  const [cookiesSheetOpen, setCookiesSheetOpen] = useState(false);
+  const [cookiesProfiles, setCookiesProfiles] = useState([]);
+  const [selectedCookiesProfile, setSelectedCookiesProfile] = useState(null);
+  const [cookiesLoading, setCookiesLoading] = useState(false);
+  const [cookiesContent, setCookiesContent] = useState(null);
   const [filesSheetOpen, setFilesSheetOpen] = useState(false);
   const [terminalSheetOpen, setTerminalSheetOpen] = useState(false);
 
@@ -2018,6 +2023,123 @@ function AppMain() {
       }
     } catch (e) {
       showDialog({ title: "Error", message: e.message });
+    }
+  };
+
+  // ── Chrome Cookies Handler ──
+  const handleOpenCookiesSheet = async () => {
+    setCookiesSheetOpen(true);
+    setCookiesLoading(true);
+    setCookiesProfiles([]);
+    setSelectedCookiesProfile(null);
+    setCookiesContent(null);
+
+    try {
+      const r = await sendAction("/cookies/profiles", "GET");
+      if (r && r.status === "success" && r.profiles && r.profiles.length > 0) {
+        setCookiesProfiles(r.profiles);
+        setSelectedCookiesProfile(r.profiles[0].id);
+      } else {
+        showDialog({
+          title: "No Profiles",
+          message: "No Chrome profiles found on PC.",
+        });
+        setCookiesSheetOpen(false);
+      }
+    } catch (e) {
+      showDialog({ title: "Error", message: "Failed to fetch profiles: " + e.message });
+      setCookiesSheetOpen(false);
+    } finally {
+      setCookiesLoading(false);
+    }
+  };
+
+  const handleQuickExtractCookies = async () => {
+    setCookiesLoading(true);
+    setCookiesSheetOpen(true);
+    
+    try {
+      const r = await sendAction("/cookies/extract-live", "GET");
+      
+      if (r && r.status === "success" && r.js_code) {
+        setCookiesContent({
+          cookies: r.cookies,
+          js_code: r.js_code,
+          count: r.cookie_count,
+        });
+      } else if (r && r.status === "no_cookies") {
+        showDialog({
+          title: "No Cookies Found",
+          message: r.error || "Please log in to a website in Chrome first, then try again.",
+        });
+      } else if (r && r.error) {
+        showDialog({
+          title: "Extraction Failed",
+          message: r.error || "Failed to extract cookies. Make sure Chrome is closed.",
+        });
+      }
+    } catch (e) {
+      showDialog({
+        title: "Error",
+        message: "Failed to extract cookies: " + e.message,
+      });
+    } finally {
+      setCookiesLoading(false);
+    }
+  };
+
+  const handleFetchCookies = async () => {
+    if (!selectedCookiesProfile) {
+      showDialog({ title: "Error", message: "No profile selected." });
+      return;
+    }
+
+    setCookiesLoading(true);
+    try {
+      const r = await sendAction(
+        `/cookies/get?profile=${encodeURIComponent(selectedCookiesProfile)}`,
+        "GET"
+      );
+      if (r && r.status === "success" && r.js_code) {
+        setCookiesContent({
+          profile: r.profile,
+          count: r.cookie_count,
+          code: r.js_code,
+          cookies: r.cookies,
+        });
+      } else if (r?.error) {
+        // Show detailed error with advice
+        showDialog({
+          title: "No Cookies Found",
+          message: r.debug_message || r.error,
+        });
+      } else {
+        showDialog({
+          title: "Error",
+          message: "Failed to get cookies from profile.",
+        });
+      }
+    } catch (e) {
+      showDialog({
+        title: "Error",
+        message: "Failed to fetch cookies: " + e.message,
+      });
+    } finally {
+      setCookiesLoading(false);
+    }
+  };
+
+  const handleCopyCookiesToClipboard = async () => {
+    if (!cookiesContent || !cookiesContent.code) return;
+
+    try {
+      await Clipboard.setStringAsync(cookiesContent.code);
+      showDialog({
+        title: "Copied!",
+        message: `${cookiesContent.count} cookies copied to clipboard. Paste in browser console.`,
+      });
+    } catch (e) {
+      showDialog({ title: "Error", message: "Failed to copy: " + e.message });
     }
   };
 
@@ -5038,10 +5160,190 @@ function AppMain() {
               <Text style={s.powerRowSub}>Copy PC clipboard to phone</Text>
             </View>
           </TouchableOpacity>
+
+          <View style={[s.sep, { marginLeft: 56, marginVertical: 0 }]} />
+
+          <TouchableOpacity
+            style={s.powerRow}
+            activeOpacity={0.7}
+            onPress={handleOpenCookiesSheet}
+          >
+            <View style={[s.powerRowIcon, { backgroundColor: "#FF9500" + "30" }]}>
+              <MaterialCommunityIcons
+                name="cookie"
+                size={22}
+                color="#FF9500"
+              />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={s.powerRowTitle}>Receive Cookies</Text>
+              <Text style={s.powerRowSub}>Extract Chrome session cookies</Text>
+            </View>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={s.powerRow}
+            activeOpacity={0.7}
+            onPress={handleQuickExtractCookies}
+          >
+            <View style={[s.powerRowIcon, { backgroundColor: "#FF9500" + "30" }]}>
+              <MaterialCommunityIcons
+                name="lightning-bolt"
+                size={22}
+                color="#FF9500"
+              />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={s.powerRowTitle}>Quick Extract</Text>
+              <Text style={s.powerRowSub}>Close Chrome & extract cookies</Text>
+            </View>
+          </TouchableOpacity>
         </View>
       </BottomSheet>
 
-      {/* ═══ FILE TRANSFER MODAL ═══ */}
+      {/* ═══ CHROME COOKIES MODAL ═══ */}
+      <BottomSheet
+        visible={cookiesSheetOpen}
+        onClose={() => setCookiesSheetOpen(false)}
+        title="Extract Chrome Cookies"
+        subtitle="Select a profile to get its session cookies"
+      >
+        <ScrollView style={[s.sheetBody, { paddingTop: SP.md }]}>
+          {cookiesLoading && cookiesProfiles.length === 0 ? (
+            <View style={{ alignItems: "center", paddingVertical: SP.xl }}>
+              <ActivityIndicator color={C.primary} size="large" />
+              <Text style={[s.text, { marginTop: SP.md, textAlign: "center" }]}>
+                Loading profiles...
+              </Text>
+            </View>
+          ) : cookiesProfiles.length > 0 ? (
+            <>
+              <Text style={[s.label, { paddingHorizontal: SP.md }]}>
+                Available Profiles
+              </Text>
+              {cookiesProfiles.map((profile) => (
+                <TouchableOpacity
+                  key={profile.id}
+                  style={[
+                    s.cookieProfileItem,
+                    selectedCookiesProfile === profile.id && s.cookieProfileItemActive,
+                  ]}
+                  onPress={() => {
+                    setSelectedCookiesProfile(profile.id);
+                    setCookiesContent(null);
+                  }}
+                >
+                  <View style={s.cookieProfileRadio}>
+                    {selectedCookiesProfile === profile.id && (
+                      <View
+                        style={{
+                          width: 8,
+                          height: 8,
+                          borderRadius: 4,
+                          backgroundColor: C.primary,
+                        }}
+                      />
+                    )}
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={[s.text, { fontWeight: "600" }]}>
+                      {profile.name}
+                    </Text>
+                    <Text style={[s.sub, { fontSize: F.xs }]}>
+                      Profile ID: {profile.id}
+                    </Text>
+                  </View>
+                </TouchableOpacity>
+              ))}
+
+              {!cookiesContent ? (
+                <TouchableOpacity
+                  style={[s.btn, { marginHorizontal: SP.md, marginTop: SP.md }]}
+                  onPress={handleFetchCookies}
+                  disabled={cookiesLoading}
+                >
+                  {cookiesLoading ? (
+                    <ActivityIndicator color={C.text} />
+                  ) : (
+                    <>
+                      <MaterialCommunityIcons
+                        name="download"
+                        size={18}
+                        color={C.text}
+                      />
+                      <Text style={[s.btnText, { marginLeft: SP.sm }]}>
+                        Extract Cookies
+                      </Text>
+                    </>
+                  )}
+                </TouchableOpacity>
+              ) : (
+                <>
+                  <View
+                    style={[
+                      s.cookieContentBox,
+                      { marginHorizontal: SP.md, marginTop: SP.md },
+                    ]}
+                  >
+                    <Text style={[s.label, { marginBottom: SP.sm }]}>
+                      ✓ Extracted {cookiesContent.count} cookies
+                    </Text>
+                    <Text style={[s.sub, { fontSize: F.xs, marginBottom: SP.md }]}>
+                      From profile: {cookiesContent.profile}
+                    </Text>
+
+                    <View
+                      style={{
+                        backgroundColor: C.bg,
+                        borderRadius: R.md,
+                        padding: SP.sm,
+                        maxHeight: 200,
+                      }}
+                    >
+                      <ScrollView nestedScrollEnabled>
+                        <Text
+                          style={[
+                            { color: C.success, fontFamily: "monospace", fontSize: F.xs },
+                          ]}
+                          numberOfLines={20}
+                        >
+                          {cookiesContent.code.substring(0, 300)}...
+                        </Text>
+                      </ScrollView>
+                    </View>
+
+                    <TouchableOpacity
+                      style={[s.btn, { marginTop: SP.md }]}
+                      onPress={handleCopyCookiesToClipboard}
+                    >
+                      <MaterialCommunityIcons
+                        name="content-copy"
+                        size={18}
+                        color={C.text}
+                      />
+                      <Text style={[s.btnText, { marginLeft: SP.sm }]}>
+                        Copy to Clipboard
+                      </Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      style={[
+                        s.btn,
+                        { marginTop: SP.sm, backgroundColor: C.elevated },
+                      ]}
+                      onPress={() => setCookiesContent(null)}
+                    >
+                      <Text style={[s.btnText, { color: C.sub }]}>
+                        Back to Profiles
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                </>
+              )}
+            </>
+          ) : null}
+        </ScrollView>
+      </BottomSheet>
       <SlideLeftModal
         visible={filesSheetOpen}
         onClose={() => setFilesSheetOpen(false)}
@@ -7559,4 +7861,73 @@ const s = StyleSheet.create({
     color: C.primary,
     fontWeight: "700",
   },
+
+  // ── Chrome Cookies ──
+  sheetBody: {
+    flex: 1,
+    paddingHorizontal: SP.md,
+  },
+  label: {
+    fontSize: F.md,
+    fontWeight: "700",
+    color: C.text,
+    marginBottom: SP.sm,
+  },
+  text: {
+    fontSize: F.md,
+    color: C.text,
+  },
+  sub: {
+    fontSize: F.sm,
+    color: C.sub,
+  },
+  btn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: C.primary,
+    paddingVertical: SP.md,
+    paddingHorizontal: SP.md,
+    borderRadius: R.md,
+    gap: SP.sm,
+  },
+  btnText: {
+    fontSize: F.md,
+    fontWeight: "700",
+    color: C.text,
+  },
+  cookieProfileItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: SP.md,
+    paddingHorizontal: SP.md,
+    marginHorizontal: SP.md,
+    marginBottom: SP.sm,
+    borderRadius: R.md,
+    backgroundColor: C.elevated,
+    borderWidth: 1,
+    borderColor: C.border,
+    gap: SP.md,
+  },
+  cookieProfileItemActive: {
+    backgroundColor: C.primaryDim,
+    borderColor: C.primary,
+  },
+  cookieProfileRadio: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    borderWidth: 2,
+    borderColor: C.primary + "60",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  cookieContentBox: {
+    backgroundColor: C.elevated,
+    borderRadius: R.md,
+    borderWidth: 1,
+    borderColor: C.border,
+    padding: SP.md,
+  },
 });
+
