@@ -1836,10 +1836,12 @@ function AppMain() {
     if (d?.apps) setVisibleApps(d.apps);
     setIsLoadingApps(false);
   };
-  const handlePower = (action) =>
+  const handlePower = (action) => {
+    const label = action.charAt(0).toUpperCase() + action.slice(1);
+
     showDialog({
-      title: "Confirm",
-      message: `${action.toUpperCase()} your PC? Runs in 5 sec.`,
+      title: `Confirm ${label}`,
+      message: `The system will execute this action in 5 seconds. Ongoing processes may be terminated.`,
       buttons: [
         { text: "Cancel", style: "cancel" },
         {
@@ -1852,6 +1854,7 @@ function AppMain() {
         },
       ],
     });
+  };
   const cancelShutdown = async () => {
     await sendAction("/power/cancel");
     showDialog({ title: "Aborted", message: "Shutdown/Restart cancelled." });

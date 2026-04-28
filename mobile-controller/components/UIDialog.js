@@ -18,8 +18,8 @@ const C = {
   primary: "#4F8EF7",
   primaryDim: "rgba(79, 142, 247, 0.15)",
   bg: "#121212",
-  elevated: "#1E1E1E",
-  border: "#333333",
+  elevated: "#141418",
+  border: "#FFFFFF0D",
   text: "#FFFFFF",
   textDim: "#AAAAAA",
   danger: "#FF453A",
@@ -138,7 +138,7 @@ export const UIDialog = ({
           {
             justifyContent: "center",
             alignItems: "center",
-            padding: SP.xl,
+            padding: SP.lg,
             zIndex: 99999,
           },
         ]}
@@ -238,7 +238,6 @@ export const UIDialog = ({
                     style={[
                       s.uiDialogBtn,
                       {
-                        borderTopWidth: 1,
                         borderLeftWidth: !isVertical && idx > 0 ? 1 : 0,
                         borderColor: C.border,
                         flex: isVertical ? 0 : 1,
@@ -282,8 +281,10 @@ export const UIDialog = ({
 const s = StyleSheet.create({
   uiDialogBox: {
     width: "100%",
-    maxWidth: 340,
+    maxWidth: 440,
     backgroundColor: C.elevated,
+    borderWidth: 1,
+    borderColor: C.border,
     borderRadius: 16,
     overflow: "hidden",
     shadowColor: "#000",
@@ -293,7 +294,7 @@ const s = StyleSheet.create({
     elevation: 10,
   },
   uiDialogContentWrapper: {
-    padding: SP.lg,
+    padding: SP.md,
     alignItems: "center",
   },
   uiDialogIconCircle: {
@@ -314,6 +315,7 @@ const s = StyleSheet.create({
     color: C.textDim,
     fontSize: 14,
     textAlign: "center",
+    paddingHorizontal: SP.sm,
     lineHeight: 20,
     marginBottom: SP.sm,
   },
