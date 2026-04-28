@@ -3151,7 +3151,7 @@ function AppMain() {
             <Text style={s.navHost}>{hostname}</Text>
           </View>
         </View>
-        {(keyboardSheetOpen || shortcutSheetOpen || filesSheetOpen || terminalSheetOpen) ? (
+        {(keyboardSheetOpen || shortcutSheetOpen || filesSheetOpen || terminalSheetOpen || touchpadOpen) ? (
           <TouchableOpacity
             style={[s.disconnectBtn, { backgroundColor: C.elevated, borderColor: C.border }]}
             onPress={() => {
@@ -3159,6 +3159,11 @@ function AppMain() {
               else if (shortcutSheetOpen) setShortcutSheetOpen(false);
               else if (filesSheetOpen) setFilesSheetOpen(false);
               else if (terminalSheetOpen) setTerminalSheetOpen(false);
+              else if (touchpadOpen) {
+                setTouchpadOpen(false);
+                if (touchpadDragging) touchpadDragEnd();
+                touchpadStopFlush();
+              }
             }}
             activeOpacity={0.7}
           >
@@ -5877,8 +5882,8 @@ function AppMain() {
               >
                 <Ionicons
                   name={touchpadDragging ? "move" : "hand-left-outline"}
-                  size={48}
-                  color={touchpadDragging ? C.primary + "30" : C.border + "40"}
+                  size={40}
+                  color={touchpadDragging ? C.primary + "18" : C.muted + "18"}
                 />
               </View>
             </View>
@@ -5887,7 +5892,7 @@ function AppMain() {
             <View style={{ height: 1, backgroundColor: C.border }} />
 
             {/* Bottom buttons — inside same container */}
-            <View style={{ flexDirection: "row", height: 56 }}>
+            <View style={{ flexDirection: "row", height: 72 }}>
               <TouchableOpacity
                 style={{
                   flex: 1,
@@ -5897,7 +5902,7 @@ function AppMain() {
                 onPress={() => touchpadClick("left")}
                 activeOpacity={0.5}
               >
-                <Text style={{ color: C.text, fontSize: F.sm, fontWeight: "600" }}>
+                <Text style={{ color: C.muted, fontSize: F.sm, fontWeight: "600" }}>
                   L
                 </Text>
               </TouchableOpacity>
@@ -5911,7 +5916,7 @@ function AppMain() {
                 onPress={() => touchpadClick("middle")}
                 activeOpacity={0.5}
               >
-                <Ionicons name="ellipsis-horizontal" size={16} color={C.muted} />
+                <Ionicons name="ellipsis-horizontal" size={14} color={C.muted + "60"} />
               </TouchableOpacity>
               <View style={{ width: 1, backgroundColor: C.border }} />
               <TouchableOpacity
@@ -5923,7 +5928,7 @@ function AppMain() {
                 onPress={() => touchpadClick("right")}
                 activeOpacity={0.5}
               >
-                <Text style={{ color: C.text, fontSize: F.sm, fontWeight: "600" }}>
+                <Text style={{ color: C.muted, fontSize: F.sm, fontWeight: "600" }}>
                   R
                 </Text>
               </TouchableOpacity>
