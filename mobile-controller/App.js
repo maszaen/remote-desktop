@@ -1198,10 +1198,11 @@ function AppMain() {
   const [tabsPendingAction, setTabsPendingAction] = useState(null);
   const [tabsLastCount, setTabsLastCount] = useState(0);
   // Distance from screen bottom to the URL bar input.
-  // The tab list below has fixed height TAB_LIST_H, plus sheet visible
-  // bottom padding. BottomSheet shifts by max(0, kbHeight - offset).
-  // Reusable: for any sheet with inputs, compute this same way.
-  const tabsKbOffset = TAB_LIST_H + (Platform.OS === "ios" ? 34 : SP.xl);
+  // Tab list below uses maxHeight, so actual height depends on item count.
+  // BottomSheet shifts by max(0, kbHeight - offset).
+  const tabsVisibleCount = Math.min(tabsList.length, TAB_LIST_MAX_ITEMS);
+  const tabsKbOffset =
+    tabsVisibleCount * TAB_ITEM_H + SP.md + (Platform.OS === "ios" ? 34 : SP.xl);
   const [filesSheetOpen, setFilesSheetOpen] = useState(false);
   const [terminalSheetOpen, setTerminalSheetOpen] = useState(false);
 
@@ -5409,254 +5410,217 @@ function AppMain() {
         keyboardVerticalOffset={tabsKbOffset}
       >
         <View style={s.sheetContent}>
-          {/* Active target indicator + change button */}
-          {tabsActiveHwnd && tabsList.length > 1 && (
+          {/* Controls panel — dark container wrapping actions + URL bar */}
+          <View
+            style={{
+              marginHorizontal: SP.md,
+              marginBottom: SP.md,
+              backgroundColor: C.surface,
+              borderRadius: R.md,
+              borderWidth: 1,
+              borderColor: C.border,
+              overflow: "hidden",
+            }}
+          >
+            {/* Quick action bar */}
+            <View
+              style={{
+                flexDirection: "row",
+                justifyContent: "space-around",
+                paddingVertical: SP.sm,
+              }}
+            >
+              <TouchableOpacity
+                style={{ alignItems: "center", paddingVertical: SP.xs, flex: 1 }}
+                onPress={() => handleTabAction("prev")}
+                activeOpacity={0.6}
+              >
+                <Ionicons name="chevron-back" size={20} color={C.primary} />
+                <Text style={{ color: C.sub, fontSize: F.xs, marginTop: 2 }}>Prev</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={{ alignItems: "center", paddingVertical: SP.xs, flex: 1 }}
+                onPress={() => handleTabAction("next")}
+                activeOpacity={0.6}
+              >
+                <Ionicons name="chevron-forward" size={20} color={C.primary} />
+                <Text style={{ color: C.sub, fontSize: F.xs, marginTop: 2 }}>Next</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={{ alignItems: "center", paddingVertical: SP.xs, flex: 1 }}
+                onPress={() => handleTabAction("new")}
+                activeOpacity={0.6}
+              >
+                <Ionicons name="add-circle-outline" size={20} color={C.success} />
+                <Text style={{ color: C.sub, fontSize: F.xs, marginTop: 2 }}>New</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={{ alignItems: "center", paddingVertical: SP.xs, flex: 1 }}
+                onPress={() => handleTabAction("close")}
+                activeOpacity={0.6}
+              >
+                <Ionicons name="close-circle-outline" size={20} color={C.danger} />
+                <Text style={{ color: C.sub, fontSize: F.xs, marginTop: 2 }}>Close</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={{ alignItems: "center", paddingVertical: SP.xs, flex: 1 }}
+                onPress={fetchTabs}
+                activeOpacity={0.6}
+              >
+                <Ionicons name="refresh" size={20} color={C.sub} />
+                <Text style={{ color: C.sub, fontSize: F.xs, marginTop: 2 }}>Refresh</Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* Navigate URL bar */}
             <View
               style={{
                 flexDirection: "row",
                 alignItems: "center",
-                marginHorizontal: SP.md,
+                marginHorizontal: SP.sm,
                 marginBottom: SP.sm,
-                backgroundColor: C.primary + "12",
-                borderRadius: R.md,
-                paddingHorizontal: SP.md,
-                paddingVertical: SP.sm,
+                backgroundColor: C.elevated,
+                borderRadius: R.sm,
+                paddingHorizontal: SP.sm,
+                height: 40,
               }}
             >
-              <Ionicons name="checkmark-circle" size={16} color={C.primary} />
-              <Text
-                style={{ color: C.primary, fontSize: F.xs, flex: 1, marginLeft: SP.sm }}
-                numberOfLines={1}
-              >
-                {(tabsList.find((t) => t.hwnd === tabsActiveHwnd) || {}).browser || "Window"} — {(tabsList.find((t) => t.hwnd === tabsActiveHwnd) || {}).title || ""}
-              </Text>
-              <TouchableOpacity
-                onPress={() => setTabsActiveHwnd(null)}
-                activeOpacity={0.6}
-              >
-                <Text style={{ color: C.primary, fontSize: F.xs, fontWeight: "600" }}>Change</Text>
+              <Ionicons name="globe-outline" size={16} color={C.muted} />
+              <TextInput
+                style={{
+                  flex: 1,
+                  color: C.text,
+                  fontSize: F.sm,
+                  paddingVertical: 0,
+                  paddingHorizontal: SP.sm,
+                  height: 40,
+                }}
+                placeholder="Enter URL..."
+                placeholderTextColor={C.muted}
+                value={tabNavUrl}
+                onChangeText={setTabNavUrl}
+                autoCapitalize="none"
+                autoCorrect={false}
+                onSubmitEditing={handleTabNavigate}
+                returnKeyType="go"
+              />
+              <TouchableOpacity onPress={handleTabNavigate} activeOpacity={0.6}>
+                <Ionicons name="arrow-forward-circle" size={22} color={C.primary} />
               </TouchableOpacity>
             </View>
-          )}
-
-          {/* Quick action bar */}
-          <View
-            style={{
-              flexDirection: "row",
-              justifyContent: "space-around",
-              paddingHorizontal: SP.sm,
-              paddingBottom: SP.md,
-              borderBottomWidth: 1,
-              borderBottomColor: C.border,
-              marginBottom: SP.md,
-            }}
-          >
-            <TouchableOpacity
-              style={{ alignItems: "center", paddingVertical: SP.sm, flex: 1 }}
-              onPress={() => handleTabAction("prev")}
-              activeOpacity={0.6}
-            >
-              <Ionicons name="chevron-back" size={22} color={C.primary} />
-              <Text style={{ color: C.sub, fontSize: F.xs, marginTop: 2 }}>Prev</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={{ alignItems: "center", paddingVertical: SP.sm, flex: 1 }}
-              onPress={() => handleTabAction("next")}
-              activeOpacity={0.6}
-            >
-              <Ionicons name="chevron-forward" size={22} color={C.primary} />
-              <Text style={{ color: C.sub, fontSize: F.xs, marginTop: 2 }}>Next</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={{ alignItems: "center", paddingVertical: SP.sm, flex: 1 }}
-              onPress={() => handleTabAction("new")}
-              activeOpacity={0.6}
-            >
-              <Ionicons name="add-circle-outline" size={22} color={C.success} />
-              <Text style={{ color: C.sub, fontSize: F.xs, marginTop: 2 }}>New</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={{ alignItems: "center", paddingVertical: SP.sm, flex: 1 }}
-              onPress={() => handleTabAction("close")}
-              activeOpacity={0.6}
-            >
-              <Ionicons name="close-circle-outline" size={22} color={C.danger} />
-              <Text style={{ color: C.sub, fontSize: F.xs, marginTop: 2 }}>Close</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={{ alignItems: "center", paddingVertical: SP.sm, flex: 1 }}
-              onPress={fetchTabs}
-              activeOpacity={0.6}
-            >
-              <Ionicons name="refresh" size={22} color={C.sub} />
-              <Text style={{ color: C.sub, fontSize: F.xs, marginTop: 2 }}>Refresh</Text>
-            </TouchableOpacity>
           </View>
 
-          {/* Navigate URL bar */}
-          <View
-            style={{
-              flexDirection: "row",
-              alignItems: "center",
-              marginHorizontal: SP.md,
-              marginBottom: SP.md,
-              backgroundColor: C.elevated,
-              borderRadius: R.md,
-              borderWidth: 1,
-              borderColor: C.border,
-              paddingHorizontal: SP.sm,
-            }}
-          >
-            <Ionicons name="globe-outline" size={18} color={C.muted} />
-            <TextInput
-              style={{
-                flex: 1,
-                color: C.text,
-                fontSize: F.sm,
-                paddingVertical: SP.sm,
-                paddingHorizontal: SP.sm,
-              }}
-              placeholder="Enter URL..."
-              placeholderTextColor={C.muted}
-              value={tabNavUrl}
-              onChangeText={setTabNavUrl}
-              autoCapitalize="none"
-              autoCorrect={false}
-              onSubmitEditing={handleTabNavigate}
-              returnKeyType="go"
-            />
-            <TouchableOpacity onPress={handleTabNavigate} activeOpacity={0.6}>
-              <Ionicons name="arrow-forward-circle" size={24} color={C.primary} />
-            </TouchableOpacity>
-          </View>
-
-          {/* Tab list — fixed height container (max 3 items visible), scrollable */}
-          <View style={{ height: TAB_LIST_H }}>
-            {tabsLoading ? (
-              <>
-                {Array.from({ length: Math.min(tabsLastCount || TAB_LIST_MAX_ITEMS, TAB_LIST_MAX_ITEMS) }).map((_, idx) => (
+          {/* Tab list — maxHeight 3 items, scrollable if more */}
+          {tabsLoading ? (
+            <View>
+              {Array.from({ length: Math.min(tabsLastCount || TAB_LIST_MAX_ITEMS, TAB_LIST_MAX_ITEMS) }).map((_, idx) => (
+                <View
+                  key={`skel-${idx}`}
+                  style={{
+                    flexDirection: "row",
+                    alignItems: "center",
+                    height: TAB_ITEM_H,
+                    paddingHorizontal: SP.md,
+                    borderBottomWidth: 1,
+                    borderBottomColor: C.border,
+                  }}
+                >
                   <View
-                    key={`skel-${idx}`}
+                    style={{
+                      width: 20,
+                      height: 20,
+                      borderRadius: 10,
+                      backgroundColor: C.border,
+                    }}
+                  />
+                  <View style={{ flex: 1, marginLeft: SP.md }}>
+                    <View
+                      style={{
+                        width: "70%",
+                        height: 14,
+                        borderRadius: R.sm,
+                        backgroundColor: C.border,
+                        marginBottom: 6,
+                      }}
+                    />
+                    <View
+                      style={{
+                        width: "30%",
+                        height: 10,
+                        borderRadius: R.sm,
+                        backgroundColor: C.border,
+                      }}
+                    />
+                  </View>
+                  <View
+                    style={{
+                      width: 16,
+                      height: 16,
+                      borderRadius: 8,
+                      backgroundColor: C.border,
+                    }}
+                  />
+                </View>
+              ))}
+            </View>
+          ) : tabsList.length > 0 ? (
+            <ScrollView style={{ maxHeight: TAB_LIST_H }}>
+              {tabsList.map((tab, i) => {
+                const isSelected = tabsActiveHwnd === tab.hwnd;
+                return (
+                  <TouchableOpacity
+                    key={`${tab.hwnd}-${i}`}
                     style={{
                       flexDirection: "row",
                       alignItems: "center",
                       height: TAB_ITEM_H,
                       paddingHorizontal: SP.md,
-                      borderBottomWidth: 1,
+                      borderBottomWidth: i < tabsList.length - 1 ? 1 : 0,
                       borderBottomColor: C.border,
+                      backgroundColor: isSelected ? C.primary + "15" : "transparent",
                     }}
+                    onPress={() => handleSwitchToTab(tab.hwnd)}
+                    activeOpacity={0.6}
                   >
-                    <View
-                      style={{
-                        width: 20,
-                        height: 20,
-                        borderRadius: 10,
-                        backgroundColor: C.border,
-                      }}
+                    <Ionicons
+                      name={
+                        tab.browser === "Chrome"
+                          ? "logo-chrome"
+                          : tab.browser === "Edge"
+                            ? "logo-edge"
+                            : tab.browser === "Firefox"
+                              ? "logo-firefox"
+                              : "globe-outline"
+                      }
+                      size={20}
+                      color={isSelected ? C.primary : C.sub}
                     />
                     <View style={{ flex: 1, marginLeft: SP.md }}>
-                      <View
+                      <Text
                         style={{
-                          width: "70%",
-                          height: 14,
-                          borderRadius: R.sm,
-                          backgroundColor: C.border,
-                          marginBottom: 6,
+                          color: C.text,
+                          fontSize: F.sm,
+                          fontWeight: isSelected ? "600" : "500",
                         }}
-                      />
-                      <View
-                        style={{
-                          width: "30%",
-                          height: 10,
-                          borderRadius: R.sm,
-                          backgroundColor: C.border,
-                        }}
-                      />
+                        numberOfLines={1}
+                      >
+                        {tab.title || "Untitled"}
+                      </Text>
+                      <Text style={{ color: C.muted, fontSize: F.xs }}>
+                        {tab.browser}
+                        {isSelected ? " · Selected" : ""}
+                      </Text>
                     </View>
-                    <View
-                      style={{
-                        width: 16,
-                        height: 16,
-                        borderRadius: 8,
-                        backgroundColor: C.border,
-                      }}
-                    />
-                  </View>
-                ))}
-              </>
-            ) : tabsList.length === 0 ? (
-              <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
-                <Ionicons name="browsers-outline" size={40} color={C.muted} />
-                <Text
-                  style={{
-                    color: C.sub,
-                    fontSize: F.sm,
-                    marginTop: SP.md,
-                    textAlign: "center",
-                  }}
-                >
-                  No browser windows detected on PC.
-                </Text>
-              </View>
-            ) : (
-              <ScrollView style={{ height: TAB_LIST_H }}>
-                {tabsList.map((tab, i) => {
-                  const isSelected = tabsActiveHwnd === tab.hwnd;
-                  return (
-                    <TouchableOpacity
-                      key={`${tab.hwnd}-${i}`}
-                      style={{
-                        flexDirection: "row",
-                        alignItems: "center",
-                        height: TAB_ITEM_H,
-                        paddingHorizontal: SP.md,
-                        borderBottomWidth: i < tabsList.length - 1 ? 1 : 0,
-                        borderBottomColor: C.border,
-                        backgroundColor: isSelected ? C.primary + "15" : "transparent",
-                      }}
-                      onPress={() => handleSwitchToTab(tab.hwnd)}
-                      activeOpacity={0.6}
-                    >
-                      <Ionicons
-                        name={
-                          tab.browser === "Chrome"
-                            ? "logo-chrome"
-                            : tab.browser === "Edge"
-                              ? "logo-edge"
-                              : tab.browser === "Firefox"
-                                ? "logo-firefox"
-                                : "globe-outline"
-                        }
-                        size={20}
-                        color={isSelected ? C.primary : C.sub}
-                      />
-                      <View style={{ flex: 1, marginLeft: SP.md }}>
-                        <Text
-                          style={{
-                            color: C.text,
-                            fontSize: F.sm,
-                            fontWeight: isSelected ? "600" : "500",
-                          }}
-                          numberOfLines={1}
-                        >
-                          {tab.title || "Untitled"}
-                        </Text>
-                        <Text style={{ color: C.muted, fontSize: F.xs }}>
-                          {tab.browser}
-                          {isSelected ? " · Selected" : ""}
-                        </Text>
-                      </View>
-                      {isSelected ? (
-                        <Ionicons name="checkmark-circle" size={18} color={C.primary} />
-                      ) : (
-                        <Ionicons name="open-outline" size={16} color={C.muted} />
-                      )}
-                    </TouchableOpacity>
-                  );
-                })}
-              </ScrollView>
-            )}
-          </View>
+                    {isSelected ? (
+                      <Ionicons name="checkmark-circle" size={18} color={C.primary} />
+                    ) : (
+                      <Ionicons name="open-outline" size={16} color={C.muted} />
+                    )}
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+          ) : null}
         </View>
       </BottomSheet>
 
