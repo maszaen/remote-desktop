@@ -40,6 +40,7 @@ import AnimatedRe, {
   useSharedValue,
   useAnimatedStyle,
   useAnimatedKeyboard,
+  useAnimatedReaction,
   withSpring,
   withTiming,
   withDecay,
@@ -1222,22 +1223,22 @@ function AppMain() {
   const [terminalRunning, setTerminalRunning] = useState(false);
   const terminalScrollRef = useRef(null);
   const loginScrollRef = useRef(null);
-  const [loginKbHeight, setLoginKbHeight] = useState(0);
-
-  useEffect(() => {
-    const showEvent = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
-    const hideEvent = Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
-    const onShow = (e) => {
-      setLoginKbHeight(e.endCoordinates.height);
-      setTimeout(() => {
-        loginScrollRef.current?.scrollToEnd({ animated: true });
-      }, 100);
-    };
-    const onHide = () => setLoginKbHeight(0);
-    const sub1 = Keyboard.addListener(showEvent, onShow);
-    const sub2 = Keyboard.addListener(hideEvent, onHide);
-    return () => { sub1.remove(); sub2.remove(); };
-  }, []);
+  const loginKb = useAnimatedKeyboard();
+  const loginKbSpacerStyle = useAnimatedStyle(() => {
+    "worklet";
+    return { height: Math.max(60, loginKb.height.value) };
+  });
+  const scrollLoginToEnd = () => {
+    loginScrollRef.current?.scrollToEnd({ animated: true });
+  };
+  useAnimatedReaction(
+    () => loginKb.height.value,
+    (cur, prev) => {
+      if (cur > 0 && (prev === null || prev === 0)) {
+        runOnJS(scrollLoginToEnd)();
+      }
+    },
+  );
 
   // Smooth keyboard animation for terminal (Reanimated worklet, no re-renders)
   // Container shrinks from bottom by keyboard height — input just follows.
@@ -2976,7 +2977,7 @@ function AppMain() {
             )}
           </FadeSlideIn>
 
-          <View style={{ height: loginKbHeight > 0 ? loginKbHeight : 60 }} />
+          <AnimatedRe.View style={loginKbSpacerStyle} />
         </ScrollView>
 
         {/* Rename Modal */}
