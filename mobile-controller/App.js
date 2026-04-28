@@ -1204,12 +1204,14 @@ function AppMain() {
   const tabsKbOffset =
     tabsVisibleCount * TAB_ITEM_H + SP.sm + (Platform.OS === "ios" ? 34 : SP.xl);
   const [touchpadOpen, setTouchpadOpen] = useState(false);
-  const [touchpadSensitivity, setTouchpadSensitivity] = useState(1.5);
   const [touchpadDragging, setTouchpadDragging] = useState(false);
   const touchpadPrevX = useRef(null);
   const touchpadPrevY = useRef(null);
   const touchpadLastRef = useRef(null);
   const touchpadTapRef = useRef(null);
+  const touchpadDeltaRef = useRef({ dx: 0, dy: 0 });
+  const touchpadScrollRef = useRef(0);
+  const touchpadFlushRef = useRef(null);
   const [filesSheetOpen, setFilesSheetOpen] = useState(false);
   const [terminalSheetOpen, setTerminalSheetOpen] = useState(false);
 
@@ -2212,34 +2214,66 @@ function AppMain() {
   };
 
   // ── Touchpad ──
-  const touchpadMove = async (dx, dy) => {
-    await sendAction("/mouse/move", "POST", {
-      dx,
-      dy,
-      sensitivity: touchpadSensitivity,
-    });
+  const TOUCHPAD_SENSITIVITY = 1.7;
+  const TOUCHPAD_SCROLL_MULT = 3.0;
+  const TOUCHPAD_FLUSH_MS = 16; // ~60fps flush rate
+
+  const touchpadFlush = () => {
+    const d = touchpadDeltaRef.current;
+    const s = touchpadScrollRef.current;
+    if (d.dx !== 0 || d.dy !== 0) {
+      sendAction("/mouse/move", "POST", {
+        dx: d.dx,
+        dy: d.dy,
+        sensitivity: TOUCHPAD_SENSITIVITY,
+      });
+      touchpadDeltaRef.current = { dx: 0, dy: 0 };
+    }
+    if (s !== 0) {
+      sendAction("/mouse/scroll", "POST", { dy: s });
+      touchpadScrollRef.current = 0;
+    }
   };
 
-  const touchpadClick = async (button = "left") => {
-    await sendAction(`/mouse/click?button=${button}`, "POST");
+  const touchpadStartFlush = () => {
+    if (!touchpadFlushRef.current) {
+      touchpadFlushRef.current = setInterval(touchpadFlush, TOUCHPAD_FLUSH_MS);
+    }
   };
 
-  const touchpadDoubleClick = async () => {
-    await sendAction("/mouse/doubleclick", "POST");
+  const touchpadStopFlush = () => {
+    if (touchpadFlushRef.current) {
+      clearInterval(touchpadFlushRef.current);
+      touchpadFlushRef.current = null;
+    }
+    touchpadFlush();
   };
 
-  const touchpadScroll = async (dy) => {
-    await sendAction("/mouse/scroll", "POST", { dy });
+  const touchpadMove = (dx, dy) => {
+    touchpadDeltaRef.current.dx += dx;
+    touchpadDeltaRef.current.dy += dy;
   };
 
-  const touchpadDragStart = async () => {
+  const touchpadScroll = (dy) => {
+    touchpadScrollRef.current += dy;
+  };
+
+  const touchpadClick = (button = "left") => {
+    sendAction(`/mouse/click?button=${button}`, "POST");
+  };
+
+  const touchpadDoubleClick = () => {
+    sendAction("/mouse/doubleclick", "POST");
+  };
+
+  const touchpadDragStart = () => {
     setTouchpadDragging(true);
-    await sendAction("/mouse/down?button=left", "POST");
+    sendAction("/mouse/down?button=left", "POST");
   };
 
-  const touchpadDragEnd = async () => {
+  const touchpadDragEnd = () => {
     setTouchpadDragging(false);
-    await sendAction("/mouse/up?button=left", "POST");
+    sendAction("/mouse/up?button=left", "POST");
   };
 
   // ── Panic Button ──
@@ -5740,6 +5774,7 @@ function AppMain() {
         onClose={() => {
           setTouchpadOpen(false);
           if (touchpadDragging) touchpadDragEnd();
+          touchpadStopFlush();
           touchpadPrevX.current = null;
           touchpadPrevY.current = null;
           touchpadLastRef.current = null;
@@ -5747,260 +5782,152 @@ function AppMain() {
         }}
         contentInsetTop={keyboardModalTopInset}
       >
-        <View style={{ flex: 1, backgroundColor: C.bg }}>
-          {/* Header */}
-          <View
-            style={{
-              flexDirection: "row",
-              alignItems: "center",
-              paddingHorizontal: SP.md,
-              paddingTop: SP.md,
-              paddingBottom: SP.sm,
-            }}
-          >
-            <TouchableOpacity
-              onPress={() => {
-                setTouchpadOpen(false);
-                if (touchpadDragging) touchpadDragEnd();
-                touchpadPrevX.current = null;
-                touchpadPrevY.current = null;
-                touchpadLastRef.current = null;
-                touchpadTapRef.current = null;
-              }}
-              activeOpacity={0.6}
-              style={{ marginRight: SP.md }}
-            >
-              <Ionicons name="arrow-back" size={24} color={C.text} />
-            </TouchableOpacity>
-            <View style={{ flex: 1 }}>
-              <Text style={{ color: C.text, fontSize: F.lg, fontWeight: "700" }}>
-                Touchpad
-              </Text>
-              <Text style={{ color: C.muted, fontSize: F.xs }}>
-                Swipe to move, tap to click
-              </Text>
-            </View>
-            {/* Sensitivity control */}
-            <View style={{ flexDirection: "row", alignItems: "center" }}>
-              <TouchableOpacity
-                onPress={() =>
-                  setTouchpadSensitivity((v) => Math.max(0.5, +(v - 0.25).toFixed(2)))
-                }
-                activeOpacity={0.6}
-                style={{
-                  width: 30,
-                  height: 30,
-                  borderRadius: 15,
-                  backgroundColor: C.surface,
-                  alignItems: "center",
-                  justifyContent: "center",
-                }}
-              >
-                <Ionicons name="remove" size={16} color={C.text} />
-              </TouchableOpacity>
-              <Text
-                style={{
-                  color: C.text,
-                  fontSize: F.xs,
-                  fontWeight: "600",
-                  marginHorizontal: SP.sm,
-                  minWidth: 36,
-                  textAlign: "center",
-                }}
-              >
-                {touchpadSensitivity.toFixed(2)}x
-              </Text>
-              <TouchableOpacity
-                onPress={() =>
-                  setTouchpadSensitivity((v) => Math.min(4.0, +(v + 0.25).toFixed(2)))
-                }
-                activeOpacity={0.6}
-                style={{
-                  width: 30,
-                  height: 30,
-                  borderRadius: 15,
-                  backgroundColor: C.surface,
-                  alignItems: "center",
-                  justifyContent: "center",
-                }}
-              >
-                <Ionicons name="add" size={16} color={C.text} />
-              </TouchableOpacity>
-            </View>
-          </View>
-
-          {/* Touchpad gesture area */}
+        <View
+          style={{
+            flex: 1,
+            backgroundColor: C.bg,
+            paddingHorizontal: SP.md,
+            paddingTop: SP.md,
+            paddingBottom: SP.md + (Platform.OS === "ios" ? 34 : 0),
+          }}
+        >
+          {/* Single container: touchpad area + buttons */}
           <View
             style={{
               flex: 1,
-              marginHorizontal: SP.md,
-              marginTop: SP.sm,
               backgroundColor: C.surface,
               borderRadius: R.lg,
               borderWidth: 1,
               borderColor: touchpadDragging ? C.primary : C.border,
               overflow: "hidden",
             }}
-            onStartShouldSetResponder={() => true}
-            onMoveShouldSetResponder={() => true}
-            onResponderGrant={(e) => {
-              const touches = e.nativeEvent.touches || [];
-              // Track touch start for tap detection
-              touchpadLastRef.current = {
-                x: e.nativeEvent.pageX,
-                y: e.nativeEvent.pageY,
-                time: Date.now(),
-                moved: false,
-                fingers: touches.length || 1,
-              };
-            }}
-            onResponderMove={(e) => {
-              const touches = e.nativeEvent.touches || [];
-              const fingerCount = touches.length || 1;
-              const now = Date.now();
+          >
+            {/* Gesture area */}
+            <View
+              style={{ flex: 1 }}
+              onStartShouldSetResponder={() => true}
+              onMoveShouldSetResponder={() => true}
+              onResponderGrant={(e) => {
+                const touches = e.nativeEvent.touches || [];
+                touchpadLastRef.current = {
+                  x: e.nativeEvent.pageX,
+                  y: e.nativeEvent.pageY,
+                  time: Date.now(),
+                  moved: false,
+                  fingers: touches.length || 1,
+                };
+                touchpadStartFlush();
+              }}
+              onResponderMove={(e) => {
+                const touches = e.nativeEvent.touches || [];
+                const fingerCount = touches.length || 1;
 
-              if (fingerCount >= 2) {
-                // Two-finger: scroll
-                const dy = e.nativeEvent.pageY - (touchpadPrevY.current || e.nativeEvent.pageY);
-                touchpadPrevY.current = e.nativeEvent.pageY;
-                if (Math.abs(dy) > 0.5) {
-                  // Natural scroll: swipe down = scroll down (negative dy to pyautogui)
-                  touchpadScroll(Math.round(-dy * 0.3));
-                }
-                if (touchpadLastRef.current) touchpadLastRef.current.moved = true;
-              } else {
-                // Single-finger: move cursor
-                const dx = e.nativeEvent.pageX - (touchpadPrevX.current || e.nativeEvent.pageX);
-                const dy = e.nativeEvent.pageY - (touchpadPrevY.current || e.nativeEvent.pageY);
-                touchpadPrevX.current = e.nativeEvent.pageX;
-                touchpadPrevY.current = e.nativeEvent.pageY;
-                if (Math.abs(dx) > 0.3 || Math.abs(dy) > 0.3) {
-                  touchpadMove(dx, dy);
+                if (fingerCount >= 2) {
+                  const dy = e.nativeEvent.pageY - (touchpadPrevY.current || e.nativeEvent.pageY);
+                  touchpadPrevY.current = e.nativeEvent.pageY;
+                  if (Math.abs(dy) > 0.5) {
+                    touchpadScroll(Math.round(dy * TOUCHPAD_SCROLL_MULT));
+                  }
                   if (touchpadLastRef.current) touchpadLastRef.current.moved = true;
+                } else {
+                  const dx = e.nativeEvent.pageX - (touchpadPrevX.current || e.nativeEvent.pageX);
+                  const dy = e.nativeEvent.pageY - (touchpadPrevY.current || e.nativeEvent.pageY);
+                  touchpadPrevX.current = e.nativeEvent.pageX;
+                  touchpadPrevY.current = e.nativeEvent.pageY;
+                  if (Math.abs(dx) > 0.3 || Math.abs(dy) > 0.3) {
+                    touchpadMove(dx, dy);
+                    if (touchpadLastRef.current) touchpadLastRef.current.moved = true;
+                  }
                 }
-              }
-            }}
-            onResponderRelease={(e) => {
-              const last = touchpadLastRef.current;
-              const now = Date.now();
-              touchpadPrevX.current = null;
-              touchpadPrevY.current = null;
+              }}
+              onResponderRelease={(e) => {
+                const last = touchpadLastRef.current;
+                const now = Date.now();
+                touchpadPrevX.current = null;
+                touchpadPrevY.current = null;
+                touchpadStopFlush();
 
-              if (touchpadDragging) {
-                // Release drag
-                touchpadDragEnd();
-                return;
-              }
-
-              if (last && !last.moved && (now - last.time) < 250) {
-                // Quick tap — check for double-tap-hold (drag)
-                const prevTap = touchpadTapRef.current;
-                if (prevTap && (now - prevTap) < 350) {
-                  // Double tap → start drag (user holds second tap to drag)
-                  touchpadTapRef.current = null;
-                  touchpadDragStart();
+                if (touchpadDragging) {
+                  touchpadDragEnd();
                   return;
                 }
-                // Single tap
-                touchpadTapRef.current = now;
-                if (last.fingers >= 2) {
-                  touchpadClick("right");
-                } else {
-                  touchpadClick("left");
-                }
-              } else {
-                touchpadTapRef.current = null;
-              }
-              touchpadLastRef.current = null;
-            }}
-          >
-            <View
-              style={{
-                flex: 1,
-                alignItems: "center",
-                justifyContent: "center",
-              }}
-              pointerEvents="none"
-            >
-              <Ionicons
-                name={touchpadDragging ? "move" : "hand-left-outline"}
-                size={48}
-                color={touchpadDragging ? C.primary + "40" : C.border}
-              />
-              <Text
-                style={{
-                  color: touchpadDragging ? C.primary + "60" : C.muted + "50",
-                  fontSize: F.xs,
-                  marginTop: SP.sm,
-                }}
-              >
-                {touchpadDragging ? "Dragging — tap to release" : "Touch area"}
-              </Text>
-            </View>
-          </View>
 
-          {/* Bottom buttons */}
-          <View
-            style={{
-              flexDirection: "row",
-              paddingHorizontal: SP.md,
-              paddingVertical: SP.md,
-              paddingBottom: SP.md + (Platform.OS === "ios" ? 34 : 0),
-              gap: SP.sm,
-            }}
-          >
-            <TouchableOpacity
-              style={{
-                flex: 1,
-                height: 52,
-                backgroundColor: C.surface,
-                borderRadius: R.md,
-                borderWidth: 1,
-                borderColor: C.border,
-                alignItems: "center",
-                justifyContent: "center",
+                if (last && !last.moved && (now - last.time) < 250) {
+                  const prevTap = touchpadTapRef.current;
+                  if (prevTap && (now - prevTap) < 350) {
+                    touchpadTapRef.current = null;
+                    touchpadDragStart();
+                    return;
+                  }
+                  touchpadTapRef.current = now;
+                  if (last.fingers >= 2) {
+                    touchpadClick("right");
+                  } else {
+                    touchpadClick("left");
+                  }
+                } else {
+                  touchpadTapRef.current = null;
+                }
+                touchpadLastRef.current = null;
               }}
-              onPress={() => touchpadClick("left")}
-              activeOpacity={0.5}
             >
-              <Text style={{ color: C.text, fontSize: F.sm, fontWeight: "600" }}>
-                L
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={{
-                flex: 0.6,
-                height: 52,
-                backgroundColor: C.surface,
-                borderRadius: R.md,
-                borderWidth: 1,
-                borderColor: C.border,
-                alignItems: "center",
-                justifyContent: "center",
-              }}
-              onPress={() => touchpadClick("middle")}
-              activeOpacity={0.5}
-            >
-              <Ionicons name="ellipsis-horizontal" size={18} color={C.muted} />
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={{
-                flex: 1,
-                height: 52,
-                backgroundColor: C.surface,
-                borderRadius: R.md,
-                borderWidth: 1,
-                borderColor: C.border,
-                alignItems: "center",
-                justifyContent: "center",
-              }}
-              onPress={() => touchpadClick("right")}
-              activeOpacity={0.5}
-            >
-              <Text style={{ color: C.text, fontSize: F.sm, fontWeight: "600" }}>
-                R
-              </Text>
-            </TouchableOpacity>
+              <View
+                style={{ flex: 1, alignItems: "center", justifyContent: "center" }}
+                pointerEvents="none"
+              >
+                <Ionicons
+                  name={touchpadDragging ? "move" : "hand-left-outline"}
+                  size={48}
+                  color={touchpadDragging ? C.primary + "30" : C.border + "40"}
+                />
+              </View>
+            </View>
+
+            {/* Divider */}
+            <View style={{ height: 1, backgroundColor: C.border }} />
+
+            {/* Bottom buttons — inside same container */}
+            <View style={{ flexDirection: "row", height: 56 }}>
+              <TouchableOpacity
+                style={{
+                  flex: 1,
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+                onPress={() => touchpadClick("left")}
+                activeOpacity={0.5}
+              >
+                <Text style={{ color: C.text, fontSize: F.sm, fontWeight: "600" }}>
+                  L
+                </Text>
+              </TouchableOpacity>
+              <View style={{ width: 1, backgroundColor: C.border }} />
+              <TouchableOpacity
+                style={{
+                  flex: 0.5,
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+                onPress={() => touchpadClick("middle")}
+                activeOpacity={0.5}
+              >
+                <Ionicons name="ellipsis-horizontal" size={16} color={C.muted} />
+              </TouchableOpacity>
+              <View style={{ width: 1, backgroundColor: C.border }} />
+              <TouchableOpacity
+                style={{
+                  flex: 1,
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+                onPress={() => touchpadClick("right")}
+                activeOpacity={0.5}
+              >
+                <Text style={{ color: C.text, fontSize: F.sm, fontWeight: "600" }}>
+                  R
+                </Text>
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
       </SlideLeftModal>
