@@ -7,7 +7,6 @@ import {
   TouchableOpacity,
   Image,
   ScrollView,
-  Alert,
   StatusBar,
   RefreshControl,
   Dimensions,
@@ -30,7 +29,7 @@ import UIDialog from "./components/UIDialog";
 import * as Clipboard from "expo-clipboard";
 import * as DocumentPicker from "expo-document-picker";
 import * as ScreenOrientation from "expo-screen-orientation";
-import * as FileSystem from "expo-file-system";
+import * as FileSystem from "expo-file-system/legacy";
 import * as Sharing from "expo-sharing";
 import {
   GestureHandlerRootView,
@@ -1332,25 +1331,10 @@ function AppMain() {
           text: "Rename",
           onPress: () => {
             closeDialog();
-            if (Alert.prompt) {
-              Alert.prompt(
-                "Rename",
-                "",
-                [
-                  { text: "Cancel", style: "cancel" },
-                  {
-                    text: "Save",
-                    onPress: (n) =>
-                      n?.trim() && renameSavedDevice(dev.hostname || dev.ip, n.trim()),
-                  },
-                ],
-                "plain-text",
-                dev.hostname || "",
-              );
-            } else {
+            setTimeout(() => {
               setRenameValue(dev.hostname || "");
               setRenameTarget(dev);
-            }
+            }, 200);
           },
         },
         {
@@ -2179,7 +2163,7 @@ function AppMain() {
       const resumable = FileSystem.createDownloadResumable(
         remoteUrl,
         localUri,
-        {},
+        { headers: { pin: activePin, "x-nexus-id": deviceId } },
         onProgress,
       );
       downloadResumableRef.current = resumable;
