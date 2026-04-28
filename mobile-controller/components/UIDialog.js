@@ -7,6 +7,9 @@ import {
   Animated,
   Easing,
   StyleSheet,
+  KeyboardAvoidingView,
+  Platform,
+  Keyboard,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 
@@ -68,6 +71,11 @@ export const UIDialog = ({
   message = "",
   type = "alert", // "alert", "confirm", "progress"
   progress = 0,
+  icon = null,
+  iconColor = null,
+  iconBg = null,
+  spinning = null,
+  children = null,
   buttons = [],
   cancelable = true,
   onClose = () => {},
@@ -124,7 +132,7 @@ export const UIDialog = ({
       animationType="none"
       onRequestClose={() => cancelable && onClose()}
     >
-      <View
+      <KeyboardAvoidingView
         style={[
           StyleSheet.absoluteFillObject,
           {
@@ -134,6 +142,7 @@ export const UIDialog = ({
             zIndex: 99999,
           },
         ]}
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
       >
         <Animated.View
           style={[
@@ -145,7 +154,10 @@ export const UIDialog = ({
           <TouchableOpacity
             style={{ flex: 1 }}
             activeOpacity={1}
-            onPress={() => cancelable && onClose()}
+            onPress={() => {
+              Keyboard.dismiss();
+              if (cancelable) onClose();
+            }}
           />
         </Animated.View>
 
@@ -154,19 +166,19 @@ export const UIDialog = ({
           pointerEvents="box-none"
         >
           <View style={s.uiDialogContentWrapper}>
-            {type === "progress" && (
+            {(type === "progress" || icon) && (
               <View style={{ alignItems: "center", marginBottom: SP.md }}>
                 <View
                   style={[
                     s.uiDialogIconCircle,
-                    { backgroundColor: C.primaryDim },
+                    { backgroundColor: iconBg || C.primaryDim },
                   ]}
                 >
                   <SpinningIcon
-                    name="cloud-upload-outline"
+                    name={icon || "cloud-upload-outline"}
                     size={26}
-                    color={C.primary}
-                    spinning={true}
+                    color={iconColor || C.primary}
+                    spinning={spinning !== null ? spinning : type === "progress"}
                   />
                 </View>
               </View>
@@ -183,6 +195,8 @@ export const UIDialog = ({
               </Text>
             )}
             {!!message && <Text style={s.uiDialogMessage}>{message}</Text>}
+
+            {children}
 
             {type === "progress" && (
               <View style={s.uiDialogProgressWrapper}>
@@ -260,7 +274,7 @@ export const UIDialog = ({
             </View>
           )}
         </Animated.View>
-      </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 };
