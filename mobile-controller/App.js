@@ -3732,8 +3732,8 @@ function AppMain() {
           onPress={handleOpenTabsSheet}
           activeOpacity={0.6}
         >
-          <View style={[s.menuRowIcon, { backgroundColor: C.primaryDim }]}>
-            <Ionicons name="browsers" size={18} color={C.primary} />
+          <View style={[s.menuRowIcon, { backgroundColor: C.successDim }]}>
+            <Ionicons name="browsers" size={18} color={C.success} />
           </View>
           <View style={s.menuRowBody}>
             <Text style={s.menuRowTitle}>Tab Manager</Text>
