@@ -197,6 +197,15 @@ class VolumeControl(BaseModel):
     volume: int
 
 
+class BrightnessControl(BaseModel):
+    brightness: int
+    monitor_index: Optional[int] = None
+
+
+class TabNavigateRequest(BaseModel):
+    url: str
+
+
 class ClipboardRequest(BaseModel):
     content: str
 
@@ -1123,6 +1132,357 @@ def power_control(action: str):
         }
     else:
         return {"error": "unknown action"}
+
+
+# ── Brightness Control ──
+def _get_physical_monitors():
+    """Enumerate physical monitors via dxva2.dll for DDC/CI brightness control."""
+    from ctypes import wintypes
+
+    dxva2 = ctypes.WinDLL("dxva2", use_last_error=True)
+    user32 = ctypes.windll.user32
+
+    class PHYSICAL_MONITOR(ctypes.Structure):
+        _fields_ = [
+            ("hPhysicalMonitor", wintypes.HANDLE),
+            ("szPhysicalMonitorDescription", wintypes.WCHAR * 128),
+        ]
+
+    monitors_info = []
+    hmonitors = []
+
+    def _enum_cb(hMonitor, hdcMonitor, lprcMonitor, dwData):
+        hmonitors.append(hMonitor)
+        return True
+
+    MONITORENUMPROC = ctypes.WINFUNCTYPE(
+        ctypes.c_int, wintypes.HMONITOR, wintypes.HDC,
+        ctypes.POINTER(wintypes.RECT), wintypes.LPARAM,
+    )
+    user32.EnumDisplayMonitors(None, None, MONITORENUMPROC(_enum_cb), 0)
+
+    for idx, hmon in enumerate(hmonitors):
+        count = wintypes.DWORD()
+        if not dxva2.GetNumberOfPhysicalMonitorsFromHMONITOR(hmon, ctypes.byref(count)):
+            continue
+        if count.value == 0:
+            continue
+        arr = (PHYSICAL_MONITOR * count.value)()
+        if not dxva2.GetPhysicalMonitorsFromHMONITOR(hmon, count.value, arr):
+            continue
+        for pm in arr:
+            monitors_info.append({
+                "handle": pm.hPhysicalMonitor,
+                "name": pm.szPhysicalMonitorDescription or f"Monitor {idx}",
+                "index": idx,
+            })
+
+    return monitors_info, dxva2
+
+
+def _get_internal_brightness():
+    """Get laptop internal display brightness via WMI (PowerShell)."""
+    try:
+        result = subprocess.run(
+            ["powershell", "-NoProfile", "-Command",
+             "(Get-WmiObject -Namespace root/WMI -Class WmiMonitorBrightness).CurrentBrightness"],
+            capture_output=True, text=True, timeout=5,
+        )
+        val = result.stdout.strip()
+        if val.isdigit():
+            return int(val)
+    except Exception:
+        pass
+    return None
+
+
+def _set_internal_brightness(level):
+    """Set laptop internal display brightness via WMI (PowerShell)."""
+    level = max(0, min(100, level))
+    try:
+        subprocess.run(
+            ["powershell", "-NoProfile", "-Command",
+             f"(Get-WmiObject -Namespace root/WMI -Class WmiMonitorBrightnessMethods)"
+             f".WmiSetBrightness(1, {level})"],
+            capture_output=True, text=True, timeout=5,
+        )
+        return True
+    except Exception:
+        return False
+
+
+@app.get("/brightness", dependencies=[Depends(verify_pin)])
+def get_brightness():
+    """Get brightness for all monitors (internal + external)."""
+    from ctypes import wintypes
+    monitors = []
+
+    # Internal display (laptop)
+    internal = _get_internal_brightness()
+    if internal is not None:
+        monitors.append({
+            "index": -1,
+            "name": "Built-in Display",
+            "type": "internal",
+            "brightness": internal,
+            "supported": True,
+        })
+
+    # External monitors via DDC/CI
+    try:
+        phys, dxva2 = _get_physical_monitors()
+        for m in phys:
+            minimum = wintypes.DWORD()
+            current = wintypes.DWORD()
+            maximum = wintypes.DWORD()
+            ok = dxva2.GetMonitorBrightness(
+                m["handle"],
+                ctypes.byref(minimum),
+                ctypes.byref(current),
+                ctypes.byref(maximum),
+            )
+            if ok:
+                max_val = maximum.value if maximum.value > 0 else 100
+                pct = round(current.value * 100 / max_val)
+                monitors.append({
+                    "index": m["index"],
+                    "name": m["name"],
+                    "type": "external",
+                    "brightness": pct,
+                    "min": minimum.value,
+                    "max": maximum.value,
+                    "raw": current.value,
+                    "supported": True,
+                })
+            else:
+                monitors.append({
+                    "index": m["index"],
+                    "name": m["name"],
+                    "type": "external",
+                    "brightness": None,
+                    "supported": False,
+                    "error": "Monitor does not support DDC/CI brightness control",
+                })
+            dxva2.DestroyPhysicalMonitor(m["handle"])
+    except Exception as e:
+        print(f"[BRIGHTNESS] DDC/CI error: {e}")
+
+    if not monitors:
+        return {
+            "status": "no_monitors",
+            "monitors": [],
+            "message": "No adjustable monitors found on this machine",
+        }
+
+    return {"status": "success", "monitors": monitors}
+
+
+@app.post("/brightness", dependencies=[Depends(verify_pin)])
+def set_brightness(ctrl: BrightnessControl):
+    """Set brightness for a specific monitor."""
+    from ctypes import wintypes
+    level = max(0, min(100, ctrl.brightness))
+    idx = ctrl.monitor_index
+
+    # Internal display
+    if idx is None or idx == -1:
+        internal = _get_internal_brightness()
+        if internal is not None:
+            if _set_internal_brightness(level):
+                return {"status": "success", "brightness": level, "type": "internal"}
+            return {"error": "Failed to set internal brightness"}
+
+    # External monitor via DDC/CI
+    try:
+        phys, dxva2 = _get_physical_monitors()
+        for m in phys:
+            if idx is not None and m["index"] != idx:
+                dxva2.DestroyPhysicalMonitor(m["handle"])
+                continue
+
+            minimum = wintypes.DWORD()
+            current = wintypes.DWORD()
+            maximum = wintypes.DWORD()
+            ok = dxva2.GetMonitorBrightness(
+                m["handle"],
+                ctypes.byref(minimum),
+                ctypes.byref(current),
+                ctypes.byref(maximum),
+            )
+            if not ok:
+                dxva2.DestroyPhysicalMonitor(m["handle"])
+                return {
+                    "error": "Monitor does not support DDC/CI brightness control",
+                    "supported": False,
+                }
+
+            max_val = maximum.value if maximum.value > 0 else 100
+            raw = round(level * max_val / 100)
+            raw = max(minimum.value, min(maximum.value, raw))
+            dxva2.SetMonitorBrightness(m["handle"], raw)
+            dxva2.DestroyPhysicalMonitor(m["handle"])
+            return {"status": "success", "brightness": level, "type": "external"}
+
+        return {"error": f"Monitor index {idx} not found"}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+# ── Tab Manager ──
+def _enum_browser_windows():
+    """List all visible browser windows with titles using EnumWindows."""
+    from ctypes import wintypes
+
+    user32 = ctypes.windll.user32
+    results = []
+    browser_exes = {"chrome.exe", "msedge.exe", "firefox.exe", "brave.exe", "opera.exe"}
+
+    def _cb(hwnd, _):
+        if not user32.IsWindowVisible(hwnd):
+            return True
+        length = user32.GetWindowTextLengthW(hwnd)
+        if length == 0:
+            return True
+        buf = ctypes.create_unicode_buffer(length + 1)
+        user32.GetWindowTextW(hwnd, buf, length + 1)
+        title = buf.value
+
+        # Get process name
+        pid = wintypes.DWORD()
+        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+        try:
+            proc = psutil.Process(pid.value)
+            exe = proc.name().lower()
+        except Exception:
+            return True
+
+        if exe in browser_exes:
+            browser_name = {
+                "chrome.exe": "Chrome",
+                "msedge.exe": "Edge",
+                "firefox.exe": "Firefox",
+                "brave.exe": "Brave",
+                "opera.exe": "Opera",
+            }.get(exe, exe)
+            results.append({
+                "hwnd": hwnd,
+                "pid": pid.value,
+                "title": title,
+                "browser": browser_name,
+                "exe": exe,
+            })
+        return True
+
+    WNDENUMPROC = ctypes.WINFUNCTYPE(
+        ctypes.c_bool, wintypes.HWND, wintypes.LPARAM,
+    )
+    user32.EnumWindows(WNDENUMPROC(_cb), 0)
+    return results
+
+
+@app.get("/tabs", dependencies=[Depends(verify_pin)])
+def get_tabs():
+    """List all browser windows with their active tab titles."""
+    try:
+        windows = _enum_browser_windows()
+        tabs = []
+        for w in windows:
+            title = w["title"]
+            # Chrome/Edge titles: "Page Title - Browser Name"
+            browser_suffix = f" - {w['browser']}"
+            if title.endswith(browser_suffix):
+                title = title[: -len(browser_suffix)]
+            elif title.endswith(f" — {w['browser']}"):
+                title = title[: title.rfind(f" — {w['browser']}")]
+            tabs.append({
+                "hwnd": w["hwnd"],
+                "title": title,
+                "browser": w["browser"],
+                "pid": w["pid"],
+            })
+        return {"status": "success", "tabs": tabs}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.post("/tabs/switch", dependencies=[Depends(verify_pin)])
+def switch_tab_window(hwnd: int):
+    """Bring a specific browser window to the foreground."""
+    try:
+        user32 = ctypes.windll.user32
+        # Restore if minimized
+        if user32.IsIconic(hwnd):
+            user32.ShowWindow(hwnd, 9)  # SW_RESTORE
+        user32.SetForegroundWindow(hwnd)
+        return {"status": "success"}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.post("/tabs/next", dependencies=[Depends(verify_pin)])
+def next_tab():
+    """Switch to next browser tab (Ctrl+Tab)."""
+    try:
+        execute_hotkey("ctrlleft", "tab")
+        return {"status": "success"}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.post("/tabs/prev", dependencies=[Depends(verify_pin)])
+def prev_tab():
+    """Switch to previous browser tab (Ctrl+Shift+Tab)."""
+    try:
+        execute_hotkey("ctrlleft", "shiftleft", "tab")
+        return {"status": "success"}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.post("/tabs/close", dependencies=[Depends(verify_pin)])
+def close_tab():
+    """Close current browser tab (Ctrl+W)."""
+    try:
+        execute_hotkey("ctrlleft", "w")
+        return {"status": "success"}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.post("/tabs/new", dependencies=[Depends(verify_pin)])
+def new_tab():
+    """Open a new browser tab (Ctrl+T)."""
+    try:
+        execute_hotkey("ctrlleft", "t")
+        return {"status": "success"}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.post("/tabs/goto", dependencies=[Depends(verify_pin)])
+def goto_tab(index: int):
+    """Jump to tab by index 1-9 (Ctrl+1 through Ctrl+9)."""
+    try:
+        if index < 1 or index > 9:
+            return {"error": "Tab index must be 1-9"}
+        execute_hotkey("ctrlleft", str(index))
+        return {"status": "success", "index": index}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.post("/tabs/navigate", dependencies=[Depends(verify_pin)])
+def navigate_tab(req: TabNavigateRequest):
+    """Navigate current tab to a URL (Ctrl+L, type URL, Enter)."""
+    try:
+        execute_hotkey("ctrlleft", "l")
+        time.sleep(0.15)
+        pyautogui.typewrite(req.url, interval=0.01)
+        time.sleep(0.05)
+        pyautogui.press("enter")
+        return {"status": "success", "url": req.url}
+    except Exception as e:
+        return {"error": str(e)}
 
 
 # ── Connectivity (Wi-Fi & Bluetooth) ──
