@@ -206,6 +206,17 @@ class TabNavigateRequest(BaseModel):
     url: str
 
 
+class MouseMoveRequest(BaseModel):
+    dx: float
+    dy: float
+    sensitivity: float = 1.0
+
+
+class MouseScrollRequest(BaseModel):
+    dx: float = 0
+    dy: float = 0
+
+
 class ClipboardRequest(BaseModel):
     content: str
 
@@ -1499,6 +1510,75 @@ def navigate_tab(req: TabNavigateRequest, hwnd: Optional[int] = None):
         time.sleep(0.05)
         pyautogui.press("enter")
         return {"status": "success", "url": req.url}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+# ── Mouse / Touchpad ──
+
+@app.post("/mouse/move", dependencies=[Depends(verify_pin)])
+def mouse_move(req: MouseMoveRequest):
+    """Move mouse cursor by relative delta, scaled by sensitivity."""
+    try:
+        dx = int(req.dx * req.sensitivity)
+        dy = int(req.dy * req.sensitivity)
+        if dx == 0 and dy == 0:
+            return {"status": "success"}
+        pyautogui.moveRel(dx, dy, _pause=False)
+        return {"status": "success"}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.post("/mouse/click", dependencies=[Depends(verify_pin)])
+def mouse_click(button: str = "left"):
+    """Click mouse button (left, right, middle)."""
+    try:
+        pyautogui.click(button=button, _pause=False)
+        return {"status": "success"}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.post("/mouse/doubleclick", dependencies=[Depends(verify_pin)])
+def mouse_doubleclick():
+    """Double-click left mouse button."""
+    try:
+        pyautogui.doubleClick(_pause=False)
+        return {"status": "success"}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.post("/mouse/scroll", dependencies=[Depends(verify_pin)])
+def mouse_scroll(req: MouseScrollRequest):
+    """Scroll mouse wheel. Positive dy = scroll up, negative = down."""
+    try:
+        if req.dy != 0:
+            pyautogui.scroll(int(req.dy), _pause=False)
+        if req.dx != 0:
+            pyautogui.hscroll(int(req.dx), _pause=False)
+        return {"status": "success"}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.post("/mouse/down", dependencies=[Depends(verify_pin)])
+def mouse_down(button: str = "left"):
+    """Press and hold a mouse button (for drag start)."""
+    try:
+        pyautogui.mouseDown(button=button, _pause=False)
+        return {"status": "success"}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.post("/mouse/up", dependencies=[Depends(verify_pin)])
+def mouse_up(button: str = "left"):
+    """Release a mouse button (for drag end)."""
+    try:
+        pyautogui.mouseUp(button=button, _pause=False)
+        return {"status": "success"}
     except Exception as e:
         return {"error": str(e)}
 
