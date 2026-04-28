@@ -1203,6 +1203,9 @@ function AppMain() {
   const tabsVisibleCount = Math.min(tabsList.length, TAB_LIST_MAX_ITEMS);
   const tabsKbOffset =
     tabsVisibleCount * TAB_ITEM_H + SP.sm + (Platform.OS === "ios" ? 34 : SP.xl);
+  const [touchpadOpen, setTouchpadOpen] = useState(false);
+  const [touchpadSensitivity, setTouchpadSensitivity] = useState(1.5);
+  const [touchpadDragging, setTouchpadDragging] = useState(false);
   const [filesSheetOpen, setFilesSheetOpen] = useState(false);
   const [terminalSheetOpen, setTerminalSheetOpen] = useState(false);
 
@@ -1684,6 +1687,10 @@ function AppMain() {
         setBrightnessSheetOpen(false);
         return true;
       }
+      if (touchpadOpen) {
+        setTouchpadOpen(false);
+        return true;
+      }
       if (tabsPickerOpen) {
         setTabsPickerOpen(false);
         setTabsPendingAction(null);
@@ -1755,6 +1762,7 @@ function AppMain() {
     connectivitySheetOpen,
     clipboardSheetOpen,
     brightnessSheetOpen,
+    touchpadOpen,
     tabsPickerOpen,
     tabsSheetOpen,
     filesSheetOpen,
@@ -2197,6 +2205,37 @@ function AppMain() {
     await sendAction(`/tabs/navigate${param}`, "POST", { url });
     setTabNavUrl("");
     setTimeout(fetchTabs, 1000);
+  };
+
+  // ── Touchpad ──
+  const touchpadMove = async (dx, dy) => {
+    await sendAction("/mouse/move", "POST", {
+      dx,
+      dy,
+      sensitivity: touchpadSensitivity,
+    });
+  };
+
+  const touchpadClick = async (button = "left") => {
+    await sendAction(`/mouse/click?button=${button}`, "POST");
+  };
+
+  const touchpadDoubleClick = async () => {
+    await sendAction("/mouse/doubleclick", "POST");
+  };
+
+  const touchpadScroll = async (dy) => {
+    await sendAction("/mouse/scroll", "POST", { dy });
+  };
+
+  const touchpadDragStart = async () => {
+    setTouchpadDragging(true);
+    await sendAction("/mouse/down?button=left", "POST");
+  };
+
+  const touchpadDragEnd = async () => {
+    setTouchpadDragging(false);
+    await sendAction("/mouse/up?button=left", "POST");
   };
 
   // ── Panic Button ──
@@ -3738,6 +3777,29 @@ function AppMain() {
           <View style={s.menuRowBody}>
             <Text style={s.menuRowTitle}>Tab Manager</Text>
             <Text style={s.menuRowSub}>Manage browser tabs</Text>
+          </View>
+          <Ionicons
+            name="arrow-forward-outline"
+            size={20}
+            color={C.muted}
+            style={{ paddingRight: SP.sm }}
+          />
+        </TouchableOpacity>
+
+        <View style={s.sep} />
+
+        {/* Touchpad row */}
+        <TouchableOpacity
+          style={s.menuRow}
+          onPress={() => setTouchpadOpen(true)}
+          activeOpacity={0.6}
+        >
+          <View style={[s.menuRowIcon, { backgroundColor: C.successDim }]}>
+            <Ionicons name="hand-left" size={18} color={C.success} />
+          </View>
+          <View style={s.menuRowBody}>
+            <Text style={s.menuRowTitle}>Touchpad</Text>
+            <Text style={s.menuRowSub}>Use phone as mouse</Text>
           </View>
           <Ionicons
             name="arrow-forward-outline"
@@ -5667,6 +5729,274 @@ function AppMain() {
           ))}
         </View>
       </BottomSheet>
+
+      {/* ═══ TOUCHPAD ═══ */}
+      <SlideLeftModal
+        visible={touchpadOpen}
+        onClose={() => {
+          setTouchpadOpen(false);
+          if (touchpadDragging) touchpadDragEnd();
+        }}
+        contentInsetTop={keyboardModalTopInset}
+      >
+        <View style={{ flex: 1, backgroundColor: C.bg }}>
+          {/* Header */}
+          <View
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              paddingHorizontal: SP.md,
+              paddingTop: SP.md,
+              paddingBottom: SP.sm,
+            }}
+          >
+            <TouchableOpacity
+              onPress={() => {
+                setTouchpadOpen(false);
+                if (touchpadDragging) touchpadDragEnd();
+              }}
+              activeOpacity={0.6}
+              style={{ marginRight: SP.md }}
+            >
+              <Ionicons name="arrow-back" size={24} color={C.text} />
+            </TouchableOpacity>
+            <View style={{ flex: 1 }}>
+              <Text style={{ color: C.text, fontSize: F.lg, fontWeight: "700" }}>
+                Touchpad
+              </Text>
+              <Text style={{ color: C.muted, fontSize: F.xs }}>
+                Swipe to move, tap to click
+              </Text>
+            </View>
+            {/* Sensitivity control */}
+            <View style={{ flexDirection: "row", alignItems: "center" }}>
+              <TouchableOpacity
+                onPress={() =>
+                  setTouchpadSensitivity((v) => Math.max(0.5, +(v - 0.25).toFixed(2)))
+                }
+                activeOpacity={0.6}
+                style={{
+                  width: 30,
+                  height: 30,
+                  borderRadius: 15,
+                  backgroundColor: C.surface,
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+              >
+                <Ionicons name="remove" size={16} color={C.text} />
+              </TouchableOpacity>
+              <Text
+                style={{
+                  color: C.text,
+                  fontSize: F.xs,
+                  fontWeight: "600",
+                  marginHorizontal: SP.sm,
+                  minWidth: 36,
+                  textAlign: "center",
+                }}
+              >
+                {touchpadSensitivity.toFixed(2)}x
+              </Text>
+              <TouchableOpacity
+                onPress={() =>
+                  setTouchpadSensitivity((v) => Math.min(4.0, +(v + 0.25).toFixed(2)))
+                }
+                activeOpacity={0.6}
+                style={{
+                  width: 30,
+                  height: 30,
+                  borderRadius: 15,
+                  backgroundColor: C.surface,
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+              >
+                <Ionicons name="add" size={16} color={C.text} />
+              </TouchableOpacity>
+            </View>
+          </View>
+
+          {/* Touchpad gesture area */}
+          <View
+            style={{
+              flex: 1,
+              marginHorizontal: SP.md,
+              marginTop: SP.sm,
+              backgroundColor: C.surface,
+              borderRadius: R.lg,
+              borderWidth: 1,
+              borderColor: touchpadDragging ? C.primary : C.border,
+              overflow: "hidden",
+            }}
+          >
+            <GestureDetector
+              gesture={Gesture.Simultaneous(
+                Gesture.Pan()
+                  .minPointers(1)
+                  .maxPointers(1)
+                  .onUpdate((e) => {
+                    touchpadMove(e.changeX, e.changeY);
+                  })
+                  .runOnJS(true),
+                Gesture.Pan()
+                  .minPointers(2)
+                  .maxPointers(2)
+                  .onUpdate((e) => {
+                    touchpadScroll(e.changeY > 0 ? -2 : 2);
+                  })
+                  .runOnJS(true),
+                Gesture.Tap()
+                  .numberOfTaps(1)
+                  .maxDuration(200)
+                  .onEnd(() => {
+                    touchpadClick("left");
+                  })
+                  .runOnJS(true),
+                Gesture.Tap()
+                  .numberOfTaps(2)
+                  .maxDuration(300)
+                  .onEnd(() => {
+                    touchpadDoubleClick();
+                  })
+                  .runOnJS(true),
+                Gesture.LongPress()
+                  .minDuration(400)
+                  .onStart(() => {
+                    touchpadDragStart();
+                  })
+                  .runOnJS(true)
+              )}
+            >
+              <View
+                style={{
+                  flex: 1,
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+              >
+                <Ionicons
+                  name={touchpadDragging ? "move" : "hand-left-outline"}
+                  size={48}
+                  color={touchpadDragging ? C.primary + "40" : C.border}
+                />
+                <Text
+                  style={{
+                    color: touchpadDragging ? C.primary + "60" : C.muted + "50",
+                    fontSize: F.xs,
+                    marginTop: SP.sm,
+                  }}
+                >
+                  {touchpadDragging ? "Dragging..." : "Touch area"}
+                </Text>
+              </View>
+            </GestureDetector>
+          </View>
+
+          {/* Bottom buttons */}
+          <View
+            style={{
+              flexDirection: "row",
+              paddingHorizontal: SP.md,
+              paddingVertical: SP.md,
+              gap: SP.sm,
+            }}
+          >
+            <TouchableOpacity
+              style={{
+                flex: 1,
+                height: 52,
+                backgroundColor: C.surface,
+                borderRadius: R.md,
+                borderWidth: 1,
+                borderColor: C.border,
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+              onPress={() => touchpadClick("left")}
+              activeOpacity={0.5}
+            >
+              <Text style={{ color: C.text, fontSize: F.sm, fontWeight: "600" }}>
+                L
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={{
+                flex: 0.6,
+                height: 52,
+                backgroundColor: C.surface,
+                borderRadius: R.md,
+                borderWidth: 1,
+                borderColor: C.border,
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+              onPress={() => touchpadClick("middle")}
+              activeOpacity={0.5}
+            >
+              <Ionicons name="ellipsis-horizontal" size={18} color={C.muted} />
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={{
+                flex: 1,
+                height: 52,
+                backgroundColor: C.surface,
+                borderRadius: R.md,
+                borderWidth: 1,
+                borderColor: C.border,
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+              onPress={() => touchpadClick("right")}
+              activeOpacity={0.5}
+            >
+              <Text style={{ color: C.text, fontSize: F.sm, fontWeight: "600" }}>
+                R
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* Drag toggle */}
+          <TouchableOpacity
+            style={{
+              marginHorizontal: SP.md,
+              marginBottom: SP.md + (Platform.OS === "ios" ? 34 : 0),
+              height: 44,
+              backgroundColor: touchpadDragging ? C.primary : C.elevated,
+              borderRadius: R.md,
+              borderWidth: 1,
+              borderColor: touchpadDragging ? C.primary : C.border,
+              alignItems: "center",
+              justifyContent: "center",
+              flexDirection: "row",
+            }}
+            onPress={() => {
+              if (touchpadDragging) {
+                touchpadDragEnd();
+              } else {
+                touchpadDragStart();
+              }
+            }}
+            activeOpacity={0.6}
+          >
+            <Ionicons
+              name={touchpadDragging ? "lock-closed" : "lock-open-outline"}
+              size={16}
+              color={touchpadDragging ? C.bg : C.sub}
+              style={{ marginRight: SP.sm }}
+            />
+            <Text
+              style={{
+                color: touchpadDragging ? C.bg : C.sub,
+                fontSize: F.sm,
+                fontWeight: "600",
+              }}
+            >
+              {touchpadDragging ? "Release Drag" : "Hold to Drag"}
+            </Text>
+          </TouchableOpacity>
+        </View>
+      </SlideLeftModal>
 
       <SlideLeftModal
         visible={filesSheetOpen}
