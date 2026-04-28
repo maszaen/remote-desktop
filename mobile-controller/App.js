@@ -1224,8 +1224,8 @@ function AppMain() {
   const [launchingKey, setLaunchingKey] = useState("");
   const [topNavHeight, setTopNavHeight] = useState(0);
 
-  const [queueInput, _setQueueInput] = useState("waasd");
-  const queueInputRef = useRef("waasd");
+  const [queueInput, _setQueueInput] = useState("");
+  const queueInputRef = useRef("");
   const setQueueInput = (val) => {
     queueInputRef.current = val;
     _setQueueInput(val);
@@ -1351,28 +1351,20 @@ function AppMain() {
 
   // ── Network ──────────────────────────────────────────────────
   const formatConnectionError = (title, data, fallbackUrl = "") => {
-    const statusLine =
-      data?.status || data?.statusText
-        ? `HTTP: ${data?.status || "-"} ${data?.statusText || ""}`.trim()
-        : "HTTP: -";
     const phase = data?.phase || data?._requestError?.phase || "unknown";
-    const endpoint = data?.endpoint || data?._requestError?.endpoint || "-";
-    const requestUrl =
-      data?.url || data?._requestError?.url || fallbackUrl || "-";
     const message =
       data?.message ||
       data?.detail ||
       data?._requestError?.message ||
       data?.error ||
       "Unknown connection error";
-    return (
-      `${title}\n\n` +
-      `Phase: ${phase}\n` +
-      `${statusLine}\n` +
-      `Endpoint: ${endpoint}\n` +
-      `URL: ${requestUrl}\n\n` +
-      `Error: ${message}`
-    );
+
+    let userMessage = message;
+    if (phase === "timeout") userMessage = "Connection timed out. Make sure both devices are on the same network.";
+    else if (phase === "network") userMessage = "Could not reach the server. Check your connection and try again.";
+    else if (data?.status === 401 || data?.status === 403) userMessage = "Authentication failed. Please check your pairing code.";
+
+    return `${title}\n\n${userMessage}`;
   };
 
   const sendAction = async (
@@ -1546,7 +1538,7 @@ function AppMain() {
 
   const handlePairingSubmit = async () => {
     if (inputPin.length !== 4)
-      return showDialog({ title: "Invalid PIN", message: "Enter the 4-digit Code." });
+      return showDialog({ title: "Invalid PIN", message: "Please enter the 4-digit pairing code shown on your PC." });
     setLoadingAction("pairing");
     const url = `http://${pairingIp}:8000`;
     const res = await sendAction("/auth-check", "GET", null, url, inputPin);
@@ -1566,7 +1558,7 @@ function AppMain() {
     } else
       showDialog({
         title: "Pairing Failed",
-        message: formatConnectionError("Incorrect code or server unreachable", res, url),
+        message: formatConnectionError("Could not pair with this device", res, url),
       });
     setLoadingAction("");
   };
@@ -2903,37 +2895,28 @@ function AppMain() {
             <Text style={s.navHost}>{hostname}</Text>
           </View>
         </View>
-        <TouchableOpacity
-          style={s.disconnectBtn}
-          onPress={() => {
-            if (keyboardSheetOpen) setKeyboardSheetOpen(false);
-            else if (shortcutSheetOpen) setShortcutSheetOpen(false);
-            else if (filesSheetOpen) setFilesSheetOpen(false);
-            else if (terminalSheetOpen) setTerminalSheetOpen(false);
-            else disconnect();
-          }}
-          activeOpacity={0.7}
-        >
-          <Ionicons
-            name={
-              keyboardSheetOpen ||
-              shortcutSheetOpen ||
-              filesSheetOpen ||
-              terminalSheetOpen
-                ? "arrow-back"
-                : "power"
-            }
-            size={17}
-            color={
-              keyboardSheetOpen ||
-              shortcutSheetOpen ||
-              filesSheetOpen ||
-              terminalSheetOpen
-                ? C.sub
-                : C.danger
-            }
-          />
-        </TouchableOpacity>
+        {(keyboardSheetOpen || shortcutSheetOpen || filesSheetOpen || terminalSheetOpen) ? (
+          <TouchableOpacity
+            style={[s.disconnectBtn, { backgroundColor: C.elevated, borderColor: C.border }]}
+            onPress={() => {
+              if (keyboardSheetOpen) setKeyboardSheetOpen(false);
+              else if (shortcutSheetOpen) setShortcutSheetOpen(false);
+              else if (filesSheetOpen) setFilesSheetOpen(false);
+              else if (terminalSheetOpen) setTerminalSheetOpen(false);
+            }}
+            activeOpacity={0.7}
+          >
+            <Ionicons name="arrow-back" size={17} color={C.sub} />
+          </TouchableOpacity>
+        ) : (
+          <TouchableOpacity
+            style={s.disconnectBtn}
+            onPress={disconnect}
+            activeOpacity={0.7}
+          >
+            <Ionicons name="power" size={17} color={C.danger} />
+          </TouchableOpacity>
+        )}
       </View>
 
       <ScrollView
@@ -2982,7 +2965,7 @@ function AppMain() {
           onPress={() => setVolumeSheetOpen(true)}
           activeOpacity={0.6}
         >
-          <View style={[s.menuRowIcon, { backgroundColor: C.elevated }]}>
+          <View style={[s.menuRowIcon, { backgroundColor: isMuted ? C.dangerDim : "#AEAEB215" }]}>
             <Ionicons
               name={
                 isMuted || currentVolume === 0 ? "volume-mute" : "volume-high"
@@ -3106,7 +3089,7 @@ function AppMain() {
                 activeOpacity={0.7}
               >
                 <Ionicons name="eye-off" size={14} color={C.danger} />
-                <Text style={s.panicBtnText}>Hide/Show</Text>
+                <Text style={s.panicBtnText}>Panic</Text>
               </TouchableOpacity>
             </View>
           )}
@@ -3344,11 +3327,16 @@ function AppMain() {
               ]}
             >
               <Ionicons name="pie-chart-outline" size={26} color={C.muted} />
-              <Text style={s.placeholderText}>Pull down to refresh</Text>
+              <Text style={s.placeholderText}>Pull down to load system stats</Text>
             </View>
           )}
         </View>
         <View style={[s.sep, { marginLeft: 0, marginTop: SP.lg }]} />
+
+        {/* ── TOOLS Section ── */}
+        <View style={{ paddingTop: SP.lg, marginBottom: SP.xs }}>
+          <Text style={s.groupLabel}>TOOLS</Text>
+        </View>
 
         {/* Keyboard Shortcuts row */}
         <TouchableOpacity
@@ -3385,7 +3373,7 @@ function AppMain() {
           <View style={s.menuRowBody}>
             <Text style={s.menuRowTitle}>Launch Apps</Text>
             <Text style={s.menuRowSub}>
-              Preload game/music before entering room
+              Open apps on your PC remotely
             </Text>
           </View>
           <Ionicons
@@ -3409,7 +3397,7 @@ function AppMain() {
           </View>
           <View style={s.menuRowBody}>
             <Text style={s.menuRowTitle}>Keyboard Inject</Text>
-            <Text style={s.menuRowSub}>Realtime typing + queue mode</Text>
+            <Text style={s.menuRowSub}>Type & send keystrokes to PC</Text>
           </View>
           <Ionicons
             name="arrow-forward-outline"
@@ -3514,10 +3502,11 @@ function AppMain() {
           />
         </TouchableOpacity>
 
-        <View style={s.sep} />
+        <View style={[s.sep, { marginLeft: 0, marginTop: SP.md }]} />
+
         {/* Power row */}
         <TouchableOpacity
-          style={s.menuRow}
+          style={[s.menuRow, { marginTop: SP.xs }]}
           onPress={() => setPowerSheetOpen(true)}
           activeOpacity={0.6}
         >
@@ -3528,7 +3517,7 @@ function AppMain() {
             <Text style={[s.menuRowTitle, { color: C.danger }]}>
               Power Options
             </Text>
-            <Text style={s.menuRowSub}>Shutdown or restart</Text>
+            <Text style={s.menuRowSub}>Shutdown or restart PC</Text>
           </View>
           <Ionicons
             name="arrow-forward-outline"
@@ -3735,7 +3724,7 @@ function AppMain() {
             </View>
             <View style={{ flex: 1 }}>
               <Text style={s.powerRowTitle}>Restart</Text>
-              <Text style={s.powerRowSub}>Reboot system in 5 seconds</Text>
+              <Text style={s.powerRowSub}>Reboot your PC</Text>
             </View>
             <Ionicons
               name="arrow-forward-outline"
@@ -3762,7 +3751,7 @@ function AppMain() {
             </View>
             <View style={{ flex: 1 }}>
               <Text style={s.powerRowTitle}>Shutdown</Text>
-              <Text style={s.powerRowSub}>Turn off PC in 5 seconds</Text>
+              <Text style={s.powerRowSub}>Power off your PC</Text>
             </View>
             <Ionicons
               name="arrow-forward-outline"
@@ -4747,7 +4736,7 @@ function AppMain() {
                   ]}
                   value={queueInput}
                   onChangeText={setQueueInput}
-                  placeholder="Ketik teks, macro, atau pola (misal: waasd)..."
+                  placeholder="Type text, macros, or patterns..."
                   placeholderTextColor={C.muted}
                   autoCorrect={false}
                   autoCapitalize="none"
@@ -4867,7 +4856,7 @@ function AppMain() {
         visible={connectivitySheetOpen}
         onClose={() => setConnectivitySheetOpen(false)}
         title="Connectivity"
-        subtitle={`Turn on / off connectivity`}
+        subtitle="Manage wireless connections"
       >
         <View style={s.sheetContent}>
           <TouchableOpacity
@@ -4957,7 +4946,7 @@ function AppMain() {
         visible={clipboardSheetOpen}
         onClose={() => setClipboardSheetOpen(false)}
         title="Clipboard Access"
-        subtitle={`Cross-device clipboard`}
+        subtitle="Share clipboard between devices"
       >
         <View style={s.sheetContent}>
           <TouchableOpacity
@@ -5178,7 +5167,7 @@ function AppMain() {
                         <Ionicons
                           name="chevron-forward"
                           size={13}
-                          color={isLast ? "#5c5c5e" : "#FFFFFF0D"}
+                          color={isLast ? C.muted : C.muted + "60"}
                           style={{ marginHorizontal: 6 }}
                         />
                         {isLast ? (
@@ -5696,7 +5685,7 @@ function AppMain() {
                         color: C.muted,
                         marginTop: SP.sm,
                         textAlign: "center",
-                        fontFamily: "Google Sans Code",
+                        fontFamily: Platform.select({ web: "monospace", default: "Google Sans Code" }),
                       }}
                     >
                       Run commands on your PC
@@ -5707,7 +5696,7 @@ function AppMain() {
                         color: C.muted,
                         marginTop: SP.xs,
                         textAlign: "center",
-                        fontFamily: "Google Sans Code",
+                        fontFamily: Platform.select({ web: "monospace", default: "Google Sans Code" }),
                       }}
                     >
                       PowerShell session
@@ -5735,7 +5724,7 @@ function AppMain() {
                       >
                         <Text
                           style={{
-                            fontFamily: "Google Sans Code",
+                            fontFamily: Platform.select({ web: "monospace", default: "Google Sans Code" }),
                             fontSize: F.sm,
                             color: C.primary,
                             marginRight: SP.xs,
@@ -5746,7 +5735,7 @@ function AppMain() {
                         <Text
                           selectable
                           style={{
-                            fontFamily: "Google Sans Code",
+                            fontFamily: Platform.select({ web: "monospace", default: "Google Sans Code" }),
                             fontSize: F.sm,
                             color: C.text,
                           }}
@@ -5758,7 +5747,7 @@ function AppMain() {
                       <Text
                         selectable
                         style={{
-                          fontFamily: "Google Sans Code",
+                          fontFamily: Platform.select({ web: "monospace", default: "Google Sans Code" }),
                           fontSize: F.sm,
                           color: entry.isError ? C.danger : C.sub,
                         }}
@@ -5784,7 +5773,7 @@ function AppMain() {
                         fontSize: F.sm,
                         color: C.sub,
                         marginLeft: SP.sm,
-                        fontFamily: "Google Sans Code",
+                        fontFamily: Platform.select({ web: "monospace", default: "Google Sans Code" }),
                       }}
                     >
                       Running...
@@ -5824,7 +5813,7 @@ function AppMain() {
                       flex: 1,
                       fontSize: F.sm,
                       color: C.muted,
-                      fontFamily: "Google Sans Code",
+                      fontFamily: Platform.select({ web: "monospace", default: "Google Sans Code" }),
                       marginRight: SP.sm,
                     }}
                   >
@@ -5845,7 +5834,7 @@ function AppMain() {
                       opacity: terminalHistory.length === 0 ? 0.4 : 1,
                     }}
                   >
-                    <Text style={{ fontSize: F.sm, color: C.muted, fontFamily: "Google Sans Code", }}>Clear</Text>
+                    <Text style={{ fontSize: F.sm, color: C.muted, fontFamily: Platform.select({ web: "monospace", default: "Google Sans Code" }), }}>Clear</Text>
                   </TouchableOpacity>
                 </View>
                 {/* Gradient fade below header */}
@@ -5900,7 +5889,7 @@ function AppMain() {
                       fontSize: F.md,
                       paddingVertical: 6,
                       lineHeight: 22,
-                      fontFamily: "Google Sans Code",
+                      fontFamily: Platform.select({ web: "monospace", default: "Google Sans Code" }),
                     }}
                     value={terminalInput}
                     onChangeText={setTerminalInput}
@@ -6805,7 +6794,7 @@ const s = StyleSheet.create({
   volBigUnit: {
     fontSize: 56,
     fontWeight: "700",
-    color: C.muted,
+    color: C.sub,
     lineHeight: 60,
     paddingRight: 4,
   },
