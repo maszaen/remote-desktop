@@ -16,7 +16,6 @@ import {
   Switch,
   Modal,
   Keyboard,
-  KeyboardAvoidingView,
   Animated,
   Easing,
   BackHandler,
@@ -2156,7 +2155,102 @@ function AppMain() {
     const remoteUrl = `${serverUrl}/files/download?token=${encodeURIComponent(
       deviceId,
     )}&path=${encodeURIComponent(entry.path)}`;
-    Linking.openURL(url).catch((e) => Alert.alert("Download Error", e.message));
+    const localUri =
+      FileSystem.cacheDirectory + encodeURIComponent(fileName);
+
+    setDownloadState({
+      active: true,
+      fileName,
+      fileSize: entry.size || 0,
+      progress: 0,
+      done: false,
+      error: null,
+    });
+
+    try {
+      const onProgress = ({ totalBytesWritten, totalBytesExpectedToWrite }) => {
+        const pct =
+          totalBytesExpectedToWrite > 0
+            ? totalBytesWritten / totalBytesExpectedToWrite
+            : 0;
+        setDownloadState((prev) => ({ ...prev, progress: pct }));
+      };
+
+      const resumable = FileSystem.createDownloadResumable(
+        remoteUrl,
+        localUri,
+        {},
+        onProgress,
+      );
+      downloadResumableRef.current = resumable;
+
+      const result = await resumable.downloadAsync();
+      downloadResumableRef.current = null;
+
+      if (!result || !result.uri) {
+        setDownloadState((prev) => ({
+          ...prev,
+          error: "Download failed — no file returned.",
+        }));
+        return;
+      }
+
+      setDownloadState((prev) => ({
+        ...prev,
+        progress: 1,
+        done: true,
+      }));
+
+      const canShare = await Sharing.isAvailableAsync();
+      if (canShare) {
+        try {
+          await Sharing.shareAsync(result.uri, {
+            mimeType: "application/octet-stream",
+            dialogTitle: `Save ${fileName}`,
+          });
+        } catch (_shareErr) {
+          // Sharing failed but download succeeded
+        }
+      }
+    } catch (e) {
+      downloadResumableRef.current = null;
+      if (e.message?.includes("aborted") || e.message?.includes("cancel")) {
+        setDownloadState((prev) => ({ ...prev, active: false }));
+        return;
+      }
+      setDownloadState((prev) => ({
+        ...prev,
+        error: e.message || "Download failed.",
+      }));
+    }
+  };
+
+  const cancelDownload = async () => {
+    try {
+      if (downloadResumableRef.current) {
+        await downloadResumableRef.current.pauseAsync();
+        downloadResumableRef.current = null;
+      }
+    } catch (_) {}
+    setDownloadState({
+      active: false,
+      fileName: "",
+      fileSize: 0,
+      progress: 0,
+      done: false,
+      error: null,
+    });
+  };
+
+  const dismissDownloadModal = () => {
+    setDownloadState({
+      active: false,
+      fileName: "",
+      fileSize: 0,
+      progress: 0,
+      done: false,
+      error: null,
+    });
   };
 
   const uploadFileToCurrent = async () => {
@@ -2633,70 +2727,62 @@ function AppMain() {
         </ScrollView>
 
         {/* Rename Modal */}
-        <Modal
+        <UIDialog
           visible={renameTarget !== null}
-          transparent
-          animationType="fade"
-          onRequestClose={() => {
+          icon="create"
+          spinning={false}
+          title="Rename Device"
+          message={renameTarget?.ip || ""}
+          cancelable
+          onClose={() => {
             setRenameTarget(null);
             setRenameValue("");
           }}
-        >
-          <KeyboardAvoidingView
-            behavior={Platform.OS === "ios" ? "padding" : "height"}
-            style={s.modalOverlay}
-          >
-            <Pressable
-              style={StyleSheet.absoluteFill}
-              onPress={() => {
-                Keyboard.dismiss();
+          buttons={[
+            {
+              text: "Cancel",
+              style: "cancel",
+              onPress: () => {
                 setRenameTarget(null);
                 setRenameValue("");
-              }}
-            />
-            <View style={s.modalBox}>
-              <View style={[s.modalIcon, { backgroundColor: C.primaryDim }]}>
-                <Ionicons name="create" size={24} color={C.primary} />
-              </View>
-              <Text style={s.modalTitle}>Rename Device</Text>
-              <Text style={s.modalSub}>{renameTarget?.ip}</Text>
-              <TextInput
-                style={s.modalInput}
-                value={renameValue}
-                onChangeText={setRenameValue}
-                placeholder="e.g. My Desktop"
-                placeholderTextColor={C.muted}
-                autoFocus
-              />
-              <View style={s.modalBtnRow}>
-                <TouchableOpacity
-                  style={s.btnSecondary}
-                  onPress={() => {
-                    setRenameTarget(null);
-                    setRenameValue("");
-                  }}
-                >
-                  <Text style={s.btnSecondaryText}>Cancel</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[
-                    s.btnPrimary,
-                    { flex: 1 },
-                    !renameValue.trim() && { opacity: 0.3 },
-                  ]}
-                  disabled={!renameValue.trim()}
-                  onPress={() => {
-                    renameSavedDevice(renameTarget.ip, renameValue.trim());
-                    setRenameTarget(null);
-                    setRenameValue("");
-                  }}
-                >
-                  <Text style={s.btnPrimaryText}>Save</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-          </KeyboardAvoidingView>
-        </Modal>
+              },
+              shouldClose: false,
+            },
+            {
+              text: "Save",
+              style: !renameValue.trim() ? "cancel" : "primary",
+              onPress: () => {
+                if (!renameValue.trim()) return;
+                renameSavedDevice(renameTarget.ip, renameValue.trim());
+                setRenameTarget(null);
+                setRenameValue("");
+              },
+              shouldClose: false,
+            },
+          ]}
+        >
+          <TextInput
+            style={{
+              width: "100%",
+              height: 48,
+              backgroundColor: "#1A1A1E",
+              borderRadius: 12,
+              borderWidth: 1.5,
+              borderColor: "#4F8EF7",
+              fontSize: 15,
+              fontWeight: "600",
+              paddingHorizontal: 16,
+              marginTop: 8,
+              marginBottom: 4,
+              color: "#FFFFFF",
+            }}
+            value={renameValue}
+            onChangeText={setRenameValue}
+            placeholder="e.g. My Desktop"
+            placeholderTextColor="#5c5c5e"
+            autoFocus
+          />
+        </UIDialog>
 
         {/* QR Camera */}
         <Modal
@@ -2736,84 +2822,69 @@ function AppMain() {
         </Modal>
 
         {/* Pairing Modal */}
-        <Modal
+        <UIDialog
           visible={pairingModalOpen}
-          transparent
-          animationType="fade"
-          onRequestClose={() => {
+          icon="lock-closed"
+          iconColor="#FF9F0A"
+          iconBg="rgba(255,159,10,0.15)"
+          spinning={false}
+          title="Pairing Required"
+          message={`Enter the 4-digit code shown on ${pairingHostname || "PC"}'s system tray`}
+          cancelable
+          onClose={() => {
             setPairingModalOpen(false);
             setInputPin("");
           }}
-        >
-          <KeyboardAvoidingView
-            behavior={Platform.OS === "ios" ? "padding" : "height"}
-            style={s.modalOverlay}
-          >
-            <Pressable
-              style={StyleSheet.absoluteFill}
-              onPress={() => {
-                Keyboard.dismiss();
+          buttons={[
+            {
+              text: "Cancel",
+              style: "cancel",
+              onPress: () => {
                 setPairingModalOpen(false);
                 setInputPin("");
-              }}
-            />
-            <View style={s.modalBox}>
-              <View style={[s.modalIcon, { backgroundColor: C.warningDim }]}>
-                <Ionicons name="lock-closed" size={24} color={C.warning} />
-              </View>
-              <Text style={s.modalTitle}>Pairing Required</Text>
-              <Text style={s.modalSub}>
-                Enter the 4-digit code shown on{"\n"}
-                <Text style={{ color: C.text, fontWeight: "700" }}>
-                  {pairingHostname}
-                </Text>
-                's system tray
-              </Text>
-              <TextInput
-                style={[
-                  s.pinInput,
-                  { borderColor: C.warning, color: C.warning },
-                ]}
-                keyboardType="number-pad"
-                maxLength={4}
-                value={inputPin}
-                onChangeText={setInputPin}
-                placeholder="• • • •"
-                placeholderTextColor={C.muted}
-                autoFocus
-                secureTextEntry
-              />
-              <View style={s.modalBtnRow}>
-                <TouchableOpacity
-                  style={s.btnSecondary}
-                  onPress={() => {
-                    setPairingModalOpen(false);
-                    setInputPin("");
-                  }}
-                >
-                  <Text style={s.btnSecondaryText}>Cancel</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[
-                    s.btnPrimary,
-                    { flex: 1 },
-                    inputPin.length !== 4 && { opacity: 0.3 },
-                  ]}
-                  onPress={handlePairingSubmit}
-                  disabled={
-                    inputPin.length !== 4 || loadingAction === "pairing"
-                  }
-                >
-                  {loadingAction === "pairing" ? (
-                    <ActivityIndicator color={C.bg} size="small" />
-                  ) : (
-                    <Text style={s.btnPrimaryText}>Verify</Text>
-                  )}
-                </TouchableOpacity>
-              </View>
-            </View>
-          </KeyboardAvoidingView>
-        </Modal>
+              },
+              shouldClose: false,
+            },
+            {
+              text: loadingAction === "pairing" ? "Verifying..." : "Verify",
+              style: inputPin.length !== 4 ? "cancel" : "primary",
+              onPress: () => {
+                if (inputPin.length === 4 && loadingAction !== "pairing") {
+                  handlePairingSubmit();
+                }
+              },
+              shouldClose: false,
+            },
+          ]}
+        >
+          <TextInput
+            style={{
+              width: "100%",
+              maxWidth: 220,
+              height: 64,
+              alignSelf: "center",
+              backgroundColor: "#1A1A1E",
+              borderRadius: 12,
+              borderWidth: 2,
+              borderColor: "#FF9F0A",
+              fontSize: 32,
+              fontWeight: "900",
+              textAlign: "center",
+              letterSpacing: 16,
+              marginTop: 8,
+              marginBottom: 4,
+              color: "#FF9F0A",
+            }}
+            keyboardType="number-pad"
+            maxLength={4}
+            value={inputPin}
+            onChangeText={setInputPin}
+            placeholder="• • • •"
+            placeholderTextColor="#5c5c5e"
+            autoFocus
+            secureTextEntry
+          />
+        </UIDialog>
         <UIDialog {...appDialog} onClose={closeDialog} />
       </View>
     );
@@ -5883,125 +5954,71 @@ function AppMain() {
         </View>
       </SlideLeftModal>
 
-      {/* ═══ DOWNLOAD PROGRESS MODAL ═══ */}
-      <Modal
+      {/* ═══ DOWNLOAD PROGRESS ═══ */}
+      <UIDialog
         visible={downloadState.active}
-        transparent
-        animationType="fade"
-        onRequestClose={() => {
-          if (downloadState.done || downloadState.error) dismissDownloadModal();
-          else cancelDownload();
-        }}
-      >
-        <View style={s.modalOverlay}>
-          <View style={s.modalBox}>
-            <View
-              style={[
-                s.modalIcon,
+        type={!downloadState.done && !downloadState.error ? "progress" : "alert"}
+        progress={downloadState.progress * 100}
+        icon={
+          downloadState.error
+            ? "alert-circle"
+            : downloadState.done
+              ? "checkmark-circle"
+              : "arrow-down-circle"
+        }
+        iconColor={
+          downloadState.error
+            ? "#FF453A"
+            : downloadState.done
+              ? "#32D74B"
+              : undefined
+        }
+        iconBg={
+          downloadState.error
+            ? "rgba(255,69,58,0.15)"
+            : downloadState.done
+              ? "rgba(50,215,75,0.15)"
+              : undefined
+        }
+        spinning={!downloadState.done && !downloadState.error}
+        title={
+          downloadState.error
+            ? "Download Failed"
+            : downloadState.done
+              ? "Download Complete"
+              : "Downloading"
+        }
+        message={
+          downloadState.error
+            ? downloadState.error
+            : `${downloadState.fileName}${
+                downloadState.fileSize > 0
+                  ? ` · ${formatBytes(downloadState.fileSize)}`
+                  : ""
+              }`
+        }
+        cancelable={false}
+        buttons={
+          downloadState.done || downloadState.error
+            ? [
                 {
-                  backgroundColor: downloadState.error
-                    ? C.dangerDim
-                    : downloadState.done
-                      ? C.successDim
-                      : C.primaryDim,
+                  text: "Done",
+                  style: "primary",
+                  onPress: dismissDownloadModal,
+                  shouldClose: false,
                 },
-              ]}
-            >
-              <Ionicons
-                name={
-                  downloadState.error
-                    ? "alert-circle"
-                    : downloadState.done
-                      ? "checkmark-circle"
-                      : "arrow-down-circle"
-                }
-                size={24}
-                color={
-                  downloadState.error
-                    ? C.danger
-                    : downloadState.done
-                      ? C.success
-                      : C.primary
-                }
-              />
-            </View>
-            <Text style={s.modalTitle}>
-              {downloadState.error
-                ? "Download Failed"
-                : downloadState.done
-                  ? "Download Complete"
-                  : "Downloading"}
-            </Text>
-            <Text
-              style={[s.modalSub, { marginBottom: SP.md }]}
-              numberOfLines={2}
-            >
-              {downloadState.fileName}
-              {downloadState.fileSize > 0
-                ? ` · ${formatBytes(downloadState.fileSize)}`
-                : ""}
-            </Text>
-
-            {downloadState.error ? (
-              <Text
-                style={{
-                  fontSize: F.sm,
-                  color: C.danger,
-                  textAlign: "center",
-                  marginBottom: SP.lg,
-                }}
-              >
-                {downloadState.error}
-              </Text>
-            ) : (
-              <View style={{ width: "100%", marginBottom: SP.lg }}>
-                <View
-                  style={{
-                    height: 6,
-                    backgroundColor: C.border,
-                    borderRadius: 3,
-                    overflow: "hidden",
-                  }}
-                >
-                  <AnimatedProgressBar
-                    percent={downloadState.progress * 100}
-                    color={downloadState.done ? C.success : C.primary}
-                    style={{ height: 6, borderRadius: 3 }}
-                  />
-                </View>
-                <Text
-                  style={{
-                    fontSize: F.xs,
-                    color: C.muted,
-                    textAlign: "right",
-                    marginTop: SP.xs,
-                  }}
-                >
-                  {Math.round(downloadState.progress * 100)}%
-                </Text>
-              </View>
-            )}
-
-            <View style={s.modalBtnRow}>
-              {downloadState.done || downloadState.error ? (
-                <TouchableOpacity
-                  style={[s.btnPrimary, { flex: 1 }]}
-                  onPress={dismissDownloadModal}
-                >
-                  <Text style={s.btnPrimaryText}>Done</Text>
-                </TouchableOpacity>
-              ) : (
-                <TouchableOpacity
-                  style={[s.btnSecondary, { flex: 1 }]}
-                  onPress={cancelDownload}
-                >
-                  <Text style={s.btnSecondaryText}>Cancel</Text>
-                </TouchableOpacity>
-              )}
-            </View>
-          </View>
-        </View>
-      </Modal>
+              ]
+            : [
+                {
+                  text: "Cancel",
+                  style: "cancel",
+                  onPress: cancelDownload,
+                  shouldClose: false,
+                },
+              ]
+        }
+        onClose={dismissDownloadModal}
+      />
 
       {/* ═══ IMAGE DETAIL MODAL ═══ */}
       <Modal
@@ -6356,72 +6373,6 @@ const s = StyleSheet.create({
     borderColor: C.border,
   },
   btnSecondaryText: { color: C.sub, fontWeight: "700", fontSize: F.md },
-
-  // ── Modals ──
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: "rgba(0,0,0,0.7)",
-    justifyContent: "center",
-    padding: SP.lg,
-  },
-  modalBox: {
-    backgroundColor: C.surface,
-    borderRadius: R.xl,
-    padding: SP.xl,
-    alignItems: "center",
-    borderWidth: 1,
-    borderColor: C.border,
-  },
-  modalIcon: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
-    justifyContent: "center",
-    alignItems: "center",
-    marginBottom: SP.md,
-  },
-  modalTitle: {
-    fontSize: F.xl,
-    fontWeight: "900",
-    color: C.text,
-    marginBottom: SP.xs,
-  },
-  modalSub: {
-    fontSize: F.sm,
-    color: C.sub,
-    textAlign: "center",
-    marginBottom: SP.lg,
-    lineHeight: 20,
-  },
-  modalInput: {
-    width: "100%",
-    height: 52,
-    backgroundColor: C.elevated,
-    borderRadius: R.md,
-    borderWidth: 1.5,
-    borderColor: C.primary,
-    fontSize: F.md,
-    fontWeight: "600",
-    textAlign: "left",
-    paddingHorizontal: SP.md,
-    marginBottom: SP.lg,
-    color: C.text,
-  },
-  pinInput: {
-    width: "100%",
-    maxWidth: 220,
-    height: 64,
-    backgroundColor: C.elevated,
-    borderRadius: R.md,
-    borderWidth: 2,
-    fontSize: 32,
-    fontWeight: "900",
-    textAlign: "center",
-    letterSpacing: 16,
-    marginBottom: SP.lg,
-    color: C.text,
-  },
-  modalBtnRow: { flexDirection: "row", gap: SP.md, width: "100%" },
 
   // ── QR ──
   qrOverlay: {
