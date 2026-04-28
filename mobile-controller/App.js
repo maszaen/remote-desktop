@@ -2517,20 +2517,6 @@ function AppMain() {
           translucent
           backgroundColor="transparent"
         />
-        {/* Gradient fade bottom screen */}
-        <LinearGradient
-          colors={["transparent", C.warning]}
-          style={{
-            position: "absolute",
-            bottom: 60,
-            left: 0,
-            right: 0,
-            height: 20,
-            zIndex: 999,
-          }}
-          pointerEvents="none"
-        />
-
         <ScrollView
           contentContainerStyle={s.scrollLogin}
           showsVerticalScrollIndicator={false}
@@ -3605,6 +3591,19 @@ function AppMain() {
 
         <View style={{ height: 60 }} />
       </ScrollView>
+
+      {/* Gradient fade bottom screen */}
+      <LinearGradient
+        colors={["transparent", C.bg]}
+        style={{
+          position: "absolute",
+          bottom: 0,
+          left: 0,
+          right: 0,
+          height: 60,
+        }}
+        pointerEvents="none"
+      />
 
       {/* ═══ VOLUME SHEET ═══ */}
       <BottomSheet
