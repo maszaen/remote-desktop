@@ -1168,7 +1168,6 @@ function AppMain() {
   const [hiResImage, setHiResImage] = useState(null);
   const [hiResLoading, setHiResLoading] = useState(false);
 
-  const [mediaSheetOpen, setMediaSheetOpen] = useState(false);
   const [volumeSheetOpen, setVolumeSheetOpen] = useState(false);
   const [powerSheetOpen, setPowerSheetOpen] = useState(false);
   const [shortcutSheetOpen, setShortcutSheetOpen] = useState(false);
@@ -1618,10 +1617,6 @@ function AppMain() {
         setImageModalOpen(false);
         return true;
       }
-      if (mediaSheetOpen) {
-        setMediaSheetOpen(false);
-        return true;
-      }
       if (volumeSheetOpen) {
         setVolumeSheetOpen(false);
         return true;
@@ -1703,7 +1698,6 @@ function AppMain() {
     return () => backHandler.remove();
   }, [
     imageModalOpen,
-    mediaSheetOpen,
     volumeSheetOpen,
     powerSheetOpen,
     shortcutSheetOpen,
@@ -2932,66 +2926,127 @@ function AppMain() {
           />
         }
       >
-        {/* Media row */}
-        <TouchableOpacity
-          style={s.menuRow}
-          onPress={() => {
-            getStats();
-            setMediaSheetOpen(true);
-          }}
-          activeOpacity={0.6}
-        >
-          <View style={[s.menuRowIcon, { backgroundColor: C.primaryDim }]}>
-            <Ionicons name="musical-notes" size={18} color={C.primary} />
+        {/* ── Media Controls ── */}
+        <View style={{ paddingBottom: SP.sm }}>
+          <View style={s.sectionHeaderRow}>
+            <Text style={s.groupLabel}>MEDIA CONTROLS</Text>
+            <TouchableOpacity
+              onPress={() => getStats()}
+              disabled={mediaFetching}
+              style={s.refreshChip}
+              activeOpacity={0.7}
+            >
+              <SpinningIcon
+                name="sync-outline"
+                size={13}
+                color={C.sub}
+                spinning={mediaFetching}
+              />
+              <Text style={s.refreshChipText}> Refresh</Text>
+            </TouchableOpacity>
           </View>
-          <View style={s.menuRowBody}>
-            <Text style={s.menuRowTitle}>Media Controls</Text>
-            <Text style={s.menuRowSub} numberOfLines={1}>
-              {stats?.active_media || "Nothing Playing"}
-            </Text>
-          </View>
-          <Ionicons
-            name="arrow-forward-outline"
-            size={20}
-            color={C.muted}
-            style={{ paddingRight: SP.sm }}
-          />
-        </TouchableOpacity>
-        <View style={s.sep} />
 
-        {/* Volume row */}
-        <TouchableOpacity
-          style={s.menuRow}
-          onPress={() => setVolumeSheetOpen(true)}
-          activeOpacity={0.6}
-        >
-          <View style={[s.menuRowIcon, { backgroundColor: isMuted ? C.dangerDim : "#AEAEB215" }]}>
-            <Ionicons
-              name={
-                isMuted || currentVolume === 0 ? "volume-mute" : "volume-high"
-              }
-              size={18}
-              color={isMuted ? C.danger : C.sub}
-            />
+          <View style={s.mediaCard}>
+            {/* Track title */}
+            <View style={s.mediaCardTitle}>
+              {stats?.active_media && stats.active_media !== "Not Playing" ? (
+                <MarqueeText
+                  style={[
+                    s.mediaCardTrack,
+                    marqueeScrolling && { paddingLeft: 20 },
+                  ]}
+                  onScrollChange={setMarqueeScrolling}
+                >
+                  {stats.active_media}
+                </MarqueeText>
+              ) : (
+                <Text style={[s.mediaCardTrack, { color: C.muted }]}>
+                  {mediaFetching ? "Loading..." : "Not Playing"}
+                </Text>
+              )}
+            </View>
+
+            {/* Playback buttons */}
+            <View style={s.mediaCardControls}>
+              <TouchableOpacity
+                style={s.mediaCardBtnSm}
+                onPress={() => mediaControl("prev")}
+                activeOpacity={0.7}
+              >
+                <Ionicons name="play-skip-back" size={18} color={C.text} />
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[s.mediaCardBtnLg, mediaCooldown && { opacity: 0.6 }]}
+                onPress={() => mediaControl("playpause")}
+                disabled={mediaCooldown}
+                activeOpacity={0.8}
+              >
+                <Ionicons
+                  name={
+                    (
+                      optimisticPlaying !== null
+                        ? optimisticPlaying
+                        : stats?.active_media &&
+                          stats.active_media !== "Not Playing"
+                    )
+                      ? "pause"
+                      : "play"
+                  }
+                  size={28}
+                  color={C.text}
+                  style={
+                    (
+                      optimisticPlaying !== null
+                        ? optimisticPlaying
+                        : stats?.active_media &&
+                          stats.active_media !== "Not Playing"
+                    )
+                      ? { paddingLeft: 0 }
+                      : { paddingLeft: 3 }
+                  }
+                />
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[s.mediaCardBtnSm, mediaCooldown && { opacity: 0.4 }]}
+                onPress={() => mediaControl("next")}
+                disabled={mediaCooldown}
+                activeOpacity={0.7}
+              >
+                <Ionicons name="play-skip-forward" size={18} color={C.text} />
+              </TouchableOpacity>
+            </View>
+
+            {/* System Volume chip — bottom-right */}
+            <TouchableOpacity
+              style={s.mediaCardVolBtn}
+              onPress={() => setVolumeSheetOpen(true)}
+              activeOpacity={0.7}
+            >
+              <Ionicons
+                name={
+                  isMuted || currentVolume === 0
+                    ? "volume-mute"
+                    : "volume-high"
+                }
+                size={14}
+                color={isMuted ? C.danger : C.sub}
+              />
+              <Text
+                style={[
+                  s.mediaCardVolText,
+                  isMuted && { color: C.danger },
+                ]}
+              >
+                {isMuted
+                  ? "Muted"
+                  : currentVolume !== undefined
+                    ? `${currentVolume}%`
+                    : "Vol"}
+              </Text>
+            </TouchableOpacity>
           </View>
-          <View style={s.menuRowBody}>
-            <Text style={s.menuRowTitle}>System Volume</Text>
-            <Text style={s.menuRowSub}>
-              {isMuted
-                ? "Muted"
-                : currentVolume !== undefined
-                  ? `${currentVolume}%`
-                  : "Loading..."}
-            </Text>
-          </View>
-          <Ionicons
-            name="arrow-forward-outline"
-            size={20}
-            color={C.muted}
-            style={{ paddingRight: SP.sm }}
-          />
-        </TouchableOpacity>
-        <View style={s.sep} />
+        </View>
+        <View style={[s.sep, { marginLeft: 0 }]} />
 
         {/* Live Desktop */}
         <View style={{ paddingTop: SP.lg }}>
@@ -3531,91 +3586,6 @@ function AppMain() {
 
         <View style={{ height: 60 }} />
       </ScrollView>
-
-      {/* ═══ MEDIA SHEET ═══ */}
-      <BottomSheet
-        visible={mediaSheetOpen}
-        onClose={() => setMediaSheetOpen(false)}
-        title="Media Controls"
-      >
-        <View style={s.sheetContent}>
-          {/* Hero track title with marquee */}
-          <View style={s.mediaTitleWrap}>
-            {stats?.active_media && stats.active_media !== "Not Playing" ? (
-              <MarqueeText
-                style={[
-                  s.mediaHeroTitle,
-                  marqueeScrolling && { paddingLeft: 20 },
-                ]}
-                onScrollChange={setMarqueeScrolling}
-              >
-                {stats.active_media}
-              </MarqueeText>
-            ) : (
-              <Text
-                style={[
-                  s.mediaHeroTitle,
-                  { color: C.muted, textAlign: "center" },
-                ]}
-              >
-                {mediaFetching ? "Loading..." : "Not Playing"}
-              </Text>
-            )}
-          </View>
-          <View style={s.mediaCluster}>
-            <TouchableOpacity
-              style={s.mediaBtnSm}
-              onPress={() => mediaControl("prev")}
-              activeOpacity={0.7}
-            >
-              <Ionicons name="play-skip-back" size={20} color={C.text} />
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[s.mediaBtnLg, mediaCooldown && { opacity: 0.6 }]}
-              onPress={() => mediaControl("playpause")}
-              disabled={mediaCooldown}
-              activeOpacity={0.8}
-            >
-              <Ionicons
-                name={
-                  (
-                    optimisticPlaying !== null
-                      ? optimisticPlaying
-                      : stats?.active_media &&
-                        stats.active_media !== "Not Playing"
-                  )
-                    ? "pause"
-                    : "play"
-                }
-                size={37}
-                color={C.text}
-                style={
-                  (
-                    optimisticPlaying !== null
-                      ? optimisticPlaying
-                      : stats?.active_media &&
-                        stats.active_media !== "Not Playing"
-                  )
-                    ? {
-                        paddingLeft: 0,
-                      }
-                    : {
-                        paddingLeft: 5,
-                      }
-                }
-              />
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[s.mediaBtnSm, mediaCooldown && { opacity: 0.4 }]}
-              onPress={() => mediaControl("next")}
-              disabled={mediaCooldown}
-              activeOpacity={0.7}
-            >
-              <Ionicons name="play-skip-forward" size={20} color={C.text} />
-            </TouchableOpacity>
-          </View>
-        </View>
-      </BottomSheet>
 
       {/* ═══ VOLUME SHEET ═══ */}
       <BottomSheet
@@ -6733,48 +6703,74 @@ const s = StyleSheet.create({
   },
   sheetContent: { paddingHorizontal: SP.md, paddingTop: SP.xs },
 
-  // ── Media Sheet ──
-  mediaTitleWrap: {
+  // ── Inline Media Card ──
+  mediaCard: {
+    backgroundColor: C.elevated,
+    borderRadius: R.sm,
+    borderWidth: 1,
+    borderColor: C.border,
+    paddingHorizontal: SP.md,
+    paddingTop: SP.md,
+    paddingBottom: SP.sm,
+  },
+  mediaCardTitle: {
     alignItems: "center",
     justifyContent: "center",
-    paddingVertical: SP.lg,
-    paddingHorizontal: SP.xl,
+    paddingBottom: SP.sm,
+    paddingHorizontal: SP.xs,
   },
-  mediaHeroTitle: {
-    fontSize: 56,
-    fontWeight: "800",
+  mediaCardTrack: {
+    fontSize: F.lg,
+    fontWeight: "700",
     color: C.text,
-    lineHeight: 60,
   },
-  mediaCluster: {
+  mediaCardControls: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    gap: SP.xl,
-    paddingVertical: SP.lg + SP.sm,
+    gap: SP.lg,
+    paddingVertical: SP.sm,
   },
-  mediaBtnSm: {
-    width: 58,
-    height: 58,
+  mediaCardBtnSm: {
+    width: 44,
+    height: 44,
     borderRadius: R.full,
-    backgroundColor: C.elevated,
+    backgroundColor: C.surface,
     justifyContent: "center",
     alignItems: "center",
     borderWidth: 1,
     borderColor: C.border,
   },
-  mediaBtnLg: {
-    width: 76,
-    height: 76,
+  mediaCardBtnLg: {
+    width: 56,
+    height: 56,
     borderRadius: R.full,
     backgroundColor: C.primary,
     justifyContent: "center",
     alignItems: "center",
     shadowColor: C.primary,
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.45,
-    shadowRadius: 14,
-    elevation: 10,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.35,
+    shadowRadius: 10,
+    elevation: 6,
+  },
+  mediaCardVolBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    alignSelf: "flex-end",
+    gap: SP.xs,
+    paddingHorizontal: SP.sm + 2,
+    paddingVertical: SP.xs + 2,
+    borderRadius: R.full,
+    backgroundColor: C.surface,
+    borderWidth: 1,
+    borderColor: C.border,
+    marginTop: SP.sm,
+  },
+  mediaCardVolText: {
+    fontSize: F.xs,
+    fontWeight: "600",
+    color: C.sub,
   },
 
   // ── Volume Sheet ──
