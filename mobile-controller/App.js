@@ -1190,8 +1190,15 @@ function AppMain() {
   const terminalKb = useAnimatedKeyboard();
   const terminalCardAnimStyle = useAnimatedStyle(() => {
     "worklet";
-    // Base margin (SP.md=16) + keyboard height so card always has bottom gap
-    return { paddingBottom: 16 + terminalKb.height.value };
+    // Base margin (16) saat tertutup, tapi pakai flexibilitas keyboard height saat terbuka
+    return { paddingBottom: Math.max(16, terminalKb.height.value) };
+  });
+
+  const keyboardInjectAnimStyle = useAnimatedStyle(() => {
+    "worklet";
+    // Base padding (16) saat tertutup biar ada margin,
+    // flexibel menyesuaikan keyboard saat terbuka dengan gap (16)
+    return { paddingBottom: Math.max(16, terminalKb.height.value + 16) };
   });
 
   // Files browser state
@@ -2926,7 +2933,7 @@ function AppMain() {
         }
       >
         {/* ── Media Controls ── */}
-        <View style={{ paddingBottom: SP.lg, paddingTop: SP.md }}>
+        <View style={{ paddingBottom: SP.lg, paddingTop: SP.md     }}>
           <View style={s.sectionHeaderRow}>
             <Text style={s.groupLabel}>MEDIA CONTROLS</Text>
             {/* System Volume chip — bottom-right */}
@@ -3054,7 +3061,7 @@ function AppMain() {
         <View style={[s.sep, { marginLeft: 0 }]} />
 
         {/* Live Desktop */}
-        <View style={{ paddingTop: SP.md }}>
+        <View style={{ paddingTop: SP.sm }}>
           <View style={s.sectionHeaderRow}>
             <Text style={s.groupLabel}>DESKTOP CAPTURE</Text>
             <TouchableOpacity
@@ -3157,7 +3164,7 @@ function AppMain() {
         <View style={[s.sep, { marginLeft: 0, marginTop: SP.lg }]} />
 
         {/* System Stats */}
-        <View style={{ paddingTop: SP.md }}>
+        <View style={{ paddingTop: SP.sm }}>
           <View style={s.sectionHeaderRow}>
             <Text style={s.groupLabel}>SYSTEM USAGE</Text>
             <TouchableOpacity
@@ -3394,8 +3401,8 @@ function AppMain() {
         <View style={[s.sep, { marginLeft: 0, marginTop: SP.lg }]} />
 
         {/* ── TOOLS Section ── */}
-        <View style={{ paddingTop: SP.lg, marginBottom: SP.xs }}>
-          <Text style={s.groupLabel}>TOOLS</Text>
+        <View style={{ paddingTop: SP.sm + SP.xs + 1, marginBottom: SP.xs }}>
+          <Text style={s.groupLabel}>TOOLS & UTILITIES</Text>
         </View>
 
         {/* Keyboard Shortcuts row */}
@@ -4565,9 +4572,15 @@ function AppMain() {
         contentInsetTop={keyboardModalTopInset}
       >
         <View style={s.keyboardModalRoot}>
-          <ScrollView
-            style={s.keyboardModalScroll}
-            contentContainerStyle={s.keyboardModalScrollContent}
+          <AnimatedRe.View
+            style={[
+              { flex: 1 },
+              keyboardInjectAnimStyle,
+            ]}
+          >
+            <ScrollView
+              style={s.keyboardModalScroll}
+              contentContainerStyle={s.keyboardModalScrollContent}
             showsVerticalScrollIndicator={false}
             keyboardShouldPersistTaps="handled"
           >
@@ -4665,61 +4678,98 @@ function AppMain() {
             <View
               style={[
                 s.keyboardPanel,
-                { backgroundColor: "transparent", borderWidth: 0, padding: 0 },
+                { backgroundColor: "transparent", borderWidth: 0, padding: 0, flex: 1 },
               ]}
             >
-              {/* MAIN TEXTAREA CARD */}
+              {/* MAIN TEXTAREA CARD - Matches Terminal Access structure */}
               <View
                 style={[
                   s.keyboardTextareaWrap,
                   {
-                    minHeight: 240,
+                    height: 250, // FIXED HEIGHT FORCES INTERNAL SCROLL
                     overflow: "hidden",
                     elevation: 2,
                     shadowColor: "#000",
                     shadowOffset: { width: 0, height: 2 },
                     shadowOpacity: 0.1,
                     shadowRadius: 4,
+                    borderWidth: 0, // Terminal access layout has no outer border
+                    backgroundColor: C.elevated,
                   },
                 ]}
               >
+                {/* Header resembling Terminal Access path */}
                 <View
                   style={{
-                    flexDirection: "row",
-                    alignItems: "center",
-                    paddingHorizontal: SP.md,
-                    paddingTop: SP.sm,
-                    paddingBottom: SP.sm,
-                    borderBottomWidth: 1,
-                    borderBottomColor: C.border,
-                    backgroundColor: C.elevated,
+                    position: "absolute",
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    zIndex: 10,
                   }}
                 >
-                  <Ionicons
-                    name="terminal"
-                    size={16}
-                    color={C.primary}
-                    style={{ marginRight: 8 }}
-                  />
-                  <Text
-                    style={[
-                      s.groupLabel,
-                      { marginVertical: 0, color: C.primary, letterSpacing: 1 },
-                    ]}
+                  <View
+                    style={{
+                      flexDirection: "row",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      paddingTop: SP.sm,
+                      paddingBottom: SP.xs,
+                      paddingHorizontal: SP.md,
+                      paddingRight: SP.sm,
+                      backgroundColor: C.elevated,
+                    }}
                   >
-                    SCRIPT / PATTERN
-                  </Text>
+                    <Text
+                      numberOfLines={1}
+                      style={{
+                        flex: 1,
+                        fontSize: F.sm,
+                        color: C.muted,
+                        fontFamily: Platform.select({ web: "monospace", default: "Google Sans Code" }),
+                        marginRight: SP.sm,
+                      }}
+                    >
+                      SCRIPT / PATTERN
+                    </Text>
+                    <TouchableOpacity
+                      onPress={() => setQueueInput("")}
+                      activeOpacity={0.6}
+                      disabled={!queueInput.trim()}
+                      style={{
+                        paddingHorizontal: SP.sm + 2,
+                        borderRadius: R.full,
+                        backgroundColor: C.bg,
+                        borderWidth: 0.5,
+                        borderColor: C.muted,
+                        opacity: !queueInput.trim() ? 0.4 : 1,
+                      }}
+                    >
+                      <Text style={{ fontSize: F.sm, color: C.muted, fontFamily: Platform.select({ web: "monospace", default: "Google Sans Code" }) }}>Clear</Text>
+                    </TouchableOpacity>
+                  </View>
+                  <LinearGradient
+                    colors={[C.elevated, "transparent"]}
+                    style={{ height: 20 }}
+                    pointerEvents="none"
+                  />
                 </View>
+
+                {/* Make textarea explicitly scrollable natively by giving parent strict height */}
                 <TextInput
                   style={[
                     s.keyboardInput,
                     s.keyboardTextarea,
                     {
-                      fontSize: F.lg,
                       flex: 1,
-                      paddingTop: SP.md - 3,
+                      fontSize: F.md,
+                      lineHeight: 24,
+                      paddingTop: 36 + SP.sm,
+                      paddingBottom: 80,
                       paddingHorizontal: SP.md,
                       backgroundColor: C.elevated,
+                      fontFamily: Platform.select({ web: "monospace", default: "Google Sans Code" }),
+                      color: C.text,
                     },
                   ]}
                   value={queueInput}
@@ -4728,114 +4778,101 @@ function AppMain() {
                   placeholderTextColor={C.muted}
                   autoCorrect={false}
                   autoCapitalize="none"
-                  multiline
+                  multiline={true}
+                  scrollEnabled={true}
                   textAlignVertical="top"
                 />
+
+                <LinearGradient
+                  colors={["transparent", C.elevated]}
+                  style={{
+                    position: "absolute",
+                    bottom: 60,
+                    left: 0,
+                    right: 0,
+                    height: 20,
+                    zIndex: 5,
+                  }}
+                  pointerEvents="none"
+                />
+
+                {/* INPUT BAR / ACTIONS (Replicated from Terminal Access Form) */}
+                <View
+                  style={{
+                    flexDirection: "row",
+                    alignItems: "center",
+                    paddingHorizontal: SP.sm,
+                    paddingBottom: SP.sm,
+                    position: "absolute",
+                    bottom: 0,
+                    left: 0,
+                    right: 0,
+                    backgroundColor: C.elevated,
+                    zIndex: 10,
+                  }}
+                >
+                  <View
+                    style={{
+                      flex: 1,
+                      flexDirection: "row",
+                      alignItems: "center",
+                      backgroundColor: C.bg,
+                      borderRadius: 24,
+                      borderWidth: 1,
+                      borderColor: C.border,
+                      paddingVertical: 6,
+                      paddingLeft: 14,
+                      paddingRight: 5,
+                    }}
+                  >
+                    {/* Status/Stop button */}
+                    <TouchableOpacity
+                      onPress={stopServerQueue}
+                      activeOpacity={0.7}
+                      style={{
+                        marginRight: 10,
+                      }}
+                    >
+                      <Ionicons name="stop-circle" size={24} color={C.danger} />
+                    </TouchableOpacity>
+
+                    <Text
+                      style={{
+                        flex: 1,
+                        color: C.muted,
+                        fontSize: F.sm,
+                        fontFamily: Platform.select({ web: "monospace", default: "Google Sans Code" }),
+                      }}
+                    >
+                      Execute Script Queue
+                    </Text>
+
+                    {/* Send Button */}
+                    <TouchableOpacity
+                      style={{
+                        width: 38,
+                        height: 38,
+                        borderRadius: 19,
+                        backgroundColor: queueInput.trim() ? C.primary : C.surface,
+                        alignItems: "center",
+                        justifyContent: "center",
+                      }}
+                      onPress={sendQueueToServer}
+                      disabled={!queueInput.trim()}
+                      activeOpacity={0.7}
+                    >
+                      <Ionicons
+                        name="arrow-up"
+                        size={20}
+                        color={queueInput.trim() ? "#fff" : C.muted}
+                      />
+                    </TouchableOpacity>
+                  </View>
+                </View>
               </View>
             </View>
           </ScrollView>
-
-          {/* ACTION BUTTONS (Floating Bottom) */}
-          <View
-            style={{
-              paddingHorizontal: SP.lg,
-              paddingTop: SP.sm,
-              paddingBottom: Platform.OS === "ios" ? 40 : 40,
-              backgroundColor: C.bg,
-              borderTopWidth: 1,
-              borderTopColor: C.border,
-            }}
-          >
-            <View
-              style={{
-                flexDirection: "row",
-                marginTop: SP.sm,
-                backgroundColor: C.elevated,
-                borderRadius: R.full,
-                borderWidth: 1,
-                borderColor: C.border,
-                overflow: "hidden",
-                height: 44,
-              }}
-            >
-              <Pressable
-                style={({ pressed }) => [
-                  {
-                    width: 52,
-                    alignItems: "center",
-                    justifyContent: "center",
-                    borderRightWidth: 1,
-                    borderRightColor: C.border,
-                  },
-                  pressed && Platform.OS === "ios" && { opacity: 0.7 },
-                ]}
-                android_ripple={{
-                  color: "rgba(247, 80, 79, 0.2)",
-                  foreground: true,
-                }}
-                delayPressIn={0}
-                onPress={() => setQueueInput("")}
-              >
-                <Ionicons name="trash" size={18} color={C.danger} />
-              </Pressable>
-
-              <Pressable
-                style={({ pressed }) => [
-                  {
-                    width: 52,
-                    alignItems: "center",
-                    justifyContent: "center",
-                    borderRightWidth: 1,
-                    borderRightColor: C.border,
-                  },
-                  pressed && Platform.OS === "ios" && { opacity: 0.7 },
-                ]}
-                android_ripple={{
-                  color: "rgba(247, 80, 79, 0.2)",
-                  foreground: true,
-                }}
-                delayPressIn={0}
-                onPress={stopServerQueue}
-              >
-                <Ionicons name="stop" size={18} color={C.danger} />
-              </Pressable>
-
-              <Pressable
-                style={({ pressed }) => [
-                  {
-                    flex: 1,
-                    flexDirection: "row",
-                    alignItems: "center",
-                    justifyContent: "center",
-                  },
-                  pressed && Platform.OS === "ios" && { opacity: 0.6 },
-                ]}
-                android_ripple={{
-                  color: "rgba(79, 142, 247, 0.2)",
-                  foreground: true,
-                }}
-                delayPressIn={0}
-                onPress={sendQueueToServer}
-              >
-                <Ionicons
-                  name="paper-plane"
-                  size={16}
-                  color={C.primary}
-                  style={{ marginRight: 6 }}
-                />
-                <Text
-                  style={{
-                    color: C.primary,
-                    fontSize: 14,
-                    fontWeight: "700",
-                    letterSpacing: 0.5,
-                  }}
-                >
-                  EXECUTE SCRIPT
-                </Text>
-              </Pressable>
-            </View>
-          </View>
+          </AnimatedRe.View>
         </View>
       </SlideLeftModal>
 
@@ -5623,6 +5660,7 @@ function AppMain() {
                 borderRadius: R.lg,
                 borderWidth: 1,
                 borderColor: C.border,
+                marginBottom: SP.md,
                 overflow: "hidden",
               }}
             >
@@ -6264,7 +6302,7 @@ const s = StyleSheet.create({
 
   // ── Group Label ──
   groupLabel: {
-    fontSize: F.sm,
+    fontSize: F.md,
     fontWeight: "800",
     paddingLeft: SP.sm,
     color: C.muted,
@@ -6419,7 +6457,7 @@ const s = StyleSheet.create({
     paddingHorizontal: SP.lg,
     paddingVertical: SP.sm + 4,
     borderBottomWidth: 1,
-    borderBottomColor: C.separator,
+    borderColor: C.separator,
     backgroundColor: C.bg,
     zIndex: 80,
     elevation: 12,
@@ -6736,6 +6774,7 @@ const s = StyleSheet.create({
     borderColor: C.border,
     paddingTop: SP.sm,
     paddingBottom: SP.sm,
+    paddingHorizontal: SP.xs,
   },
   mediaCardTitle: {
     alignItems: "center",
@@ -6924,9 +6963,10 @@ const s = StyleSheet.create({
     flex: 1,
   },
   keyboardModalScrollContent: {
+    flexGrow: 1,
     paddingHorizontal: SP.md,
     paddingTop: 0,
-    paddingBottom: SP.xl,
+    paddingBottom: SP.md,
   },
   keyboardHeroCard: {
     backgroundColor: C.elevated,
