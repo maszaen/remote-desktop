@@ -3857,7 +3857,7 @@ function AppMain() {
           activeOpacity={0.6}
         >
           <View style={[s.menuRowIcon, { backgroundColor: C.successDim }]}>
-            <Ionicons name="hand-left" size={18} color={C.success} />
+            <Ionicons name="hand-right" size={20} color={C.success} />
           </View>
           <View style={s.menuRowBody}>
             <Text style={s.menuRowTitle}>Touchpad</Text>
@@ -5812,7 +5812,7 @@ function AppMain() {
             backgroundColor: C.bg,
             paddingHorizontal: SP.md,
             paddingTop: SP.md,
-            paddingBottom: SP.md + (Platform.OS === "ios" ? 34 : 0),
+            paddingBottom: SP.xl + (Platform.OS === "ios" ? 34 : 0),
           }}
         >
           {/* Single container: touchpad area + buttons */}
@@ -5900,9 +5900,9 @@ function AppMain() {
                 pointerEvents="none"
               >
                 <Ionicons
-                  name={touchpadDragging ? "move" : "hand-left-outline"}
-                  size={40}
-                  color={touchpadDragging ? C.primary + "18" : C.muted + "18"}
+                  name={touchpadDragging ? "move" : "hand-right"}
+                  size={45}
+                  color={touchpadDragging ? C.primary + 60 : C.muted + 60}
                 />
               </View>
             </View>
