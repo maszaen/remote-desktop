@@ -118,7 +118,7 @@ const FOLDER_COLOR_MAP = {
 // Returns whether a path is a drive root (e.g. "C:\", "D:/")
 const isDrivePath = (path) => /^[a-zA-Z]:[\\\/]?$/.test(path || "");
 
-const BottomSheet = ({ visible, onClose, children, title, subtitle, keyboardAware }) => {
+const BottomSheet = ({ visible, onClose, children, title, subtitle, keyboardAware, keyboardVerticalOffset = 0 }) => {
   const [mounted, setMounted] = useState(false);
   const translateY = useSharedValue(SCREEN_HEIGHT);
   const overlayOpacity = useSharedValue(0);
@@ -176,9 +176,11 @@ const BottomSheet = ({ visible, onClose, children, title, subtitle, keyboardAwar
     });
 
   const sheetStyle = useAnimatedStyle(() => {
-    const kbOffset = keyboardAware ? kb.height.value : 0;
+    const kbShift = keyboardAware
+      ? Math.max(0, kb.height.value - keyboardVerticalOffset)
+      : 0;
     return {
-      transform: [{ translateY: translateY.value - kbOffset }],
+      transform: [{ translateY: translateY.value - kbShift }],
     };
   });
   const overlayStyle = useAnimatedStyle(() => ({
@@ -1190,6 +1192,16 @@ function AppMain() {
   const [tabsActiveHwnd, setTabsActiveHwnd] = useState(null);
   const [tabsPickerOpen, setTabsPickerOpen] = useState(false);
   const [tabsPendingAction, setTabsPendingAction] = useState(null);
+  const [tabsContentHeight, setTabsContentHeight] = useState(0);
+  const [tabsUrlBarY, setTabsUrlBarY] = useState(0);
+  // Distance from screen bottom to the URL bar input.
+  // BottomSheet shifts up by max(0, kbHeight - this offset), so the
+  // input only lifts exactly enough to sit above the keyboard.
+  // Reusable pattern: measure contentHeight + inputY via onLayout, then
+  // compute offset = (contentHeight - inputY) + visible sheet padding.
+  const tabsKbOffset = tabsContentHeight > 0
+    ? (tabsContentHeight - tabsUrlBarY) + (Platform.OS === "ios" ? 34 : SP.xl)
+    : 0;
   const [filesSheetOpen, setFilesSheetOpen] = useState(false);
   const [terminalSheetOpen, setTerminalSheetOpen] = useState(false);
 
@@ -5392,16 +5404,14 @@ function AppMain() {
           setTabsPendingAction(null);
         }}
         title="Tab Manager"
-        subtitle={
-          tabsActiveHwnd
-            ? `Target: ${(tabsList.find((t) => t.hwnd === tabsActiveHwnd) || {}).title || "Selected"}`
-            : tabsList.length > 1
-              ? "Tap a window to select it"
-              : "Manage browser tabs on PC"
-        }
+        subtitle="Manage browser tabs on PC"
         keyboardAware
+        keyboardVerticalOffset={tabsKbOffset}
       >
-        <View style={s.sheetContent}>
+        <View
+          style={s.sheetContent}
+          onLayout={(e) => setTabsContentHeight(e.nativeEvent.layout.height)}
+        >
           {/* Active target indicator + change button */}
           {tabsActiveHwnd && tabsList.length > 1 && (
             <View
@@ -5486,47 +5496,58 @@ function AppMain() {
             </TouchableOpacity>
           </View>
 
-          {/* Navigate URL bar */}
-          <View
-            style={{
-              flexDirection: "row",
-              alignItems: "center",
-              marginHorizontal: SP.md,
-              marginBottom: SP.md,
-              backgroundColor: C.elevated,
-              borderRadius: R.md,
-              borderWidth: 1,
-              borderColor: C.border,
-              paddingHorizontal: SP.sm,
-            }}
-          >
-            <Ionicons name="globe-outline" size={18} color={C.muted} />
-            <TextInput
-              style={{
-                flex: 1,
-                color: C.text,
-                fontSize: F.sm,
-                paddingVertical: SP.sm,
-                paddingHorizontal: SP.sm,
-              }}
-              placeholder="Enter URL..."
-              placeholderTextColor={C.muted}
-              value={tabNavUrl}
-              onChangeText={setTabNavUrl}
-              autoCapitalize="none"
-              autoCorrect={false}
-              onSubmitEditing={handleTabNavigate}
-              returnKeyType="go"
-            />
-            <TouchableOpacity onPress={handleTabNavigate} activeOpacity={0.6}>
-              <Ionicons name="arrow-forward-circle" size={24} color={C.primary} />
-            </TouchableOpacity>
-          </View>
-
           {/* Tab list */}
           {tabsLoading ? (
-            <View style={{ alignItems: "center", paddingVertical: SP.xl }}>
-              <ActivityIndicator color={C.primary} size="large" />
+            <View>
+              {[0, 1, 2].map((idx) => (
+                <View
+                  key={`skel-${idx}`}
+                  style={{
+                    flexDirection: "row",
+                    alignItems: "center",
+                    paddingVertical: SP.md,
+                    paddingHorizontal: SP.md,
+                    borderBottomWidth: idx < 2 ? 1 : 0,
+                    borderBottomColor: C.border,
+                  }}
+                >
+                  <View
+                    style={{
+                      width: 20,
+                      height: 20,
+                      borderRadius: 10,
+                      backgroundColor: C.border,
+                    }}
+                  />
+                  <View style={{ flex: 1, marginLeft: SP.md }}>
+                    <View
+                      style={{
+                        width: "70%",
+                        height: 14,
+                        borderRadius: R.sm,
+                        backgroundColor: C.border,
+                        marginBottom: 6,
+                      }}
+                    />
+                    <View
+                      style={{
+                        width: "30%",
+                        height: 10,
+                        borderRadius: R.sm,
+                        backgroundColor: C.border,
+                      }}
+                    />
+                  </View>
+                  <View
+                    style={{
+                      width: 16,
+                      height: 16,
+                      borderRadius: 8,
+                      backgroundColor: C.border,
+                    }}
+                  />
+                </View>
+              ))}
             </View>
           ) : tabsList.length === 0 ? (
             <View style={{ alignItems: "center", paddingVertical: SP.xl }}>
@@ -5600,6 +5621,44 @@ function AppMain() {
               })}
             </ScrollView>
           )}
+
+          {/* Navigate URL bar — at bottom */}
+          <View
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              marginHorizontal: SP.md,
+              marginTop: SP.md,
+              backgroundColor: C.elevated,
+              borderRadius: R.md,
+              borderWidth: 1,
+              borderColor: C.border,
+              paddingHorizontal: SP.sm,
+            }}
+            onLayout={(e) => setTabsUrlBarY(e.nativeEvent.layout.y)}
+          >
+            <Ionicons name="globe-outline" size={18} color={C.muted} />
+            <TextInput
+              style={{
+                flex: 1,
+                color: C.text,
+                fontSize: F.sm,
+                paddingVertical: SP.sm,
+                paddingHorizontal: SP.sm,
+              }}
+              placeholder="Enter URL..."
+              placeholderTextColor={C.muted}
+              value={tabNavUrl}
+              onChangeText={setTabNavUrl}
+              autoCapitalize="none"
+              autoCorrect={false}
+              onSubmitEditing={handleTabNavigate}
+              returnKeyType="go"
+            />
+            <TouchableOpacity onPress={handleTabNavigate} activeOpacity={0.6}>
+              <Ionicons name="arrow-forward-circle" size={24} color={C.primary} />
+            </TouchableOpacity>
+          </View>
         </View>
       </BottomSheet>
 
