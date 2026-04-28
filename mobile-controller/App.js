@@ -1176,6 +1176,13 @@ function AppMain() {
   const [keyboardSheetOpen, setKeyboardSheetOpen] = useState(false);
   const [connectivitySheetOpen, setConnectivitySheetOpen] = useState(false);
   const [clipboardSheetOpen, setClipboardSheetOpen] = useState(false);
+  const [brightnessSheetOpen, setBrightnessSheetOpen] = useState(false);
+  const [brightnessMonitors, setBrightnessMonitors] = useState([]);
+  const [brightnessLoading, setBrightnessLoading] = useState(false);
+  const [tabsSheetOpen, setTabsSheetOpen] = useState(false);
+  const [tabsList, setTabsList] = useState([]);
+  const [tabsLoading, setTabsLoading] = useState(false);
+  const [tabNavUrl, setTabNavUrl] = useState("");
   const [filesSheetOpen, setFilesSheetOpen] = useState(false);
   const [terminalSheetOpen, setTerminalSheetOpen] = useState(false);
 
@@ -1653,6 +1660,14 @@ function AppMain() {
         setClipboardSheetOpen(false);
         return true;
       }
+      if (brightnessSheetOpen) {
+        setBrightnessSheetOpen(false);
+        return true;
+      }
+      if (tabsSheetOpen) {
+        setTabsSheetOpen(false);
+        return true;
+      }
       if (filesSheetOpen) {
         if (filesCurrentPath) {
           if (filesParent) browseFilesPath(filesParent);
@@ -1713,6 +1728,8 @@ function AppMain() {
     keyboardSheetOpen,
     connectivitySheetOpen,
     clipboardSheetOpen,
+    brightnessSheetOpen,
+    tabsSheetOpen,
     filesSheetOpen,
     terminalSheetOpen,
     filesCurrentPath,
@@ -2019,6 +2036,90 @@ function AppMain() {
     } catch (e) {
       showDialog({ title: "Error", message: e.message });
     }
+  };
+
+  // ── Brightness Control ──
+  const fetchBrightness = async () => {
+    setBrightnessLoading(true);
+    try {
+      const r = await sendAction("/brightness", "GET");
+      if (r && r.status === "success" && r.monitors) {
+        setBrightnessMonitors(r.monitors);
+      } else if (r && r.status === "no_monitors") {
+        setBrightnessMonitors([]);
+        showDialog({
+          title: "No Monitors",
+          message: r.message || "No adjustable monitors found.",
+        });
+      }
+    } catch (e) {
+      showDialog({ title: "Error", message: "Failed to get brightness: " + e.message });
+    } finally {
+      setBrightnessLoading(false);
+    }
+  };
+
+  const handleOpenBrightnessSheet = () => {
+    setBrightnessSheetOpen(true);
+    fetchBrightness();
+  };
+
+  const handleSetBrightness = async (monitorIndex, level) => {
+    const rounded = Math.round(level);
+    setBrightnessMonitors((prev) =>
+      prev.map((m) =>
+        m.index === monitorIndex ? { ...m, brightness: rounded } : m,
+      ),
+    );
+    try {
+      await sendAction("/brightness", "POST", {
+        brightness: rounded,
+        monitor_index: monitorIndex,
+      });
+    } catch (e) {
+      fetchBrightness();
+    }
+  };
+
+  // ── Tab Manager ──
+  const fetchTabs = async () => {
+    setTabsLoading(true);
+    try {
+      const r = await sendAction("/tabs", "GET");
+      if (r && r.status === "success") {
+        setTabsList(r.tabs || []);
+      }
+    } catch (e) {
+      showDialog({ title: "Error", message: "Failed to list tabs: " + e.message });
+    } finally {
+      setTabsLoading(false);
+    }
+  };
+
+  const handleOpenTabsSheet = () => {
+    setTabsSheetOpen(true);
+    fetchTabs();
+  };
+
+  const handleSwitchToTab = async (hwnd) => {
+    await sendAction(`/tabs/switch?hwnd=${hwnd}`, "POST");
+    setTimeout(fetchTabs, 300);
+  };
+
+  const handleTabAction = async (action) => {
+    await sendAction(`/tabs/${action}`, "POST");
+    setTimeout(fetchTabs, 500);
+  };
+
+  const handleTabNavigate = async () => {
+    if (!tabNavUrl.trim()) return;
+    let url = tabNavUrl.trim();
+    if (!url.startsWith("http://") && !url.startsWith("https://")) {
+      url = "https://" + url;
+    }
+    await sendAction("/tabs/navigate", "POST", { url });
+    setTabNavUrl("");
+    setTimeout(fetchTabs, 1000);
   };
 
   // ── Panic Button ──
@@ -3514,6 +3615,52 @@ function AppMain() {
           <View style={s.menuRowBody}>
             <Text style={s.menuRowTitle}>Clipboard Access</Text>
             <Text style={s.menuRowSub}>Cross-device clipboard</Text>
+          </View>
+          <Ionicons
+            name="arrow-forward-outline"
+            size={20}
+            color={C.muted}
+            style={{ paddingRight: SP.sm }}
+          />
+        </TouchableOpacity>
+
+        <View style={s.sep} />
+
+        {/* Brightness Control row */}
+        <TouchableOpacity
+          style={s.menuRow}
+          onPress={handleOpenBrightnessSheet}
+          activeOpacity={0.6}
+        >
+          <View style={[s.menuRowIcon, { backgroundColor: "#FF9500" + "20" }]}>
+            <Ionicons name="sunny" size={18} color="#FF9500" />
+          </View>
+          <View style={s.menuRowBody}>
+            <Text style={s.menuRowTitle}>Brightness</Text>
+            <Text style={s.menuRowSub}>Adjust monitor brightness</Text>
+          </View>
+          <Ionicons
+            name="arrow-forward-outline"
+            size={20}
+            color={C.muted}
+            style={{ paddingRight: SP.sm }}
+          />
+        </TouchableOpacity>
+
+        <View style={s.sep} />
+
+        {/* Tab Manager row */}
+        <TouchableOpacity
+          style={s.menuRow}
+          onPress={handleOpenTabsSheet}
+          activeOpacity={0.6}
+        >
+          <View style={[s.menuRowIcon, { backgroundColor: C.primaryDim }]}>
+            <Ionicons name="browsers" size={18} color={C.primary} />
+          </View>
+          <View style={s.menuRowBody}>
+            <Text style={s.menuRowTitle}>Tab Manager</Text>
+            <Text style={s.menuRowSub}>Manage browser tabs</Text>
           </View>
           <Ionicons
             name="arrow-forward-outline"
@@ -5039,6 +5186,301 @@ function AppMain() {
             </View>
           </TouchableOpacity>
 
+        </View>
+      </BottomSheet>
+
+      {/* ═══ BRIGHTNESS CONTROL MODAL ═══ */}
+      <BottomSheet
+        visible={brightnessSheetOpen}
+        onClose={() => setBrightnessSheetOpen(false)}
+        title="Brightness"
+        subtitle="Adjust display brightness"
+      >
+        <View style={s.sheetContent}>
+          {brightnessLoading && brightnessMonitors.length === 0 ? (
+            <View style={{ alignItems: "center", paddingVertical: SP.xl }}>
+              <ActivityIndicator color={C.primary} size="large" />
+            </View>
+          ) : brightnessMonitors.length === 0 ? (
+            <View style={{ alignItems: "center", paddingVertical: SP.xl }}>
+              <Ionicons name="sunny-outline" size={40} color={C.muted} />
+              <Text
+                style={{
+                  color: C.sub,
+                  fontSize: F.sm,
+                  marginTop: SP.md,
+                  textAlign: "center",
+                  paddingHorizontal: SP.lg,
+                }}
+              >
+                No adjustable monitors found on this machine.
+              </Text>
+            </View>
+          ) : (
+            brightnessMonitors.map((mon) => (
+              <View key={mon.index} style={{ paddingHorizontal: SP.md, marginBottom: SP.lg }}>
+                <View style={{ flexDirection: "row", alignItems: "center", marginBottom: SP.sm }}>
+                  <Ionicons
+                    name={mon.type === "internal" ? "laptop-outline" : "desktop-outline"}
+                    size={18}
+                    color={mon.supported ? "#FF9500" : C.muted}
+                  />
+                  <Text
+                    style={{
+                      color: C.text,
+                      fontSize: F.md,
+                      fontWeight: "600",
+                      marginLeft: SP.sm,
+                      flex: 1,
+                    }}
+                  >
+                    {mon.name}
+                  </Text>
+                  {mon.supported && (
+                    <Text style={{ color: "#FF9500", fontSize: F.lg, fontWeight: "700" }}>
+                      {mon.brightness}%
+                    </Text>
+                  )}
+                </View>
+                {mon.supported ? (
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: SP.sm }}>
+                    <Ionicons name="sunny-outline" size={16} color={C.muted} />
+                    <View style={{ flex: 1, height: 36, justifyContent: "center" }}>
+                      <View
+                        style={{
+                          height: 6,
+                          borderRadius: 3,
+                          backgroundColor: C.elevated,
+                          overflow: "hidden",
+                        }}
+                      >
+                        <View
+                          style={{
+                            width: `${mon.brightness}%`,
+                            height: "100%",
+                            backgroundColor: "#FF9500",
+                            borderRadius: 3,
+                          }}
+                        />
+                      </View>
+                    </View>
+                    <Ionicons name="sunny" size={18} color={C.muted} />
+                  </View>
+                ) : (
+                  <View
+                    style={{
+                      backgroundColor: C.elevated,
+                      borderRadius: R.md,
+                      padding: SP.md,
+                      flexDirection: "row",
+                      alignItems: "center",
+                      gap: SP.sm,
+                    }}
+                  >
+                    <Ionicons name="alert-circle-outline" size={18} color={C.warning} />
+                    <Text style={{ color: C.sub, fontSize: F.sm, flex: 1 }}>
+                      {mon.error || "Your monitor does not support software brightness control (DDC/CI)."}
+                    </Text>
+                  </View>
+                )}
+                {mon.supported && (
+                  <View
+                    style={{
+                      flexDirection: "row",
+                      justifyContent: "center",
+                      gap: SP.md,
+                      marginTop: SP.md,
+                    }}
+                  >
+                    <TouchableOpacity
+                      style={s.volStepBtn}
+                      activeOpacity={0.7}
+                      onPress={() =>
+                        handleSetBrightness(mon.index, Math.max(0, mon.brightness - 10))
+                      }
+                    >
+                      <Ionicons name="remove" size={24} color={C.text} />
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={s.volStepBtn}
+                      activeOpacity={0.7}
+                      onPress={() =>
+                        handleSetBrightness(mon.index, Math.min(100, mon.brightness + 10))
+                      }
+                    >
+                      <Ionicons name="add" size={24} color={C.text} />
+                    </TouchableOpacity>
+                  </View>
+                )}
+              </View>
+            ))
+          )}
+        </View>
+      </BottomSheet>
+
+      {/* ═══ TAB MANAGER MODAL ═══ */}
+      <BottomSheet
+        visible={tabsSheetOpen}
+        onClose={() => setTabsSheetOpen(false)}
+        title="Tab Manager"
+        subtitle="Manage browser tabs on PC"
+      >
+        <View style={s.sheetContent}>
+          {/* Quick action bar */}
+          <View
+            style={{
+              flexDirection: "row",
+              justifyContent: "space-around",
+              paddingHorizontal: SP.sm,
+              paddingBottom: SP.md,
+              borderBottomWidth: 1,
+              borderBottomColor: C.border,
+              marginBottom: SP.md,
+            }}
+          >
+            <TouchableOpacity
+              style={{ alignItems: "center", paddingVertical: SP.sm, flex: 1 }}
+              onPress={() => handleTabAction("prev")}
+              activeOpacity={0.6}
+            >
+              <Ionicons name="chevron-back" size={22} color={C.primary} />
+              <Text style={{ color: C.sub, fontSize: F.xs, marginTop: 2 }}>Prev</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={{ alignItems: "center", paddingVertical: SP.sm, flex: 1 }}
+              onPress={() => handleTabAction("next")}
+              activeOpacity={0.6}
+            >
+              <Ionicons name="chevron-forward" size={22} color={C.primary} />
+              <Text style={{ color: C.sub, fontSize: F.xs, marginTop: 2 }}>Next</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={{ alignItems: "center", paddingVertical: SP.sm, flex: 1 }}
+              onPress={() => handleTabAction("new")}
+              activeOpacity={0.6}
+            >
+              <Ionicons name="add-circle-outline" size={22} color={C.success} />
+              <Text style={{ color: C.sub, fontSize: F.xs, marginTop: 2 }}>New</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={{ alignItems: "center", paddingVertical: SP.sm, flex: 1 }}
+              onPress={() => handleTabAction("close")}
+              activeOpacity={0.6}
+            >
+              <Ionicons name="close-circle-outline" size={22} color={C.danger} />
+              <Text style={{ color: C.sub, fontSize: F.xs, marginTop: 2 }}>Close</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={{ alignItems: "center", paddingVertical: SP.sm, flex: 1 }}
+              onPress={fetchTabs}
+              activeOpacity={0.6}
+            >
+              <Ionicons name="refresh" size={22} color={C.sub} />
+              <Text style={{ color: C.sub, fontSize: F.xs, marginTop: 2 }}>Refresh</Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* Navigate URL bar */}
+          <View
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              marginHorizontal: SP.md,
+              marginBottom: SP.md,
+              backgroundColor: C.elevated,
+              borderRadius: R.md,
+              borderWidth: 1,
+              borderColor: C.border,
+              paddingHorizontal: SP.sm,
+            }}
+          >
+            <Ionicons name="globe-outline" size={18} color={C.muted} />
+            <TextInput
+              style={{
+                flex: 1,
+                color: C.text,
+                fontSize: F.sm,
+                paddingVertical: SP.sm,
+                paddingHorizontal: SP.sm,
+              }}
+              placeholder="Enter URL..."
+              placeholderTextColor={C.muted}
+              value={tabNavUrl}
+              onChangeText={setTabNavUrl}
+              autoCapitalize="none"
+              autoCorrect={false}
+              onSubmitEditing={handleTabNavigate}
+              returnKeyType="go"
+            />
+            <TouchableOpacity onPress={handleTabNavigate} activeOpacity={0.6}>
+              <Ionicons name="arrow-forward-circle" size={24} color={C.primary} />
+            </TouchableOpacity>
+          </View>
+
+          {/* Tab list */}
+          {tabsLoading ? (
+            <View style={{ alignItems: "center", paddingVertical: SP.xl }}>
+              <ActivityIndicator color={C.primary} size="large" />
+            </View>
+          ) : tabsList.length === 0 ? (
+            <View style={{ alignItems: "center", paddingVertical: SP.xl }}>
+              <Ionicons name="browsers-outline" size={40} color={C.muted} />
+              <Text
+                style={{
+                  color: C.sub,
+                  fontSize: F.sm,
+                  marginTop: SP.md,
+                  textAlign: "center",
+                }}
+              >
+                No browser windows detected on PC.
+              </Text>
+            </View>
+          ) : (
+            <ScrollView style={{ maxHeight: 300 }}>
+              {tabsList.map((tab, i) => (
+                <TouchableOpacity
+                  key={`${tab.hwnd}-${i}`}
+                  style={{
+                    flexDirection: "row",
+                    alignItems: "center",
+                    paddingVertical: SP.md,
+                    paddingHorizontal: SP.md,
+                    borderBottomWidth: i < tabsList.length - 1 ? 1 : 0,
+                    borderBottomColor: C.border,
+                  }}
+                  onPress={() => handleSwitchToTab(tab.hwnd)}
+                  activeOpacity={0.6}
+                >
+                  <Ionicons
+                    name={
+                      tab.browser === "Chrome"
+                        ? "logo-chrome"
+                        : tab.browser === "Edge"
+                          ? "logo-edge"
+                          : tab.browser === "Firefox"
+                            ? "logo-firefox"
+                            : "globe-outline"
+                    }
+                    size={20}
+                    color={C.primary}
+                  />
+                  <View style={{ flex: 1, marginLeft: SP.md }}>
+                    <Text
+                      style={{ color: C.text, fontSize: F.sm, fontWeight: "500" }}
+                      numberOfLines={1}
+                    >
+                      {tab.title || "Untitled"}
+                    </Text>
+                    <Text style={{ color: C.muted, fontSize: F.xs }}>
+                      {tab.browser}
+                    </Text>
+                  </View>
+                  <Ionicons name="open-outline" size={16} color={C.muted} />
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          )}
         </View>
       </BottomSheet>
 
