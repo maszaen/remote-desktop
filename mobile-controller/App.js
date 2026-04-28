@@ -56,6 +56,7 @@ const C = {
   surface: "#0D0D12",
   elevated: "#141418",
   border: "#FFFFFF0D",
+  borderLight: "#FFFFFF18",
   separator: "#ffffff15",
   primary: "#4F8EF7",
   primaryDim: "#4F8EF715",
@@ -71,7 +72,7 @@ const C = {
 };
 
 const SP = { xs: 4, sm: 8, md: 16, lg: 24, xl: 32, xxl: 48 };
-const R = { sm: 10, md: 16, lg: 20, xl: 28, full: 999 };
+const R = { sm: 13, md: 16, lg: 20, lga: 25, xl: 28, full: 999 };
 const F = { xs: 11, sm: 13, md: 15, lg: 17, xl: 22, hero: 44 };
 
 // ─── SLIDE-UP BOTTOM SHEET ────────────────────────────────────────────────────
@@ -1198,7 +1199,7 @@ function AppMain() {
     "worklet";
     // Base padding (16) saat tertutup biar ada margin,
     // flexibel menyesuaikan keyboard saat terbuka dengan gap (16)
-    return { paddingBottom: Math.max(16, terminalKb.height.value + 16) };
+    return { paddingBottom: Math.max(16, terminalKb.height.value) };
   });
 
   // Files browser state
@@ -3262,6 +3263,8 @@ function AppMain() {
                 style={{
                   backgroundColor: C.elevated,
                   borderRadius: R.sm,
+                  borderBottomLeftRadius: R.lga,
+                  borderBottomRightRadius: R.lga,
                   borderWidth: 1,
                   borderColor: C.border,
                   paddingHorizontal: SP.md,
@@ -3806,7 +3809,7 @@ function AppMain() {
               style={{
                 flex: 1,
                 backgroundColor: C.elevated,
-                borderRadius: R.lg,
+                borderRadius: R.lga,
                 borderWidth: 1,
                 borderColor: C.border,
                 overflow: "hidden",
@@ -4589,6 +4592,7 @@ function AppMain() {
                     paddingVertical: SP.sm,
                     paddingHorizontal: SP.sm,
                     borderRadius: R.sm,
+                    borderTopLeftRadius: R.lga,
                     elevation: 1,
                   },
                 ]}
@@ -4633,6 +4637,7 @@ function AppMain() {
                     paddingVertical: SP.sm,
                     paddingHorizontal: SP.sm,
                     borderRadius: R.sm,
+                    borderTopRightRadius: R.lga,
                     elevation: 1,
                   },
                 ]}
@@ -4782,7 +4787,7 @@ function AppMain() {
                   colors={["transparent", C.elevated]}
                   style={{
                     position: "absolute",
-                    bottom: 60,
+                    bottom: 64,
                     left: 0,
                     right: 0,
                     height: 20,
@@ -4791,11 +4796,9 @@ function AppMain() {
                   pointerEvents="none"
                 />
 
-                {/* INPUT BAR / ACTIONS (Replicated from Terminal Access Form) */}
+                {/* ACTION BUTTON PILL (Tuned from the original layout so it doesn't look like an input box) */}
                 <View
                   style={{
-                    flexDirection: "row",
-                    alignItems: "center",
                     paddingHorizontal: SP.sm,
                     paddingBottom: SP.sm,
                     position: "absolute",
@@ -4808,60 +4811,90 @@ function AppMain() {
                 >
                   <View
                     style={{
-                      flex: 1,
+                      flexDirection: "row",
+                      alignItems: "center",
+                      borderRadius: 24,
+                    }}
+                  >
+                    
+
+                  <View
+                    style={{
                       flexDirection: "row",
                       alignItems: "center",
                       backgroundColor: C.bg,
                       borderRadius: 24,
                       borderWidth: 1,
                       borderColor: C.border,
-                      paddingVertical: 6,
-                      paddingLeft: 14,
-                      paddingRight: 5,
+                      paddingVertical: 4,
+                      paddingHorizontal: 4,
                     }}
                   >
-                    {/* Status/Stop button */}
-                    <TouchableOpacity
-                      onPress={stopServerQueue}
-                      activeOpacity={0.7}
-                      style={{
-                        marginRight: 10,
-                      }}
-                    >
-                      <Ionicons name="stop-circle" size={24} color={C.danger} />
-                    </TouchableOpacity>
+                      {/* Stop Button */}
+                      <TouchableOpacity
+                        onPress={stopServerQueue}
+                        style={{
+                          width: 38,
+                          height: 38,
+                          alignItems: "center",
+                          justifyContent: "center",
+                          borderRadius: 19,
+                          backgroundColor: C.surface,
+                        }}
+                        activeOpacity={0.7}
+                      >
+                        <Ionicons name="stop-circle-outline" size={27} color={C.danger} />
+                      </TouchableOpacity>
+                    </View>
 
-                    <Text
-                      style={{
-                        flex: 1,
-                        color: C.muted,
-                        fontSize: F.sm,
-                        fontFamily: Platform.select({ web: "monospace", default: "Google Sans Code" }),
-                      }}
-                    >
-                      Execute Script Queue
-                    </Text>
-
-                    {/* Send Button */}
+                    <View style={{ flex: 1 }} />
+                    
+                  <View
+                    style={{
+                      flexDirection: "row",
+                      alignItems: "center",
+                      backgroundColor: C.bg,
+                      borderRadius: 24,
+                      borderWidth: 1,
+                      borderColor: C.border,
+                      paddingVertical: 4,
+                      paddingHorizontal: 4,
+                    }}
+                  >
+                    {/* Execute Button */}
                     <TouchableOpacity
                       style={{
-                        width: 38,
                         height: 38,
                         borderRadius: 19,
                         backgroundColor: queueInput.trim() ? C.primary : C.surface,
+                        flexDirection: "row",
                         alignItems: "center",
                         justifyContent: "center",
+                        paddingHorizontal: 16,
                       }}
                       onPress={sendQueueToServer}
                       disabled={!queueInput.trim()}
                       activeOpacity={0.7}
                     >
+                      <Text
+                        style={{
+                          color: queueInput.trim() ? "#fff" : C.muted,
+                          fontSize: F.sm,
+                          fontWeight: "700",
+                          letterSpacing: 0.5,
+                          marginRight: 6,
+                        }}
+                      >
+                        EXECUTE
+                      </Text>
                       <Ionicons
-                        name="arrow-up"
-                        size={20}
+                        name="flash"
+                        size={16}
                         color={queueInput.trim() ? "#fff" : C.muted}
                       />
                     </TouchableOpacity>
+
+                    </View>
                   </View>
                 </View>
               </View>
@@ -5651,7 +5684,7 @@ function AppMain() {
               style={{
                 flex: 1,
                 backgroundColor: C.elevated,
-                borderRadius: R.lg,
+                borderRadius: R.lga,
                 borderWidth: 1,
                 borderColor: C.border,
                 marginBottom: SP.md,
@@ -5850,6 +5883,7 @@ function AppMain() {
                       borderRadius: R.full,
                       backgroundColor: C.bg,
                       borderWidth: 0.5,
+                      marginRight: SP.xs,
                       borderColor: C.muted,
                       opacity: terminalHistory.length === 0 ? 0.4 : 1,
                     }}
@@ -6482,7 +6516,7 @@ const s = StyleSheet.create({
     backgroundColor: C.bg,
     borderRadius: R.sm,
     borderWidth: 1,
-    borderColor: C.border,
+    borderColor: C.borderLight,
     overflow: "hidden",
   },
   screenLoader: {
@@ -6654,6 +6688,8 @@ const s = StyleSheet.create({
     alignItems: "center",
     backgroundColor: C.elevated,
     borderRadius: R.sm,
+    borderBottomLeftRadius: R.lga,
+    borderBottomRightRadius: R.lga,
     borderWidth: 1,
     borderColor: C.border,
     paddingHorizontal: SP.md,
@@ -6764,6 +6800,8 @@ const s = StyleSheet.create({
   mediaCard: {
     backgroundColor: C.elevated,
     borderRadius: R.sm,
+    borderBottomLeftRadius: R.lga,
+    borderBottomRightRadius: R.lga,
     borderWidth: 1,
     borderColor: C.border,
     paddingTop: SP.sm,
@@ -7113,6 +7151,8 @@ const s = StyleSheet.create({
     borderWidth: 1,
     borderColor: C.border,
     borderRadius: R.sm,
+    borderBottomLeftRadius: R.lga,
+    borderBottomRightRadius: R.lga,
   },
   keyboardTextarea: {
     minHeight: 130,
