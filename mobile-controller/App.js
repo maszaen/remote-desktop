@@ -3502,11 +3502,11 @@ function AppMain() {
           />
         </TouchableOpacity>
 
-        <View style={[s.sep, { marginLeft: 0, marginTop: SP.md }]} />
+        <View style={s.sep} />
 
         {/* Power row */}
         <TouchableOpacity
-          style={[s.menuRow, { marginTop: SP.xs }]}
+          style={s.menuRow}
           onPress={() => setPowerSheetOpen(true)}
           activeOpacity={0.6}
         >
@@ -6193,7 +6193,7 @@ const s = StyleSheet.create({
     paddingTop: SP.xxl + SP.lg,
     paddingBottom: SP.xl,
   },
-  scrollConnected: { paddingHorizontal: SP.lg, paddingBottom: SP.xl },
+  scrollConnected: { paddingHorizontal: SP.md, paddingBottom: SP.xl },
 
   // ── Hero ──
   hero: { alignItems: "center", marginBottom: SP.xl + SP.md },
@@ -6252,6 +6252,7 @@ const s = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     paddingVertical: SP.md,
+    paddingHorizontal: SP.sm,
     gap: SP.md,
   },
   menuRowIcon: {

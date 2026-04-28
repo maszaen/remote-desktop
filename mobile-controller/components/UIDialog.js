@@ -138,7 +138,7 @@ export const UIDialog = ({
           {
             justifyContent: "center",
             alignItems: "center",
-            padding: SP.lg,
+            padding: SP.md,
             zIndex: 99999,
           },
         ]}
