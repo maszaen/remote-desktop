@@ -1223,13 +1223,22 @@ function AppMain() {
   const [terminalRunning, setTerminalRunning] = useState(false);
   const terminalScrollRef = useRef(null);
   const loginScrollRef = useRef(null);
+  const loginRootRef = useRef(null);
   const loginFormRef = useRef(null);
   const loginKb = useAnimatedKeyboard();
   const loginFormSpaceBelow = useSharedValue(SCREEN_HEIGHT);
-  const onLoginFormLayout = useCallback(() => {
-    loginFormRef.current?.measureInWindow((_x, y, _w, h) => {
-      loginFormSpaceBelow.value = SCREEN_HEIGHT - (y + h);
+  const loginRootBottom = useSharedValue(SCREEN_HEIGHT);
+  const onLoginRootLayout = useCallback(() => {
+    loginRootRef.current?.measureInWindow((_x, y, _w, h) => {
+      loginRootBottom.value = y + h;
     });
+  }, []);
+  const onLoginFormLayout = useCallback(() => {
+    setTimeout(() => {
+      loginFormRef.current?.measureInWindow((_x, y, _w, h) => {
+        loginFormSpaceBelow.value = loginRootBottom.value - (y + h);
+      });
+    }, 50);
   }, []);
   const loginKbShiftStyle = useAnimatedStyle(() => {
     "worklet";
@@ -2786,7 +2795,7 @@ function AppMain() {
   // ════════════════════════════════════════════════════════════════
   if (!isConnected) {
     return (
-      <View style={s.root}>
+      <View style={s.root} ref={loginRootRef} onLayout={onLoginRootLayout}>
         <StatusBar
           barStyle="light-content"
           translucent
