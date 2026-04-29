@@ -3064,7 +3064,7 @@ function AppMain() {
               shouldClose: false,
             },
             {
-              text: "Save",
+              text: "Rename",
               style: !renameValue.trim() ? "cancel" : "primary",
               onPress: () => {
                 if (!renameValue.trim()) return;
@@ -3087,7 +3087,6 @@ function AppMain() {
               fontSize: 15,
               fontWeight: "600",
               paddingHorizontal: 16,
-              marginTop: 8,
               marginBottom: 4,
               color: "#FFFFFF",
             }}
