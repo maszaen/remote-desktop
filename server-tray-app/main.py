@@ -912,40 +912,45 @@ def kill_process(req: KillRequest):
         return {"error": str(e)}
 
 
-def _get_smtc_titles():
+async def _get_smtc_titles():
     """Get media titles via Windows SMTC (System Media Transport Controls).
-    Returns a list of display strings for currently playing media, or empty list on failure."""
-    import asyncio
+    Returns a list of display strings for currently playing media."""
+    from winrt.windows.media.control import (
+        GlobalSystemMediaTransportControlsSessionManager as SessionManager,
+        GlobalSystemMediaTransportControlsSessionPlaybackStatus as PlaybackStatus,
+    )
+    manager = await SessionManager.request_async()
+    sessions = manager.get_sessions()
+    titles = []
+    for session in sessions:
+        info = session.get_playback_info()
+        if info.playback_status != PlaybackStatus.PLAYING:
+            continue
+        props = await session.try_get_media_properties_async()
+        title = (props.title or "").strip()
+        artist = (props.artist or "").strip()
+        if title:
+            display = f"{artist} - {title}" if artist else title
+            titles.append(display)
+    return titles
 
-    async def _query():
-        from winrt.windows.media.control import (
-            GlobalSystemMediaTransportControlsSessionManager as SessionManager,
-            GlobalSystemMediaTransportControlsSessionPlaybackStatus as PlaybackStatus,
-        )
-        manager = await SessionManager.request_async()
-        sessions = manager.get_sessions()
-        titles = []
-        for session in sessions:
-            info = session.get_playback_info()
-            if info.playback_status != PlaybackStatus.PLAYING:
-                continue
-            props = await session.try_get_media_properties_async()
-            title = (props.title or "").strip()
-            artist = (props.artist or "").strip()
-            if title:
-                display = f"{artist} - {title}" if artist else title
-                titles.append(display)
-        return titles
 
-    loop = asyncio.new_event_loop()
-    try:
-        return loop.run_until_complete(_query())
-    finally:
-        loop.close()
+# Window titles that are process/app names rather than actual media titles
+_UNHELPFUL_MEDIA_TITLES = {
+    "google chrome", "chrome", "microsoft edge", "msedge", "firefox", "brave",
+    "opera", "microsoft.media.player", "popuphost",
+}
+
+_BROWSER_SUFFIXES = (
+    " - Google Chrome", " - Microsoft Edge", " - Mozilla Firefox",
+    " - Brave", " - Opera",
+    " — Google Chrome", " — Microsoft Edge", " — Mozilla Firefox",
+    " — Brave", " — Opera",
+)
 
 
 @app.get("/stats", dependencies=[Depends(verify_pin)])
-def get_stats():
+async def get_stats():
     try:
         import ctypes
 
@@ -959,11 +964,11 @@ def get_stats():
 
     active_media = "Not Playing"
     try:
-        smtc_titles = _get_smtc_titles()
+        smtc_titles = await _get_smtc_titles()
         if smtc_titles:
             active_media = " • ".join(smtc_titles)
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"[SMTC] Failed: {e}")
 
     if active_media == "Not Playing":
         try:
@@ -1006,8 +1011,14 @@ def get_stats():
                                     "spotify premium",
                                     "spotify free",
                                     "spotify",
+                                    *_UNHELPFUL_MEDIA_TITLES,
                                 ):
-                                    media_titles.append(title)
+                                    for sfx in _BROWSER_SUFFIXES:
+                                        if title.endswith(sfx):
+                                            title = title[: -len(sfx)].strip()
+                                            break
+                                    if title:
+                                        media_titles.append(title)
                     return True
 
                 WNDENUMPROC = ctypes.WINFUNCTYPE(
