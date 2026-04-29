@@ -1223,10 +1223,18 @@ function AppMain() {
   const [terminalRunning, setTerminalRunning] = useState(false);
   const terminalScrollRef = useRef(null);
   const loginScrollRef = useRef(null);
+  const loginFormRef = useRef(null);
   const loginKb = useAnimatedKeyboard();
+  const loginFormSpaceBelow = useSharedValue(SCREEN_HEIGHT);
+  const onLoginFormLayout = useCallback(() => {
+    loginFormRef.current?.measureInWindow((_x, y, _w, h) => {
+      loginFormSpaceBelow.value = SCREEN_HEIGHT - (y + h);
+    });
+  }, []);
   const loginKbShiftStyle = useAnimatedStyle(() => {
     "worklet";
-    return { transform: [{ translateY: -loginKb.height.value }] };
+    const shift = Math.max(0, loginKb.height.value - loginFormSpaceBelow.value + 16);
+    return { transform: [{ translateY: -shift }] };
   });
 
   // Smooth keyboard animation for terminal (Reanimated worklet, no re-renders)
@@ -2879,7 +2887,7 @@ function AppMain() {
                 <View style={s.sep} />
               </>
             ) : (
-              <View>
+              <View ref={loginFormRef} onLayout={onLoginFormLayout}>
                 <View
                   style={{
                     flexDirection: "row",
@@ -2940,6 +2948,7 @@ function AppMain() {
                     onPress={() => {
                       setShowManualInput(false);
                       setIpAddress("");
+                      loginFormSpaceBelow.value = SCREEN_HEIGHT;
                     }}
                     activeOpacity={0.7}
                   >
