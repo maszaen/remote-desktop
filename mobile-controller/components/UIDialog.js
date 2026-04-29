@@ -1,19 +1,27 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import {
   Modal,
   View,
   Text,
   TouchableOpacity,
-  Animated,
-  Easing,
   StyleSheet,
-  KeyboardAvoidingView,
-  Platform,
   Keyboard,
+  Dimensions,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  useAnimatedKeyboard,
+  withTiming,
+  withSpring,
+  withRepeat,
+  cancelAnimation,
+  runOnJS,
+} from "react-native-reanimated";
 
-// Basic colors to fallback if not provided by App
+const { height: SCREEN_HEIGHT } = Dimensions.get("window");
+
 const C = {
   primary: "#4F8EF7",
   primaryDim: "rgba(79, 142, 247, 0.15)",
@@ -36,30 +44,28 @@ const SP = {
 };
 
 const SpinningIcon = ({ name, size, color, spinning }) => {
-  const spinValue = useRef(new Animated.Value(0)).current;
+  const rotation = useSharedValue(0);
 
   useEffect(() => {
     if (spinning) {
-      Animated.loop(
-        Animated.timing(spinValue, {
-          toValue: 1,
-          duration: 1000,
-          easing: Easing.linear,
-          useNativeDriver: true,
-        })
-      ).start();
+      rotation.value = 0;
+      rotation.value = withRepeat(
+        withTiming(360, { duration: 1000 }),
+        -1,
+        false
+      );
     } else {
-      spinValue.stopAnimation();
+      cancelAnimation(rotation);
+      rotation.value = 0;
     }
   }, [spinning]);
 
-  const spin = spinValue.interpolate({
-    inputRange: [0, 1],
-    outputRange: ["0deg", "360deg"],
-  });
+  const spinStyle = useAnimatedStyle(() => ({
+    transform: [{ rotateZ: `${rotation.value}deg` }],
+  }));
 
   return (
-    <Animated.View style={{ transform: [{ rotate: spin }] }}>
+    <Animated.View style={spinStyle}>
       <Ionicons name={name} size={size} color={color} />
     </Animated.View>
   );
@@ -69,7 +75,7 @@ export const UIDialog = ({
   visible = false,
   title = "",
   message = "",
-  type = "alert", // "alert", "confirm", "progress"
+  type = "alert",
   progress = 0,
   icon = null,
   iconColor = null,
@@ -81,10 +87,11 @@ export const UIDialog = ({
   onClose = () => {},
 }) => {
   const [mounted, setMounted] = useState(false);
-  const opacity = useRef(new Animated.Value(0)).current;
-  const scale = useRef(new Animated.Value(0.95)).current;
+  const opacity = useSharedValue(0);
+  const scale = useSharedValue(0.95);
+  const kb = useAnimatedKeyboard();
+  const dialogH = useSharedValue(0);
 
-  // Derive buttons from provided prop or use defaults
   const renderButtons =
     type === "alert" && buttons.length === 0
       ? [{ text: "OK", onPress: onClose }]
@@ -93,35 +100,36 @@ export const UIDialog = ({
   useEffect(() => {
     if (visible) {
       setMounted(true);
-      Animated.parallel([
-        Animated.timing(opacity, {
-          toValue: 1,
-          duration: 200,
-          easing: Easing.out(Easing.quad),
-          useNativeDriver: true,
-        }),
-        Animated.spring(scale, {
-          toValue: 1,
-          friction: 9,
-          tension: 130,
-          useNativeDriver: true,
-        }),
-      ]).start();
+      opacity.value = withTiming(1, { duration: 200 });
+      scale.value = withSpring(1, { damping: 9, stiffness: 130 });
     } else {
-      Animated.parallel([
-        Animated.timing(opacity, {
-          toValue: 0,
-          duration: 150,
-          useNativeDriver: true,
-        }),
-        Animated.timing(scale, {
-          toValue: 0.95,
-          duration: 150,
-          useNativeDriver: true,
-        }),
-      ]).start(() => setMounted(false));
+      opacity.value = withTiming(0, { duration: 150 }, (finished) => {
+        if (finished) runOnJS(setMounted)(false);
+      });
+      scale.value = withTiming(0.95, { duration: 150 });
     }
   }, [visible]);
+
+  const overlayStyle = useAnimatedStyle(() => ({
+    opacity: opacity.value,
+  }));
+
+  const dialogStyle = useAnimatedStyle(() => {
+    // Only shift up when keyboard actually overlaps the dialog bottom.
+    // spaceBelow = distance from dialog bottom edge to screen bottom.
+    // When kb.height > spaceBelow the keyboard touches the container,
+    // so we lift by just the overlap amount (+ 16 px breathing room).
+    const spaceBelow = (SCREEN_HEIGHT - dialogH.value) / 2;
+    const shift = Math.max(0, kb.height.value - spaceBelow + 16);
+    return {
+      opacity: opacity.value,
+      transform: [{ scale: scale.value }, { translateY: -shift }],
+    };
+  });
+
+  const onLayout = useCallback((e) => {
+    dialogH.value = e.nativeEvent.layout.height;
+  }, []);
 
   if (!mounted && !visible) return null;
 
@@ -132,22 +140,21 @@ export const UIDialog = ({
       animationType="none"
       onRequestClose={() => cancelable && onClose()}
     >
-      <KeyboardAvoidingView
+      <View
         style={[
           StyleSheet.absoluteFillObject,
           {
             justifyContent: "center",
             alignItems: "center",
             padding: SP.md,
-            zIndex: 99999,
           },
         ]}
-        behavior={Platform.OS === "ios" ? "padding" : "height"}
       >
         <Animated.View
           style={[
             StyleSheet.absoluteFillObject,
-            { backgroundColor: "rgba(0,0,0,0.65)", opacity },
+            { backgroundColor: "rgba(0,0,0,0.65)" },
+            overlayStyle,
           ]}
           pointerEvents={cancelable ? "auto" : "none"}
         >
@@ -162,8 +169,8 @@ export const UIDialog = ({
         </Animated.View>
 
         <Animated.View
-          style={[s.uiDialogBox, { opacity, transform: [{ scale }] }]}
-          pointerEvents="box-none"
+          style={[s.uiDialogBox, dialogStyle]}
+          onLayout={onLayout}
         >
           <View style={s.uiDialogContentWrapper}>
             {(type === "progress" || icon) && (
@@ -201,7 +208,7 @@ export const UIDialog = ({
             {type === "progress" && (
               <View style={s.uiDialogProgressWrapper}>
                 <View style={s.uiDialogProgressTrack}>
-                  <Animated.View
+                  <View
                     style={[
                       s.uiDialogProgressFill,
                       {
@@ -273,7 +280,7 @@ export const UIDialog = ({
             </View>
           )}
         </Animated.View>
-      </KeyboardAvoidingView>
+      </View>
     </Modal>
   );
 };

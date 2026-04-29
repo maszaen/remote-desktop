@@ -2980,10 +2980,6 @@ function AppMain() {
         {/* Rename Modal */}
         <UIDialog
           visible={renameTarget !== null}
-          icon="create"
-          spinning={false}
-          title="Rename Device"
-          message={renameTarget?.ip || ""}
           cancelable
           onClose={() => {
             setRenameTarget(null);
