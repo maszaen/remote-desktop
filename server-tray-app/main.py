@@ -912,6 +912,38 @@ def kill_process(req: KillRequest):
         return {"error": str(e)}
 
 
+def _get_smtc_titles():
+    """Get media titles via Windows SMTC (System Media Transport Controls).
+    Returns a list of display strings for currently playing media, or empty list on failure."""
+    import asyncio
+
+    async def _query():
+        from winrt.windows.media.control import (
+            GlobalSystemMediaTransportControlsSessionManager as SessionManager,
+            GlobalSystemMediaTransportControlsSessionPlaybackStatus as PlaybackStatus,
+        )
+        manager = await SessionManager.request_async()
+        sessions = manager.get_sessions()
+        titles = []
+        for session in sessions:
+            info = session.get_playback_info()
+            if info.playback_status != PlaybackStatus.PLAYING:
+                continue
+            props = await session.try_get_media_properties_async()
+            title = (props.title or "").strip()
+            artist = (props.artist or "").strip()
+            if title:
+                display = f"{artist} - {title}" if artist else title
+                titles.append(display)
+        return titles
+
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(_query())
+    finally:
+        loop.close()
+
+
 @app.get("/stats", dependencies=[Depends(verify_pin)])
 def get_stats():
     try:
@@ -927,62 +959,70 @@ def get_stats():
 
     active_media = "Not Playing"
     try:
-        from pycaw.pycaw import AudioUtilities
-        from comtypes import CoInitialize
-        import ctypes
-        from ctypes import wintypes
+        smtc_titles = _get_smtc_titles()
+        if smtc_titles:
+            active_media = " • ".join(smtc_titles)
+    except Exception:
+        pass
 
-        CoInitialize()
-        sessions = AudioUtilities.GetAllSessions()
+    if active_media == "Not Playing":
+        try:
+            from pycaw.pycaw import AudioUtilities
+            from comtypes import CoInitialize
+            import ctypes
+            from ctypes import wintypes
 
-        playing_pids = set()
-        playing_names = set()
-        for s in sessions:
-            if s.Process and s.State == 1:
-                name = s.Process.name()
-                if name.lower() not in (
-                    "explorer.exe",
-                    "lightingservice.exe",
-                    "msmpeng.exe",
-                ):
-                    playing_pids.add(s.Process.pid)
-                    playing_names.add(name.lower())
+            CoInitialize()
+            sessions = AudioUtilities.GetAllSessions()
 
-        media_titles = []
-        if playing_pids:
-            user32 = ctypes.windll.user32
+            playing_pids = set()
+            playing_names = set()
+            for s in sessions:
+                if s.Process and s.State == 1:
+                    name = s.Process.name()
+                    if name.lower() not in (
+                        "explorer.exe",
+                        "lightingservice.exe",
+                        "msmpeng.exe",
+                    ):
+                        playing_pids.add(s.Process.pid)
+                        playing_names.add(name.lower())
 
-            def enum_windows_proc(hwnd, lParam):
-                if user32.IsWindowVisible(hwnd):
-                    pid = ctypes.c_ulong()
-                    user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
-                    if pid.value in playing_pids:
-                        length = user32.GetWindowTextLengthW(hwnd)
-                        if length > 0:
-                            buff = ctypes.create_unicode_buffer(length + 1)
-                            user32.GetWindowTextW(hwnd, buff, length + 1)
-                            title = buff.value.strip()
-                            if title and title.lower() not in (
-                                "spotify premium",
-                                "spotify free",
-                                "spotify",
-                            ):
-                                media_titles.append(title)
-                return True
+            media_titles = []
+            if playing_pids:
+                user32 = ctypes.windll.user32
 
-            WNDENUMPROC = ctypes.WINFUNCTYPE(
-                ctypes.c_bool, wintypes.HWND, wintypes.LPARAM
-            )
-            user32.EnumWindows(WNDENUMPROC(enum_windows_proc), 0)
+                def enum_windows_proc(hwnd, lParam):
+                    if user32.IsWindowVisible(hwnd):
+                        pid = ctypes.c_ulong()
+                        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+                        if pid.value in playing_pids:
+                            length = user32.GetWindowTextLengthW(hwnd)
+                            if length > 0:
+                                buff = ctypes.create_unicode_buffer(length + 1)
+                                user32.GetWindowTextW(hwnd, buff, length + 1)
+                                title = buff.value.strip()
+                                if title and title.lower() not in (
+                                    "spotify premium",
+                                    "spotify free",
+                                    "spotify",
+                                ):
+                                    media_titles.append(title)
+                    return True
 
-            if media_titles:
-                active_media = " • ".join(set(media_titles))
-            else:
-                active_media = " • ".join(
-                    set(n.replace(".exe", "").title() for n in playing_names)
+                WNDENUMPROC = ctypes.WINFUNCTYPE(
+                    ctypes.c_bool, wintypes.HWND, wintypes.LPARAM
                 )
-    except Exception as e:
-        active_media = "Unknown"
+                user32.EnumWindows(WNDENUMPROC(enum_windows_proc), 0)
+
+                if media_titles:
+                    active_media = " • ".join(set(media_titles))
+                else:
+                    active_media = " • ".join(
+                        set(n.replace(".exe", "").title() for n in playing_names)
+                    )
+        except Exception as e:
+            active_media = "Unknown"
 
     try:
         ram = psutil.virtual_memory()

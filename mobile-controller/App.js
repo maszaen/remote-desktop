@@ -2215,18 +2215,15 @@ function AppMain() {
 
   const handleTabNavigate = async () => {
     if (!tabNavUrl.trim()) return;
-    let url = tabNavUrl.trim();
-    if (!url.startsWith("http://") && !url.startsWith("https://")) {
-      url = "https://" + url;
-    }
+    const rawInput = tabNavUrl.trim();
     Keyboard.dismiss();
     if (tabsList.length > 1 && !tabsActiveHwnd) {
-      setTabsPendingAction({ type: "navigate", url });
+      setTabsPendingAction({ type: "navigate", url: rawInput });
       setTabsPickerOpen(true);
       return;
     }
     const param = tabsActiveHwnd ? `?hwnd=${tabsActiveHwnd}` : "";
-    await sendAction(`/tabs/navigate${param}`, "POST", { url });
+    await sendAction(`/tabs/navigate${param}`, "POST", { url: rawInput });
     setTabNavUrl("");
     setTimeout(fetchTabs, 1000);
   };
@@ -5617,7 +5614,7 @@ function AppMain() {
                   paddingHorizontal: SP.sm,
                   height: 40,
                 }}
-                placeholder="Enter URL..."
+                placeholder="Search or enter URL..."
                 placeholderTextColor={C.muted}
                 value={tabNavUrl}
                 onChangeText={setTabNavUrl}
