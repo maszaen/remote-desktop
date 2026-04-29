@@ -2877,7 +2877,7 @@ function AppMain() {
                     <View
                       style={[s.menuRowIcon, { backgroundColor: C.successDim }]}
                     >
-                      <Ionicons name="desktop" size={18} color={C.success} />
+                      <Ionicons name="desktop-outline" size={18} color={C.success} />
                     </View>
                     <View style={s.menuRowBody}>
                       <Text style={s.menuRowTitle}>
@@ -5529,15 +5529,13 @@ function AppMain() {
         keyboardAware
         keyboardVerticalOffset={tabsKbOffset}
       >
-        <View style={s.sheetContent}>
+        <View style={s.sheetContent }>
           {/* Controls panel — dark container wrapping actions + URL bar */}
           <View
             style={{
               marginBottom: SP.md,
+              borderRadius: R.sm,
               backgroundColor: C.surface,
-              borderRadius: R.md,
-              borderWidth: 1,
-              borderColor: C.border,
               overflow: "hidden",
             }}
           >
@@ -5604,7 +5602,7 @@ function AppMain() {
                 height: 40,
               }}
             >
-              <Ionicons name="globe-outline" size={16} color={C.muted} />
+              <Ionicons name="globe-outline" size={20} color={C.muted} />
               <TextInput
                 style={{
                   flex: 1,
@@ -5624,7 +5622,7 @@ function AppMain() {
                 returnKeyType="go"
               />
               <TouchableOpacity onPress={handleTabNavigate} activeOpacity={0.6}>
-                <Ionicons name="arrow-forward-circle" size={22} color={C.primary} />
+                <Ionicons name="arrow-forward-circle" size={22} color={!tabNavUrl ? C.muted : C.primary} />
               </TouchableOpacity>
             </View>
           </View>
@@ -5693,7 +5691,8 @@ function AppMain() {
                       flexDirection: "row",
                       alignItems: "center",
                       height: TAB_ITEM_H,
-                      paddingHorizontal: SP.md,
+                      paddingHorizontal: SP.md + 2,
+                      paddingRight: SP.md + 1,
                       borderBottomWidth: i < tabsList.length - 1 ? 1 : 0,
                       borderBottomColor: isSelected ? "transparent" : C.border,
                       borderRadius: R.sm,
@@ -5715,7 +5714,7 @@ function AppMain() {
                       size={20}
                       color={isSelected ? C.primary : C.sub}
                     />
-                    <View style={{ flex: 1, marginLeft: SP.md, marginRight: SP.md }}>
+                    <View style={{ flex: 1, marginLeft: SP.md, marginRight: SP.lg }}>
                       <Text
                         style={{
                           color: C.text,
@@ -5732,9 +5731,9 @@ function AppMain() {
                       </Text>
                     </View>
                     {isSelected ? (
-                      <Ionicons name="checkmark-circle" size={18} color={C.primary} />
+                      <Ionicons name="checkmark-circle" size={21} color={C.primary} />
                     ) : (
-                      <Ionicons name="open-outline" size={16} color={C.muted} />
+                      <Ionicons name="open-outline" size={17} color={C.muted} />
                     )}
                   </TouchableOpacity>
                 );
