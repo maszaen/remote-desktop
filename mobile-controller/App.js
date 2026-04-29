@@ -1224,21 +1224,10 @@ function AppMain() {
   const terminalScrollRef = useRef(null);
   const loginScrollRef = useRef(null);
   const loginKb = useAnimatedKeyboard();
-  const loginKbSpacerStyle = useAnimatedStyle(() => {
+  const loginKbShiftStyle = useAnimatedStyle(() => {
     "worklet";
-    return { height: Math.max(60, loginKb.height.value) };
+    return { transform: [{ translateY: -loginKb.height.value }] };
   });
-  const scrollLoginToEnd = () => {
-    loginScrollRef.current?.scrollToEnd({ animated: true });
-  };
-  useAnimatedReaction(
-    () => loginKb.height.value,
-    (cur, prev) => {
-      if (cur > 0 && (prev === null || prev === 0)) {
-        runOnJS(scrollLoginToEnd)();
-      }
-    },
-  );
 
   // Smooth keyboard animation for terminal (Reanimated worklet, no re-renders)
   // Container shrinks from bottom by keyboard height — input just follows.
@@ -2795,6 +2784,7 @@ function AppMain() {
           translucent
           backgroundColor="transparent"
         />
+        <AnimatedRe.View style={[{ flex: 1 }, loginKbShiftStyle]}>
         <ScrollView
           ref={loginScrollRef}
           contentContainerStyle={s.scrollLogin}
@@ -3044,8 +3034,8 @@ function AppMain() {
 
          
 
-          <AnimatedRe.View style={loginKbSpacerStyle} />
         </ScrollView>
+        </AnimatedRe.View>
 
         {/* Rename Modal */}
         <UIDialog
