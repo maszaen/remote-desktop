@@ -2937,39 +2937,107 @@ function AppMain() {
                 <View style={s.sep} />
               </>
             ) : (
-              <View style={{ paddingBottom: SP.md }}>
-                <Text style={s.groupLabel}>MANUAL CONNECTION</Text>
-                <View style={s.inputRow}>
-                  <Ionicons
-                    name="globe-outline"
-                    size={18}
-                    color={C.muted}
-                    style={{ paddingLeft: SP.sm, marginRight: SP.sm }}
-                  />
+              <View
+                style={{
+                  backgroundColor: C.elevated,
+                  borderRadius: R.lg,
+                  borderWidth: 1,
+                  borderColor: C.border,
+                  padding: SP.md,
+                }}
+              >
+                <View
+                  style={{
+                    flexDirection: "row",
+                    alignItems: "center",
+                    backgroundColor: C.surface,
+                    borderRadius: R.sm,
+                    paddingHorizontal: SP.sm,
+                    height: 48,
+                  }}
+                >
+                  <Ionicons name="globe-outline" size={20} color={C.muted} />
                   <TextInput
-                    style={s.inputField}
+                    style={{
+                      flex: 1,
+                      color: C.text,
+                      fontSize: F.md,
+                      paddingVertical: 0,
+                      paddingHorizontal: SP.sm,
+                      height: 48,
+                      fontWeight: "600",
+                    }}
                     placeholder="192.168.x.x"
                     placeholderTextColor={C.muted}
                     value={ipAddress}
                     onChangeText={setIpAddress}
                     keyboardType="default"
                     autoCapitalize="none"
+                    autoFocus
+                    onSubmitEditing={() => {
+                      if (ipAddress.trim()) initiateConnect(null, "Direct PC", null);
+                    }}
+                    returnKeyType="go"
                   />
                 </View>
-                <TouchableOpacity
-                  style={[s.btnPrimary, !ipAddress.trim() && { opacity: 0.3 }]}
-                  onPress={() => initiateConnect(null, "Direct PC", null)}
-                  disabled={!ipAddress.trim()}
-                  activeOpacity={0.8}
+                <View
+                  style={{
+                    flexDirection: "row",
+                    marginTop: SP.sm,
+                    gap: SP.sm,
+                  }}
                 >
-                  <Text style={s.btnPrimaryText}>CONNECT</Text>
-                  <Ionicons
-                    name="arrow-forward"
-                    size={15}
-                    color={C.text}
-                    style={{ marginLeft: 8 }}
-                  />
-                </TouchableOpacity>
+                  <TouchableOpacity
+                    style={{
+                      flex: 1,
+                      alignItems: "center",
+                      justifyContent: "center",
+                      paddingVertical: 13,
+                      borderRadius: R.sm,
+                      backgroundColor: C.surface,
+                      borderWidth: 1,
+                      borderColor: C.border,
+                    }}
+                    onPress={() => {
+                      setShowManualInput(false);
+                      setIpAddress("");
+                    }}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={{ color: C.sub, fontSize: F.md, fontWeight: "600" }}>Cancel</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={{
+                      flex: 1,
+                      flexDirection: "row",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      paddingVertical: 13,
+                      borderRadius: R.sm,
+                      backgroundColor: ipAddress.trim() ? C.primary : C.surface,
+                      opacity: ipAddress.trim() ? 1 : 0.4,
+                    }}
+                    onPress={() => initiateConnect(null, "Direct PC", null)}
+                    disabled={!ipAddress.trim()}
+                    activeOpacity={0.8}
+                  >
+                    <Text
+                      style={{
+                        color: ipAddress.trim() ? "#fff" : C.muted,
+                        fontSize: F.md,
+                        fontWeight: "600",
+                      }}
+                    >
+                      Connect
+                    </Text>
+                    <Ionicons
+                      name="arrow-forward"
+                      size={15}
+                      color={ipAddress.trim() ? "#fff" : C.muted}
+                      style={{ marginLeft: 6 }}
+                    />
+                  </TouchableOpacity>
+                </View>
               </View>
             )}
           </FadeSlideIn>
@@ -3167,6 +3235,7 @@ function AppMain() {
           <TouchableOpacity
             style={[s.disconnectBtn, { backgroundColor: C.elevated, borderColor: C.border }]}
             onPress={() => {
+              Keyboard.dismiss();
               if (keyboardSheetOpen) setKeyboardSheetOpen(false);
               else if (shortcutSheetOpen) setShortcutSheetOpen(false);
               else if (filesSheetOpen) setFilesSheetOpen(false);
@@ -5119,6 +5188,7 @@ function AppMain() {
                   placeholderTextColor={C.muted}
                   autoCorrect={false}
                   autoCapitalize="none"
+                  autoFocus
                   multiline={true}
                   scrollEnabled={true}
                   textAlignVertical="top"
@@ -6857,6 +6927,7 @@ function AppMain() {
                     placeholderTextColor={C.muted}
                     autoCapitalize="none"
                     autoCorrect={false}
+                    autoFocus
                     returnKeyType="send"
                     editable={!terminalRunning}
                     onSubmitEditing={() => terminalExec(terminalInput)}
