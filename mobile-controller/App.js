@@ -2887,7 +2887,7 @@ function AppMain() {
                 <View style={s.sep} />
               </>
             ) : (
-              <View ref={loginFormRef} onLayout={onLoginFormLayout}>
+              <View>
                 <View
                   style={{
                     flexDirection: "row",
@@ -2927,6 +2927,8 @@ function AppMain() {
                   />
                 </View>
                 <View
+                  ref={loginFormRef}
+                  onLayout={onLoginFormLayout}
                   style={{
                     flexDirection: "row",
                     marginTop: SP.sm,
