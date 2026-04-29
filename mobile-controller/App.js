@@ -5611,6 +5611,7 @@ function AppMain() {
           <View
             style={{
               marginBottom: SP.md,
+              marginTop: SP.lg - 4,
               borderRadius: R.sm,
               backgroundColor: C.surface,
               overflow: "hidden",
