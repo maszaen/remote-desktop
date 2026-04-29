@@ -14,7 +14,6 @@ import Animated, {
   useAnimatedStyle,
   useAnimatedKeyboard,
   withTiming,
-  withSpring,
   withRepeat,
   cancelAnimation,
   runOnJS,
@@ -101,7 +100,7 @@ export const UIDialog = ({
     if (visible) {
       setMounted(true);
       opacity.value = withTiming(1, { duration: 200 });
-      scale.value = withSpring(1, { damping: 9, stiffness: 130 });
+      scale.value = withTiming(1, { duration: 200 });
     } else {
       opacity.value = withTiming(0, { duration: 150 }, (finished) => {
         if (finished) runOnJS(setMounted)(false);
