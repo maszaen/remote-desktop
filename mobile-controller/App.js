@@ -2856,7 +2856,142 @@ function AppMain() {
                 style={{ paddingRight: SP.sm }}
               />
             </TouchableOpacity>
-            <View style={s.sep} />
+            {!showManualInput && <View style={s.sep} />}
+          </FadeSlideIn>
+
+           {/* Manual input */}
+          <FadeSlideIn delay={240}>
+            {!showManualInput ? (
+              <>
+                <TouchableOpacity
+                  style={s.menuRow}
+                  onPress={() => setShowManualInput(true)}
+                  activeOpacity={0.6}
+                >
+                  <View
+                    style={[s.menuRowIcon, { backgroundColor: C.elevated }]}
+                  >
+                    <Ionicons name="terminal-outline" size={18} color={C.sub} />
+                  </View>
+                  <View style={s.menuRowBody}>
+                    <Text style={s.menuRowTitle}>Enter IP Manually</Text>
+                    <Text style={s.menuRowSub}>
+                      Type the PC's local IP address
+                    </Text>
+                  </View>
+                  <Ionicons
+                    name="arrow-forward-outline"
+                    size={20}
+                    color={C.muted}
+                    style={{ paddingRight: SP.sm }}
+                  />
+                </TouchableOpacity>
+                <View style={s.sep} />
+              </>
+            ) : (
+              <View>
+                <View
+                  style={{
+                    flexDirection: "row",
+                    alignItems: "center",
+                    backgroundColor: C.surface,
+                    borderRadius: R.sm,
+                    borderTopLeftRadius: R.lga,
+                    borderTopRightRadius: R.lga,
+                    paddingHorizontal: SP.sm + 3,
+                    height: 48,
+                    borderWidth: 1,
+                    borderColor: C.border,
+                  }}
+                >
+                  <Ionicons name="globe-outline" size={20} color={C.muted} />
+                  <TextInput
+                    style={{
+                      flex: 1,
+                      color: C.text,
+                      fontSize: F.md,
+                      paddingVertical: 0,
+                      paddingHorizontal: SP.sm,
+                      height: 48,
+                      fontWeight: "600",
+                    }}
+                    placeholder="Enter IP address"
+                    placeholderTextColor={C.muted}
+                    value={ipAddress}
+                    onChangeText={setIpAddress}
+                    keyboardType="default"
+                    autoCapitalize="none"
+                    autoFocus
+                    onSubmitEditing={() => {
+                      if (ipAddress.trim()) initiateConnect(null, "Direct PC", null);
+                    }}
+                    returnKeyType="go"
+                  />
+                </View>
+                <View
+                  style={{
+                    flexDirection: "row",
+                    marginTop: SP.sm,
+                    gap: SP.sm,
+                  }}
+                >
+                  <TouchableOpacity
+                    style={{
+                      flex: 1,
+                      alignItems: "center",
+                      justifyContent: "center",
+                      paddingVertical: 13,
+                      borderRadius: R.sm,
+                      borderBottomLeftRadius: R.lga,
+                      backgroundColor: C.surface,
+                      borderWidth: 1,
+                      borderColor: C.border,
+                    }}
+                    onPress={() => {
+                      setShowManualInput(false);
+                      setIpAddress("");
+                    }}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={{ color: C.sub, fontSize: F.md, fontWeight: "600" }}>Cancel</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={{
+                      flex: 1,
+                      flexDirection: "row",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      paddingVertical: 13,
+                      borderRadius: R.sm,
+                      borderBottomRightRadius: R.lga,
+                      borderWidth: 1,
+                      borderColor: C.border,
+                      backgroundColor: ipAddress.trim() ? C.primary : C.surface,
+                      opacity: ipAddress.trim() ? 1 : 0.4,
+                    }}
+                    onPress={() => initiateConnect(null, "Direct PC", null)}
+                    disabled={!ipAddress.trim()}
+                    activeOpacity={0.8}
+                  >
+                    <Text
+                      style={{
+                        color: ipAddress.trim() ? "#fff" : C.muted,
+                        fontSize: F.md,
+                        fontWeight: "600",
+                      }}
+                    >
+                      Connect
+                    </Text>
+                    <Ionicons
+                      name="arrow-forward"
+                      size={15}
+                      color={ipAddress.trim() ? "#fff" : C.muted}
+                      style={{ marginLeft: 6 }}
+                    />
+                  </TouchableOpacity>
+                </View>
+              </View>
+            )}
           </FadeSlideIn>
 
           {/* Saved devices */}
@@ -2907,140 +3042,7 @@ function AppMain() {
             </FadeSlideIn>
           )}
 
-          {/* Manual input */}
-          <FadeSlideIn delay={240} style={{ marginTop: SP.lg }}>
-            {!showManualInput ? (
-              <>
-                <TouchableOpacity
-                  style={s.menuRow}
-                  onPress={() => setShowManualInput(true)}
-                  activeOpacity={0.6}
-                >
-                  <View
-                    style={[s.menuRowIcon, { backgroundColor: C.elevated }]}
-                  >
-                    <Ionicons name="terminal-outline" size={18} color={C.sub} />
-                  </View>
-                  <View style={s.menuRowBody}>
-                    <Text style={s.menuRowTitle}>Enter IP Manually</Text>
-                    <Text style={s.menuRowSub}>
-                      Type the PC's local IP address
-                    </Text>
-                  </View>
-                  <Ionicons
-                    name="arrow-forward-outline"
-                    size={20}
-                    color={C.muted}
-                    style={{ paddingRight: SP.sm }}
-                  />
-                </TouchableOpacity>
-                <View style={s.sep} />
-              </>
-            ) : (
-              <View
-                style={{
-                  backgroundColor: C.elevated,
-                  borderRadius: R.lg,
-                  borderWidth: 1,
-                  borderColor: C.border,
-                  padding: SP.md,
-                }}
-              >
-                <View
-                  style={{
-                    flexDirection: "row",
-                    alignItems: "center",
-                    backgroundColor: C.surface,
-                    borderRadius: R.sm,
-                    paddingHorizontal: SP.sm,
-                    height: 48,
-                  }}
-                >
-                  <Ionicons name="globe-outline" size={20} color={C.muted} />
-                  <TextInput
-                    style={{
-                      flex: 1,
-                      color: C.text,
-                      fontSize: F.md,
-                      paddingVertical: 0,
-                      paddingHorizontal: SP.sm,
-                      height: 48,
-                      fontWeight: "600",
-                    }}
-                    placeholder="192.168.x.x"
-                    placeholderTextColor={C.muted}
-                    value={ipAddress}
-                    onChangeText={setIpAddress}
-                    keyboardType="default"
-                    autoCapitalize="none"
-                    autoFocus
-                    onSubmitEditing={() => {
-                      if (ipAddress.trim()) initiateConnect(null, "Direct PC", null);
-                    }}
-                    returnKeyType="go"
-                  />
-                </View>
-                <View
-                  style={{
-                    flexDirection: "row",
-                    marginTop: SP.sm,
-                    gap: SP.sm,
-                  }}
-                >
-                  <TouchableOpacity
-                    style={{
-                      flex: 1,
-                      alignItems: "center",
-                      justifyContent: "center",
-                      paddingVertical: 13,
-                      borderRadius: R.sm,
-                      backgroundColor: C.surface,
-                      borderWidth: 1,
-                      borderColor: C.border,
-                    }}
-                    onPress={() => {
-                      setShowManualInput(false);
-                      setIpAddress("");
-                    }}
-                    activeOpacity={0.7}
-                  >
-                    <Text style={{ color: C.sub, fontSize: F.md, fontWeight: "600" }}>Cancel</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={{
-                      flex: 1,
-                      flexDirection: "row",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      paddingVertical: 13,
-                      borderRadius: R.sm,
-                      backgroundColor: ipAddress.trim() ? C.primary : C.surface,
-                      opacity: ipAddress.trim() ? 1 : 0.4,
-                    }}
-                    onPress={() => initiateConnect(null, "Direct PC", null)}
-                    disabled={!ipAddress.trim()}
-                    activeOpacity={0.8}
-                  >
-                    <Text
-                      style={{
-                        color: ipAddress.trim() ? "#fff" : C.muted,
-                        fontSize: F.md,
-                        fontWeight: "600",
-                      }}
-                    >
-                      Connect
-                    </Text>
-                    <Ionicons
-                      name="arrow-forward"
-                      size={15}
-                      color={ipAddress.trim() ? "#fff" : C.muted}
-                      style={{ marginLeft: 6 }}
-                    />
-                  </TouchableOpacity>
-                </View>
-              </View>
-            )}
-          </FadeSlideIn>
+         
 
           <AnimatedRe.View style={loginKbSpacerStyle} />
         </ScrollView>
