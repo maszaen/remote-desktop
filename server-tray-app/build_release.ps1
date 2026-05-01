@@ -9,6 +9,13 @@ $projectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $projectRoot
 
 if (-not $NoClean) {
+    # 1. Matikan proses jika masih berjalan di background
+    Stop-Process -Name "NexusServer", "NexusServer_PC" -Force -ErrorAction SilentlyContinue
+    
+    # 2. Beri jeda 1 detik agar Windows PnP/File System merilis lock sepenuhnya
+    Start-Sleep -Seconds 1 
+
+    # 3. Bersihkan direktori
     if (Test-Path "build") { Remove-Item "build" -Recurse -Force }
     if (Test-Path "dist") { Remove-Item "dist" -Recurse -Force }
 }
@@ -20,12 +27,37 @@ if (Test-Path "..\.venv\Scripts\python.exe") {
 
 & $pythonCmd -m pip install -r requirements.txt
 
-$specFile = "NexusServer.spec"
+# --- MODIFIKASI: Build dinamis dari main.py ---
+$appName = "NexusServer"
 if ($OneDir) {
-    $specFile = "NexusServer_PC.spec"
+    $appName = "NexusServer_PC"
 }
 
-& $pythonCmd -m PyInstaller --noconfirm $specFile
+# Kumpulkan argumen PyInstaller ke dalam array, wajib include vgamepad
+$pyiArgs = @(
+    "--noconfirm",
+    "--name=$appName",
+    "--noconsole",
+    "--collect-all=vgamepad"
+)
+
+# Amankan file icon & resource agar tidak hilang saat build
+if (Test-Path "favicon.png") {
+    $pyiArgs += "--add-data=favicon.png;."
+    $pyiArgs += "--icon=favicon.png"
+}
+
+if ($OneDir) {
+    $pyiArgs += "--onedir"
+} else {
+    $pyiArgs += "--onefile"
+}
+
+$pyiArgs += "main.py"
+
+# Eksekusi PyInstaller menggunakan array argumen dinamis
+& $pythonCmd -m PyInstaller $pyiArgs
+# -----------------------------------------------
 
 if (-not $OneDir) {
     $releaseDir = Join-Path $projectRoot "release"
@@ -42,6 +74,6 @@ if (-not $OneDir) {
     Write-Host "Portable package created:" $zipPath
     Write-Host "Share this file with end users (no Python installation required)."
 } else {
-    Write-Host "OneDir build completed in dist\\NexusServer_PC"
+    Write-Host "OneDir build completed in dist\NexusServer_PC"
     Write-Host "Important: distribute the entire folder, not only NexusServer_PC.exe"
 }

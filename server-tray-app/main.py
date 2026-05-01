@@ -39,6 +39,11 @@ pydirectinput.PAUSE = 0
 pyautogui.FAILSAFE = False
 pydirectinput.FAILSAFE = False
 
+try:
+    import vgamepad
+except ImportError:
+    pass
+
 # Enable Per-Monitor DPI Awareness so screenshots capture at native resolution
 try:
     ctypes.windll.shcore.SetProcessDpiAwareness(2)  # PROCESS_PER_MONITOR_DPI_AWARE
@@ -1712,24 +1717,38 @@ def is_gamepad_connected():
         return _vgamepad_instance is not None
 
 def toggle_gamepad(icon, item):
-    global _vgamepad_instance
-    if is_gamepad_connected():
-        # Disconnect
-        try:
-            with _vgamepad_lock:
-                if _vgamepad_instance is not None:
-                    _vgamepad_instance.reset()
-                    _vgamepad_instance.update()
-                    _vgamepad_instance = None
-            _clear_gamepad_state()
-        except Exception as e:
-            print(f"Error disconnecting gamepad: {e}")
-    else:
-        # Connect
-        try:
-            _get_gamepad()
-        except Exception as e:
-            print(f"Error connecting gamepad: {e}")
+        global _vgamepad_instance
+        if is_gamepad_connected():
+            # Disconnect
+            try:
+                with _vgamepad_lock:
+                    if _vgamepad_instance is not None:
+                        _vgamepad_instance.reset()
+                        _vgamepad_instance.update()
+                        
+                        old_gp = _vgamepad_instance
+                        _vgamepad_instance = None
+                        del old_gp
+                        import gc
+                        gc.collect()
+                _clear_gamepad_state()
+                icon.update_menu()  # <-- Paksa refresh UI tray
+            except Exception as e:
+                import ctypes
+                ctypes.windll.user32.MessageBoxW(0, f"Gagal disconnect: {str(e)}", "Nexus Error", 0x10)
+        else:
+            # Connect
+            def connect_task():
+                import time
+                time.sleep(1.5)  # Cooldown 1.5 detik
+                try:
+                    _get_gamepad()
+                    icon.update_menu()  # <-- Paksa refresh UI tray setelah benar-benar connect
+                except Exception as e:
+                    import ctypes
+                    ctypes.windll.user32.MessageBoxW(0, f"Gagal connect virtual gamepad: {str(e)}\n\nPastikan ViGEmBus Driver sudah terinstal.", "Nexus Error", 0x10)
+            
+            threading.Thread(target=connect_task, daemon=True).start()          
 
 def _gamepad_watchdog_loop():
     while True:
