@@ -231,6 +231,7 @@ const SlideLeftModal = ({
   onClose,
   children,
   contentInsetTop = 0,
+  aboveNav = false,
 }) => {
   const [mounted, setMounted] = useState(false);
   const slideX = useRef(new Animated.Value(SCREEN_WIDTH)).current;
@@ -276,7 +277,7 @@ const SlideLeftModal = ({
   if (!mounted) return null;
 
   return (
-    <View style={s.slideLeftWrapper} pointerEvents="box-none">
+    <View style={[s.slideLeftWrapper, aboveNav && { zIndex: 100, elevation: 100 }]} pointerEvents="box-none">
       <Animated.View
         style={[s.slideLeftOverlay, { opacity: overlayOpacity }]}
       />
@@ -2319,8 +2320,6 @@ function AppMain() {
   const gpRValueRef = useRef({ x: 0, y: 0 });
   const gpLKnobAnim = useRef(new Animated.ValueXY({ x: 0, y: 0 })).current;
   const gpRKnobAnim = useRef(new Animated.ValueXY({ x: 0, y: 0 })).current;
-  const gpLLayoutRef = useRef({ x: 0, y: 0 });
-  const gpRLayoutRef = useRef({ x: 0, y: 0 });
   const gpLActiveRef = useRef(false);
   const gpRActiveRef = useRef(false);
 
@@ -2359,14 +2358,13 @@ function AppMain() {
     Animated.spring(knobAnim, { toValue: { x: 0, y: 0 }, useNativeDriver: false, tension: 80, friction: 8 }).start();
     sendAction("/gamepad/stick", "POST", { stick: side, x: 0, y: 0 });
   };
-  const gpHandleStick = (side, pageX, pageY) => {
-    const layoutRef = side === "left" ? gpLLayoutRef : gpRLayoutRef;
+  const gpHandleStick = (side, locX, locY) => {
     const valRef = side === "left" ? gpLValueRef : gpRValueRef;
     const knobAnim = side === "left" ? gpLKnobAnim : gpRKnobAnim;
-    const cx = layoutRef.current.x + GP_TOUCH_ZONE / 2;
-    const cy = layoutRef.current.y + GP_TOUCH_ZONE / 2;
-    const dx = pageX - cx;
-    const dy = pageY - cy;
+    const cx = GP_TOUCH_ZONE / 2;
+    const cy = GP_TOUCH_ZONE / 2;
+    const dx = locX - cx;
+    const dy = locY - cy;
     const dist = Math.sqrt(dx * dx + dy * dy);
     const maxPx = GP_STICK_MAX;
     const clamp = Math.min(dist, maxPx);
@@ -6159,19 +6157,17 @@ function AppMain() {
           setJoystickOpen(false);
         }}
         contentInsetTop={0}
+        aboveNav
       >
         {/* Rotated landscape container */}
-        <View style={{ flex: 1, backgroundColor: "#0d0d0d" }}>
+        <View style={{ flex: 1, backgroundColor: "#0d0d0d", alignItems: "center", justifyContent: "center" }}>
           <View
             style={{
-              flex: 1,
               transform: [{ rotate: "90deg" }],
-              width: Dimensions.get("window").height - (Platform.OS === "android" ? StatusBar.currentHeight || 0 : 44),
+              width: Dimensions.get("window").height,
               height: Dimensions.get("window").width,
-              alignSelf: "center",
-              justifyContent: "center",
-              paddingHorizontal: 32,
-              paddingVertical: 10,
+              paddingHorizontal: 28,
+              paddingVertical: 14,
             }}
           >
             {/* ── Top row: LB/LT ... RT/RB ── */}
@@ -6304,20 +6300,15 @@ function AppMain() {
                     alignItems: "center",
                     justifyContent: "center",
                   }}
-                  onLayout={(e) => {
-                    e.target.measureInWindow((x, y) => {
-                      gpLLayoutRef.current = { x, y };
-                    });
-                  }}
                   onStartShouldSetResponder={() => true}
                   onMoveShouldSetResponder={() => true}
                   onResponderGrant={(e) => {
                     gpLActiveRef.current = true;
-                    gpHandleStick("left", e.nativeEvent.pageX, e.nativeEvent.pageY);
+                    gpHandleStick("left", e.nativeEvent.locationX, e.nativeEvent.locationY);
                     gpStartFlush("left");
                   }}
                   onResponderMove={(e) => {
-                    if (gpLActiveRef.current) gpHandleStick("left", e.nativeEvent.pageX, e.nativeEvent.pageY);
+                    if (gpLActiveRef.current) gpHandleStick("left", e.nativeEvent.locationX, e.nativeEvent.locationY);
                   }}
                   onResponderRelease={() => gpStopFlush("left")}
                   onResponderTerminate={() => gpStopFlush("left")}
@@ -6671,20 +6662,15 @@ function AppMain() {
                     alignItems: "center",
                     justifyContent: "center",
                   }}
-                  onLayout={(e) => {
-                    e.target.measureInWindow((x, y) => {
-                      gpRLayoutRef.current = { x, y };
-                    });
-                  }}
                   onStartShouldSetResponder={() => true}
                   onMoveShouldSetResponder={() => true}
                   onResponderGrant={(e) => {
                     gpRActiveRef.current = true;
-                    gpHandleStick("right", e.nativeEvent.pageX, e.nativeEvent.pageY);
+                    gpHandleStick("right", e.nativeEvent.locationX, e.nativeEvent.locationY);
                     gpStartFlush("right");
                   }}
                   onResponderMove={(e) => {
-                    if (gpRActiveRef.current) gpHandleStick("right", e.nativeEvent.pageX, e.nativeEvent.pageY);
+                    if (gpRActiveRef.current) gpHandleStick("right", e.nativeEvent.locationX, e.nativeEvent.locationY);
                   }}
                   onResponderRelease={() => gpStopFlush("right")}
                   onResponderTerminate={() => gpStopFlush("right")}
