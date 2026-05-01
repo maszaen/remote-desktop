@@ -2364,6 +2364,54 @@ function AppMain() {
   const gpLPanRef = useRef();
   const gpRPanRef = useRef();
 
+  // ── Stable gesture cb refs (so useMemo gestures never go stale) ──
+  const gpGestureCbRef = useRef({});
+  // Updated every render — gestures always call the latest fn via this ref
+  // (assigned below after the fns are defined, see gpGestureCbRef.current = {...})
+
+  const _gpStartFlush  = useCallback((side) => gpGestureCbRef.current.gpStartFlush(side), []);
+  const _gpHandleStick = useCallback((side, x, y, isStart) => gpGestureCbRef.current.gpHandleStick(side, x, y, isStart), []);
+  const _gpStopFlush   = useCallback((side) => gpGestureCbRef.current.gpStopFlush(side), []);
+
+  // Memoized gestures — created once, refs stay valid forever.
+  // simultaneousWithExternalGesture(ref) reads .current at activation time,
+  // so even though both gestures are defined here the cross-link works correctly.
+  const gpLGesture = useMemo(() =>
+    Gesture.Pan()
+  .maxPointers(1)
+  .minDistance(0)
+      .withRef(gpLPanRef)
+      .simultaneousWithExternalGesture(gpRPanRef)
+      .onBegin((evt) => {
+        runOnJS(_gpStartFlush)("left");
+        runOnJS(_gpHandleStick)("left", evt.absoluteX, evt.absoluteY, true);
+      })
+      .onUpdate((evt) => {
+        runOnJS(_gpHandleStick)("left", evt.absoluteX, evt.absoluteY, false);
+      })
+      .onEnd(() => { runOnJS(_gpStopFlush)("left"); })
+      .onFinalize(() => { runOnJS(_gpStopFlush)("left"); }),
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  []);
+
+  const gpRGesture = useMemo(() =>
+    Gesture.Pan()
+  .maxPointers(1)
+  .minDistance(0)
+      .withRef(gpRPanRef)
+      .simultaneousWithExternalGesture(gpLPanRef)
+      .onBegin((evt) => {
+        runOnJS(_gpStartFlush)("right");
+        runOnJS(_gpHandleStick)("right", evt.absoluteX, evt.absoluteY, true);
+      })
+      .onUpdate((evt) => {
+        runOnJS(_gpHandleStick)("right", evt.absoluteX, evt.absoluteY, false);
+      })
+      .onEnd(() => { runOnJS(_gpStopFlush)("right"); })
+      .onFinalize(() => { runOnJS(_gpStopFlush)("right"); }),
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  []);
+
   const joystickConnect = () => sendAction("/gamepad/connect", "POST");
   const joystickDisconnect = () => sendAction("/gamepad/disconnect", "POST");
 
@@ -2433,6 +2481,9 @@ function AppMain() {
     
     knobAnim.setValue({ x: knobX, y: knobY });
   };
+
+  // Keep the cbRef fresh every render so the memoized gestures call the latest fns
+  gpGestureCbRef.current = { gpStartFlush, gpHandleStick, gpStopFlush };
 
   const joystickReleaseAll = () => {
     gpStopFlush("left");
@@ -6347,25 +6398,7 @@ function AppMain() {
               {/* ▸ LEFT COLUMN: L-Stick + D-Pad */}
               <View style={{ alignItems: "center", gap: 14, width: 160 }}>
                 {/* L-Stick (Mobile Legends style — knob follows finger) */}
-                <GestureDetector gesture={
-                  Gesture.Pan()
-                    .withRef(gpLPanRef)
-                    .simultaneousWithExternalGesture(gpRPanRef)
-                    .onBegin((evt) => {
-                      runOnJS(gpStartFlush)("left");
-                      runOnJS(gpHandleStick)("left", evt.absoluteX, evt.absoluteY, true);
-                    })
-                    .onUpdate((evt) => {
-                      runOnJS(gpHandleStick)("left", evt.absoluteX, evt.absoluteY, false);
-                    })
-                    .onEnd(() => {
-                      runOnJS(gpStopFlush)("left");
-                    })
-                    .onFinalize(() => {
-                      runOnJS(gpStopFlush)("left");
-                    })
-                }
-                >
+                <GestureDetector gesture={gpLGesture}>
                   <View
                     style={{
                       width: GP_TOUCH_ZONE,
@@ -6717,25 +6750,7 @@ function AppMain() {
                 </View>
 
                 {/* R-Stick (Mobile Legends style — knob follows finger) */}
-                <GestureDetector gesture={
-                  Gesture.Pan()
-                    .withRef(gpRPanRef)
-                    .simultaneousWithExternalGesture(gpLPanRef)
-                    .onBegin((evt) => {
-                      runOnJS(gpStartFlush)("right");
-                      runOnJS(gpHandleStick)("right", evt.absoluteX, evt.absoluteY, true);
-                    })
-                    .onUpdate((evt) => {
-                      runOnJS(gpHandleStick)("right", evt.absoluteX, evt.absoluteY, false);
-                    })
-                    .onEnd(() => {
-                      runOnJS(gpStopFlush)("right");
-                    })
-                    .onFinalize(() => {
-                      runOnJS(gpStopFlush)("right");
-                    })
-                }
-                >
+                <GestureDetector gesture={gpRGesture}>
                   <View
                     style={{
                       width: GP_TOUCH_ZONE,
@@ -9316,4 +9331,3 @@ const s = StyleSheet.create({
   },
 
 });
-
