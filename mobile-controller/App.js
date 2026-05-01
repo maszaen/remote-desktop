@@ -226,7 +226,7 @@ const BottomSheet = ({ visible, onClose, children, title, subtitle, keyboardAwar
 };
 
 // ─── GAMEPAD BUTTON (RNGH-based for multi-touch) ────────────────────────────
-const GpBtn = ({ onPressIn, onPressOut, onPress, style, children }) => {
+const GpBtn = ({ onPressIn, onPressOut, onPress, style, children, simultaneousGesture }) => {
   const [pressed, setPressed] = useState(false);
   const cbRef = useRef({ onPressIn, onPressOut, onPress });
   cbRef.current = { onPressIn, onPressOut, onPress };
@@ -241,15 +241,15 @@ const GpBtn = ({ onPressIn, onPressOut, onPress, style, children }) => {
     cbRef.current.onPress?.();
   }, []);
 
-  const gesture = useMemo(() =>
-    Gesture.LongPress()
+  const gesture = useMemo(() => {
+    const g = Gesture.LongPress()
       .minDuration(0)
       .maxDistance(10000)
       .shouldCancelWhenOutside(false)
       .onBegin(() => { runOnJS(fireIn)(); })
-      .onFinalize(() => { runOnJS(fireOut)(); }),
-    [fireIn, fireOut]
-  );
+      .onFinalize(() => { runOnJS(fireOut)(); });
+    return simultaneousGesture ? g.simultaneousWithExternalGesture(simultaneousGesture) : g;
+  }, [fireIn, fireOut, simultaneousGesture]);
 
   return (
     <GestureDetector gesture={gesture}>
@@ -2362,6 +2362,10 @@ function AppMain() {
   const gpLActiveTouchId = useRef(null);
   const gpRActiveTouchId = useRef(null);
   const gpDualAreaWidthRef = useRef(0);
+  const gpLStickZoneViewRef = useRef(null);
+  const gpRStickZoneViewRef = useRef(null);
+  const gpLStickBoundsRef = useRef(null);
+  const gpRStickBoundsRef = useRef(null);
   const gpLMoveLatestRef = useRef(null);
   const gpRMoveLatestRef = useRef(null);
   const gpLMoveRafRef = useRef(null);
@@ -2378,6 +2382,7 @@ function AppMain() {
   const _gpDualTouchDown = useCallback((evt) => gpGestureCbRef.current.gpDualTouchDown(evt), []);
   const _gpDualTouchMove = useCallback((evt) => gpGestureCbRef.current.gpDualTouchMove(evt), []);
   const _gpDualTouchUp   = useCallback((evt) => gpGestureCbRef.current.gpDualTouchUp(evt), []);
+  const _gpDualTouchCancel = useCallback((evt) => gpGestureCbRef.current.gpDualTouchCancel(evt), []);
 
   // Memoized gestures — created once, refs stay valid forever.
   // simultaneousWithExternalGesture(ref) reads .current at activation time,
@@ -2395,7 +2400,7 @@ function AppMain() {
         runOnJS(_gpDualTouchUp)(evt);
       })
       .onTouchesCancelled((evt) => {
-        runOnJS(_gpDualTouchUp)(evt);
+        runOnJS(_gpDualTouchCancel)(evt);
       }),
   // eslint-disable-next-line react-hooks/exhaustive-deps
   []);
@@ -2505,18 +2510,38 @@ function AppMain() {
     knobAnim.setValue({ x: knobX, y: knobY });
   };
 
+  const gpMeasureStickZone = (side) => {
+    const viewRef = side === "left" ? gpLStickZoneViewRef : gpRStickZoneViewRef;
+    const boundsRef = side === "left" ? gpLStickBoundsRef : gpRStickBoundsRef;
+    viewRef.current?.measureInWindow?.((x, y, width, height) => {
+      boundsRef.current = { x, y, width, height };
+    });
+  };
+
+  const gpTouchInBounds = (touch, bounds) => {
+    if (!bounds) return false;
+    return (
+      touch.absoluteX >= bounds.x &&
+      touch.absoluteX <= bounds.x + bounds.width &&
+      touch.absoluteY >= bounds.y &&
+      touch.absoluteY <= bounds.y + bounds.height
+    );
+  };
+
+  const gpSideForStickTouch = (touch) => {
+    const inLeft = gpTouchInBounds(touch, gpLStickBoundsRef.current);
+    const inRight = gpTouchInBounds(touch, gpRStickBoundsRef.current);
+    if (inLeft && gpLActiveTouchId.current == null) return "left";
+    if (inRight && gpRActiveTouchId.current == null) return "right";
+    return null;
+  };
+
   const gpDualTouchDown = (evt) => {
     const changed = Array.isArray(evt?.changedTouches) ? evt.changedTouches : [];
-    const splitX = gpDualAreaWidthRef.current > 0 ? gpDualAreaWidthRef.current / 2 : Number.MAX_SAFE_INTEGER;
+    gpMeasureStickZone("left");
+    gpMeasureStickZone("right");
     changed.forEach((t) => {
-      const preferLeft = t.x <= splitX;
-      const leftBusy = gpLActiveTouchId.current != null;
-      const rightBusy = gpRActiveTouchId.current != null;
-      let side = null;
-      if (preferLeft && !leftBusy) side = "left";
-      else if (!preferLeft && !rightBusy) side = "right";
-      else if (!leftBusy) side = "left";
-      else if (!rightBusy) side = "right";
+      const side = gpSideForStickTouch(t);
       if (!side) return;
       if (side === "left") gpLActiveTouchId.current = t.id;
       else gpRActiveTouchId.current = t.id;
@@ -2545,6 +2570,11 @@ function AppMain() {
     });
   };
 
+  const gpDualTouchCancel = () => {
+    // Button gestures can cancel this wide joystick gesture while the stick finger
+    // is still physically down. Real release is handled by onTouchesUp only.
+  };
+
   // Keep the cbRef fresh every render so the memoized gestures call the latest fns
   gpGestureCbRef.current = {
     gpStartFlush,
@@ -2553,6 +2583,7 @@ function AppMain() {
     gpDualTouchDown,
     gpDualTouchMove,
     gpDualTouchUp,
+    gpDualTouchCancel,
   };
 
   const joystickReleaseAll = () => {
@@ -2584,6 +2615,7 @@ function AppMain() {
 
   const renderGpShoulder = (label, onPressIn, onPressOut, side = "left", trigger = false) => (
     <GpBtn
+      simultaneousGesture={gpDualGesture}
       onPressIn={onPressIn}
       onPressOut={onPressOut}
       style={({ pressed }) => [
@@ -2599,6 +2631,7 @@ function AppMain() {
 
   const renderGpCenterButton = (icon, onPress) => (
     <GpBtn
+      simultaneousGesture={gpDualGesture}
       onPress={onPress}
       style={({ pressed }) => [s.gpCenterButton, pressed && s.gpCenterButtonPressed]}
     >
@@ -2608,6 +2641,7 @@ function AppMain() {
 
   const renderGpFaceButton = (label, color, positionStyle, onPressIn, onPressOut) => (
     <GpBtn
+      simultaneousGesture={gpDualGesture}
       onPressIn={onPressIn}
       onPressOut={onPressOut}
       style={({ pressed }) => [
@@ -6415,6 +6449,7 @@ function AppMain() {
               {/* Left bumper/trigger */}
               <View style={{ flexDirection: "row", gap: 8 }}>
                 <GpBtn
+                  simultaneousGesture={gpDualGesture}
                   onPressIn={() => joystickButtonDown("LB")}
                   onPressOut={() => joystickButtonUp("LB")}
                   style={({ pressed }) => ({
@@ -6442,6 +6477,7 @@ function AppMain() {
                   <Text style={{ color: "#b0b0c0", fontSize: 12, fontWeight: "800", letterSpacing: 0.5 }}>LB</Text>
                 </GpBtn>
                 <GpBtn
+                  simultaneousGesture={gpDualGesture}
                   onPressIn={() => joystickTrigger("left", 1.0)}
                   onPressOut={() => joystickTrigger("left", 0.0)}
                   style={({ pressed }) => ({
@@ -6472,6 +6508,7 @@ function AppMain() {
               {/* Right trigger/bumper */}
               <View style={{ flexDirection: "row", gap: 8 }}>
                 <GpBtn
+                  simultaneousGesture={gpDualGesture}
                   onPressIn={() => joystickTrigger("right", 1.0)}
                   onPressOut={() => joystickTrigger("right", 0.0)}
                   style={({ pressed }) => ({
@@ -6499,6 +6536,7 @@ function AppMain() {
                   <Text style={{ color: "#b0b0c0", fontSize: 12, fontWeight: "800", letterSpacing: 0.5 }}>RT</Text>
                 </GpBtn>
                 <GpBtn
+                  simultaneousGesture={gpDualGesture}
                   onPressIn={() => joystickButtonDown("RB")}
                   onPressOut={() => joystickButtonUp("RB")}
                   style={({ pressed }) => ({
@@ -6540,6 +6578,9 @@ function AppMain() {
               <View style={{ alignItems: "center", gap: 14, width: 160 }}>
                 {/* L-Stick (Mobile Legends style — knob follows finger) */}
                   <View
+                    ref={gpLStickZoneViewRef}
+                    collapsable={false}
+                    onLayout={() => gpMeasureStickZone("left")}
                     style={{
                       width: GP_TOUCH_ZONE,
                       height: GP_TOUCH_ZONE,
@@ -6599,6 +6640,7 @@ function AppMain() {
                 <View style={{ width: 140, height: 140, alignItems: "center", justifyContent: "center", marginLeft: 200,  }}>
                   {/* Up */}
                   <GpBtn
+                    simultaneousGesture={gpDualGesture}
                     onPressIn={() => joystickButtonDown("DPAD_UP")}
                     onPressOut={() => joystickButtonUp("DPAD_UP")}
                     style={({ pressed }) => ({
@@ -6623,6 +6665,7 @@ function AppMain() {
                   </GpBtn>
                   {/* Down */}
                   <GpBtn
+                    simultaneousGesture={gpDualGesture}
                     onPressIn={() => joystickButtonDown("DPAD_DOWN")}
                     onPressOut={() => joystickButtonUp("DPAD_DOWN")}
                     style={({ pressed }) => ({
@@ -6647,6 +6690,7 @@ function AppMain() {
                   </GpBtn>
                   {/* Left */}
                   <GpBtn
+                    simultaneousGesture={gpDualGesture}
                     onPressIn={() => joystickButtonDown("DPAD_LEFT")}
                     onPressOut={() => joystickButtonUp("DPAD_LEFT")}
                     style={({ pressed }) => ({
@@ -6671,6 +6715,7 @@ function AppMain() {
                   </GpBtn>
                   {/* Right */}
                   <GpBtn
+                    simultaneousGesture={gpDualGesture}
                     onPressIn={() => joystickButtonDown("DPAD_RIGHT")}
                     onPressOut={() => joystickButtonUp("DPAD_RIGHT")}
                     style={({ pressed }) => ({
@@ -6702,6 +6747,7 @@ function AppMain() {
                 <View style={{ flexDirection: "column", alignItems: "center", gap: 12 }}>
                   {/* Xbox Guide button */}
                   <GpBtn
+                    simultaneousGesture={gpDualGesture}
                     onPress={() => joystickButtonTap("GUIDE")}
                     style={({ pressed }) => ({
                       width: 90,
@@ -6725,6 +6771,7 @@ function AppMain() {
                     <Ionicons name="logo-xbox" size={80} color="#5a8a5a" />
                   </GpBtn>
                   <GpBtn
+                    simultaneousGesture={gpDualGesture}
                     onPress={() => joystickButtonTap("BACK")}
                     style={({ pressed }) => ({
                       backgroundColor: pressed ? "#3a3a4a" : "#1a1a28",
@@ -6741,6 +6788,7 @@ function AppMain() {
                     <Text style={{ color: "#7a7a90", fontSize: 9, fontWeight: "700", letterSpacing: 1 }}>BACK</Text>
                   </GpBtn>
                   <GpBtn
+                    simultaneousGesture={gpDualGesture}
                     onPress={() => joystickButtonTap("START")}
                     style={({ pressed }) => ({
                       backgroundColor: pressed ? "#3a3a4a" : "#1a1a28",
@@ -6765,6 +6813,7 @@ function AppMain() {
                 <View style={{ marginBottom: -30, width: 154, height: 154, alignItems: "center", justifyContent: "center" }}>
                   {/* Y - top (yellow) */}
                   <GpBtn
+                    simultaneousGesture={gpDualGesture}
                     onPressIn={() => joystickButtonDown("Y")}
                     onPressOut={() => joystickButtonUp("Y")}
                     style={({ pressed }) => ({
@@ -6794,6 +6843,7 @@ function AppMain() {
                   </GpBtn>
                   {/* X - left (blue) */}
                   <GpBtn
+                    simultaneousGesture={gpDualGesture}
                     onPressIn={() => joystickButtonDown("X")}
                     onPressOut={() => joystickButtonUp("X")}
                     style={({ pressed }) => ({
@@ -6825,6 +6875,7 @@ function AppMain() {
                   </GpBtn>
                   {/* B - right (red) */}
                   <GpBtn
+                    simultaneousGesture={gpDualGesture}
                     onPressIn={() => joystickButtonDown("B")}
                     onPressOut={() => joystickButtonUp("B")}
                     style={({ pressed }) => ({
@@ -6856,6 +6907,7 @@ function AppMain() {
                   </GpBtn>
                   {/* A - bottom (green) */}
                   <GpBtn
+                    simultaneousGesture={gpDualGesture}
                     onPressIn={() => joystickButtonDown("A")}
                     onPressOut={() => joystickButtonUp("A")}
                     style={({ pressed }) => ({
@@ -6887,6 +6939,9 @@ function AppMain() {
 
                 {/* R-Stick (Mobile Legends style — knob follows finger) */}
                   <View
+                    ref={gpRStickZoneViewRef}
+                    collapsable={false}
+                    onLayout={() => gpMeasureStickZone("right")}
                     style={{
                       width: GP_TOUCH_ZONE,
                       height: GP_TOUCH_ZONE,
