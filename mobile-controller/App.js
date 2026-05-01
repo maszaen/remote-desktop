@@ -1725,6 +1725,7 @@ function AppMain() {
       }
       if (joystickOpen) {
         joystickReleaseAll();
+        joystickDisconnect();
         setJoystickOpen(false);
         return true;
       }
@@ -2305,56 +2306,80 @@ function AppMain() {
     sendAction("/mouse/up?button=left", "POST");
   };
 
-  // ── Joystick / Gamepad ──
+  // ── Joystick / Gamepad (native via vgamepad) ──
   const JOYSTICK_SIZE = 160;
   const JOYSTICK_KNOB = 64;
   const JOYSTICK_MAX = (JOYSTICK_SIZE - JOYSTICK_KNOB) / 2;
-  const JOYSTICK_DEADZONE = 0.25;
+  const JOYSTICK_DEADZONE = 0.15;
+  const joystickStickFlushRef = useRef(null);
+  const joystickStickValueRef = useRef({ x: 0, y: 0 });
+  const JOYSTICK_STICK_FLUSH_MS = 25;
 
-  const joystickKeyDown = (key) => {
-    if (joystickKeysRef.current.has(key)) return;
-    joystickKeysRef.current.add(key);
-    sendAction("/keyboard/realtime", "POST", { key, mode: "down" });
+  const joystickConnect = () => {
+    sendAction("/gamepad/connect", "POST");
   };
 
-  const joystickKeyUp = (key) => {
-    if (!joystickKeysRef.current.has(key)) return;
-    joystickKeysRef.current.delete(key);
-    sendAction("/keyboard/realtime", "POST", { key, mode: "up" });
+  const joystickDisconnect = () => {
+    sendAction("/gamepad/disconnect", "POST");
   };
 
-  const joystickKeyTap = (key) => {
-    sendAction("/keyboard/realtime", "POST", { key, mode: "tap" });
+  const joystickButtonDown = (button) => {
+    if (joystickKeysRef.current.has(button)) return;
+    joystickKeysRef.current.add(button);
+    sendAction("/gamepad/button", "POST", { button, action: "down" });
   };
 
-  const joystickMouseClick = (button = "left") => {
-    sendAction(`/mouse/click?button=${button}`, "POST");
+  const joystickButtonUp = (button) => {
+    if (!joystickKeysRef.current.has(button)) return;
+    joystickKeysRef.current.delete(button);
+    sendAction("/gamepad/button", "POST", { button, action: "up" });
+  };
+
+  const joystickButtonTap = (button) => {
+    sendAction("/gamepad/button", "POST", { button, action: "tap" });
+  };
+
+  const joystickTrigger = (trigger, value) => {
+    sendAction("/gamepad/trigger", "POST", { trigger, value });
+  };
+
+  const joystickStickFlush = () => {
+    const v = joystickStickValueRef.current;
+    sendAction("/gamepad/stick", "POST", { stick: "left", x: v.x, y: v.y });
+  };
+
+  const joystickStartStickFlush = () => {
+    if (!joystickStickFlushRef.current) {
+      joystickStickFlushRef.current = setInterval(joystickStickFlush, JOYSTICK_STICK_FLUSH_MS);
+    }
+  };
+
+  const joystickStopStickFlush = () => {
+    if (joystickStickFlushRef.current) {
+      clearInterval(joystickStickFlushRef.current);
+      joystickStickFlushRef.current = null;
+    }
+    joystickStickValueRef.current = { x: 0, y: 0 };
+    sendAction("/gamepad/stick", "POST", { stick: "left", x: 0, y: 0 });
   };
 
   const joystickReleaseAll = () => {
-    const keys = Array.from(joystickKeysRef.current);
-    keys.forEach((k) => {
-      sendAction("/keyboard/realtime", "POST", { key: k, mode: "up" });
+    joystickStopStickFlush();
+    const btns = Array.from(joystickKeysRef.current);
+    btns.forEach((b) => {
+      sendAction("/gamepad/button", "POST", { button: b, action: "up" });
     });
     joystickKeysRef.current.clear();
+    sendAction("/gamepad/reset", "POST");
   };
 
   const joystickUpdateFromStick = (nx, ny) => {
     const mag = Math.sqrt(nx * nx + ny * ny);
     if (mag < JOYSTICK_DEADZONE) {
-      ["w", "a", "s", "d"].forEach((k) => joystickKeyUp(k));
-      return;
+      joystickStickValueRef.current = { x: 0, y: 0 };
+    } else {
+      joystickStickValueRef.current = { x: nx, y: -ny };
     }
-    const angle = Math.atan2(-ny, nx);
-    const deg = ((angle * 180) / Math.PI + 360) % 360;
-    const wantW = deg > 30 && deg < 150;
-    const wantS = deg > 210 && deg < 330;
-    const wantD = deg < 60 || deg > 300;
-    const wantA = deg > 120 && deg < 240;
-    wantW ? joystickKeyDown("w") : joystickKeyUp("w");
-    wantS ? joystickKeyDown("s") : joystickKeyUp("s");
-    wantD ? joystickKeyDown("d") : joystickKeyUp("d");
-    wantA ? joystickKeyDown("a") : joystickKeyUp("a");
   };
 
   // ── Panic Button ──
@@ -3318,6 +3343,7 @@ function AppMain() {
               }
               else if (joystickOpen) {
                 joystickReleaseAll();
+                joystickDisconnect();
                 setJoystickOpen(false);
               }
             }}
@@ -4013,7 +4039,7 @@ function AppMain() {
         {/* Joystick / Gamepad row */}
         <TouchableOpacity
           style={s.menuRow}
-          onPress={() => setJoystickOpen(true)}
+          onPress={() => { joystickConnect(); setJoystickOpen(true); }}
           activeOpacity={0.6}
         >
           <View style={[s.menuRowIcon, { backgroundColor: C.successDim }]}>
@@ -6122,6 +6148,7 @@ function AppMain() {
         visible={joystickOpen}
         onClose={() => {
           joystickReleaseAll();
+          joystickDisconnect();
           setJoystickOpen(false);
         }}
         contentInsetTop={keyboardModalTopInset}
@@ -6147,8 +6174,8 @@ function AppMain() {
             {/* Left shoulders */}
             <View style={{ flexDirection: "row", gap: SP.sm }}>
               <Pressable
-                onPressIn={() => joystickKeyDown("q")}
-                onPressOut={() => joystickKeyUp("q")}
+                onPressIn={() => joystickButtonDown("LB")}
+                onPressOut={() => joystickButtonUp("LB")}
                 style={({ pressed }) => [
                   {
                     backgroundColor: pressed ? C.primary + "30" : C.elevated,
@@ -6163,11 +6190,10 @@ function AppMain() {
                 ]}
               >
                 <Text style={{ color: C.sub, fontSize: F.sm, fontWeight: "700", letterSpacing: 0.5 }}>LB</Text>
-                <Text style={{ color: C.muted, fontSize: 9, marginTop: 2 }}>Q</Text>
               </Pressable>
               <Pressable
-                onPressIn={() => joystickKeyDown("ctrl")}
-                onPressOut={() => joystickKeyUp("ctrl")}
+                onPressIn={() => joystickTrigger("left", 1.0)}
+                onPressOut={() => joystickTrigger("left", 0.0)}
                 style={({ pressed }) => [
                   {
                     backgroundColor: pressed ? C.primary + "30" : C.elevated,
@@ -6182,13 +6208,13 @@ function AppMain() {
                 ]}
               >
                 <Text style={{ color: C.sub, fontSize: F.sm, fontWeight: "700", letterSpacing: 0.5 }}>LT</Text>
-                <Text style={{ color: C.muted, fontSize: 9, marginTop: 2 }}>Ctrl</Text>
               </Pressable>
             </View>
             {/* Right shoulders */}
             <View style={{ flexDirection: "row", gap: SP.sm }}>
               <Pressable
-                onPressIn={() => joystickMouseClick("right")}
+                onPressIn={() => joystickTrigger("right", 1.0)}
+                onPressOut={() => joystickTrigger("right", 0.0)}
                 style={({ pressed }) => [
                   {
                     backgroundColor: pressed ? C.danger + "30" : C.elevated,
@@ -6203,11 +6229,10 @@ function AppMain() {
                 ]}
               >
                 <Text style={{ color: C.sub, fontSize: F.sm, fontWeight: "700", letterSpacing: 0.5 }}>RT</Text>
-                <Text style={{ color: C.muted, fontSize: 9, marginTop: 2 }}>R-Click</Text>
               </Pressable>
               <Pressable
-                onPressIn={() => joystickKeyDown("f")}
-                onPressOut={() => joystickKeyUp("f")}
+                onPressIn={() => joystickButtonDown("RB")}
+                onPressOut={() => joystickButtonUp("RB")}
                 style={({ pressed }) => [
                   {
                     backgroundColor: pressed ? C.primary + "30" : C.elevated,
@@ -6222,7 +6247,6 @@ function AppMain() {
                 ]}
               >
                 <Text style={{ color: C.sub, fontSize: F.sm, fontWeight: "700", letterSpacing: 0.5 }}>RB</Text>
-                <Text style={{ color: C.muted, fontSize: 9, marginTop: 2 }}>F</Text>
               </Pressable>
             </View>
           </View>
@@ -6263,6 +6287,7 @@ function AppMain() {
                   const nx = dist > 0 ? (dx / dist) * (clampDist / JOYSTICK_MAX) : 0;
                   const ny = dist > 0 ? (dy / dist) * (clampDist / JOYSTICK_MAX) : 0;
                   joystickUpdateFromStick(nx, ny);
+                  joystickStartStickFlush();
                 }}
                 onResponderMove={(e) => {
                   const { locationX, locationY } = e.nativeEvent;
@@ -6278,6 +6303,7 @@ function AppMain() {
                 }}
                 onResponderRelease={() => {
                   joystickUpdateFromStick(0, 0);
+                  joystickStopStickFlush();
                 }}
               >
                 {/* Direction indicators */}
@@ -6305,15 +6331,15 @@ function AppMain() {
                   }}
                 />
               </View>
-              <Text style={{ color: C.muted, fontSize: 9, marginTop: 8, letterSpacing: 1 }}>WASD</Text>
+              <Text style={{ color: C.muted, fontSize: 9, marginTop: 8, letterSpacing: 1 }}>L-STICK</Text>
             </View>
 
             {/* Right side: Action buttons (diamond) */}
             <View style={{ alignItems: "center", justifyContent: "center", width: 160, height: 160 }}>
               {/* Y - top */}
               <Pressable
-                onPressIn={() => joystickKeyDown("r")}
-                onPressOut={() => joystickKeyUp("r")}
+                onPressIn={() => joystickButtonDown("Y")}
+                onPressOut={() => joystickButtonUp("Y")}
                 style={({ pressed }) => [
                   {
                     position: "absolute",
@@ -6330,12 +6356,11 @@ function AppMain() {
                 ]}
               >
                 <Text style={{ color: "#FFD60A", fontSize: F.md, fontWeight: "800" }}>Y</Text>
-                <Text style={{ color: C.muted, fontSize: 8, marginTop: -1 }}>R</Text>
               </Pressable>
               {/* X - left */}
               <Pressable
-                onPressIn={() => joystickKeyDown("e")}
-                onPressOut={() => joystickKeyUp("e")}
+                onPressIn={() => joystickButtonDown("X")}
+                onPressOut={() => joystickButtonUp("X")}
                 style={({ pressed }) => [
                   {
                     position: "absolute",
@@ -6354,12 +6379,11 @@ function AppMain() {
                 ]}
               >
                 <Text style={{ color: "#0A84FF", fontSize: F.md, fontWeight: "800" }}>X</Text>
-                <Text style={{ color: C.muted, fontSize: 8, marginTop: -1 }}>E</Text>
               </Pressable>
               {/* B - right */}
               <Pressable
-                onPressIn={() => joystickKeyDown("shift")}
-                onPressOut={() => joystickKeyUp("shift")}
+                onPressIn={() => joystickButtonDown("B")}
+                onPressOut={() => joystickButtonUp("B")}
                 style={({ pressed }) => [
                   {
                     position: "absolute",
@@ -6378,12 +6402,11 @@ function AppMain() {
                 ]}
               >
                 <Text style={{ color: "#FF453A", fontSize: F.md, fontWeight: "800" }}>B</Text>
-                <Text style={{ color: C.muted, fontSize: 8, marginTop: -1 }}>Shift</Text>
               </Pressable>
               {/* A - bottom */}
               <Pressable
-                onPressIn={() => joystickKeyDown("space")}
-                onPressOut={() => joystickKeyUp("space")}
+                onPressIn={() => joystickButtonDown("A")}
+                onPressOut={() => joystickButtonUp("A")}
                 style={({ pressed }) => [
                   {
                     position: "absolute",
@@ -6400,7 +6423,6 @@ function AppMain() {
                 ]}
               >
                 <Text style={{ color: "#30D158", fontSize: F.md, fontWeight: "800" }}>A</Text>
-                <Text style={{ color: C.muted, fontSize: 8, marginTop: -1 }}>Space</Text>
               </Pressable>
             </View>
           </View>
@@ -6417,7 +6439,7 @@ function AppMain() {
             }}
           >
             <Pressable
-              onPress={() => joystickKeyTap("tab")}
+              onPress={() => joystickButtonTap("BACK")}
               style={({ pressed }) => [
                 {
                   backgroundColor: pressed ? C.primary + "25" : C.surface,
@@ -6430,11 +6452,10 @@ function AppMain() {
                 },
               ]}
             >
-              <Text style={{ color: C.sub, fontSize: F.xs, fontWeight: "700", letterSpacing: 1 }}>SELECT</Text>
-              <Text style={{ color: C.muted, fontSize: 8, marginTop: 1 }}>Tab</Text>
+              <Text style={{ color: C.sub, fontSize: F.xs, fontWeight: "700", letterSpacing: 1 }}>BACK</Text>
             </Pressable>
             <Pressable
-              onPress={() => joystickMouseClick("left")}
+              onPress={() => joystickButtonTap("GUIDE")}
               style={({ pressed }) => [
                 {
                   backgroundColor: pressed ? C.primary + "25" : C.surface,
@@ -6448,10 +6469,10 @@ function AppMain() {
                 },
               ]}
             >
-              <Ionicons name="ellipse" size={10} color={C.muted} />
+              <Ionicons name="logo-xbox" size={18} color={C.muted} />
             </Pressable>
             <Pressable
-              onPress={() => joystickKeyTap("escape")}
+              onPress={() => joystickButtonTap("START")}
               style={({ pressed }) => [
                 {
                   backgroundColor: pressed ? C.primary + "25" : C.surface,
@@ -6465,7 +6486,6 @@ function AppMain() {
               ]}
             >
               <Text style={{ color: C.sub, fontSize: F.xs, fontWeight: "700", letterSpacing: 1 }}>START</Text>
-              <Text style={{ color: C.muted, fontSize: 8, marginTop: 1 }}>Esc</Text>
             </Pressable>
           </View>
         </View>
