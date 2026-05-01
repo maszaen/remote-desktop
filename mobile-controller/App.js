@@ -2348,9 +2348,13 @@ function AppMain() {
   const GP_STICK_MAX = (GP_STICK - GP_KNOB) / 2;
   const GP_DEADZONE = 0.15;
   const GP_FLUSH_MS = 25;
+  const GP_HOLD_HEARTBEAT_MS = 100;
   const GP_TOUCH_ZONE = GP_STICK + 40;
   const gpLFlushRef = useRef(null);
   const gpRFlushRef = useRef(null);
+  const gpButtonHeartbeatRef = useRef(null);
+  const gpTriggerHeartbeatRef = useRef(null);
+  const gpTriggerValuesRef = useRef({ left: 0, right: 0 });
   const gpLValueRef = useRef({ x: 0, y: 0 });
   const gpRValueRef = useRef({ x: 0, y: 0 });
   const gpLKnobAnim = useRef(new Animated.ValueXY({ x: 0, y: 0 })).current;
@@ -2408,18 +2412,58 @@ function AppMain() {
   const joystickConnect = () => sendAction("/gamepad/connect", "POST");
   const joystickDisconnect = () => sendAction("/gamepad/disconnect", "POST");
 
+  const gpStartButtonHeartbeat = () => {
+    if (gpButtonHeartbeatRef.current) return;
+    gpButtonHeartbeatRef.current = setInterval(() => {
+      Array.from(joystickKeysRef.current).forEach((button) => {
+        sendAction("/gamepad/button", "POST", { button, action: "hold" });
+      });
+    }, GP_HOLD_HEARTBEAT_MS);
+  };
+
+  const gpStopButtonHeartbeatIfIdle = () => {
+    if (joystickKeysRef.current.size > 0 || !gpButtonHeartbeatRef.current) return;
+    clearInterval(gpButtonHeartbeatRef.current);
+    gpButtonHeartbeatRef.current = null;
+  };
+
+  const gpStartTriggerHeartbeat = () => {
+    if (gpTriggerHeartbeatRef.current) return;
+    gpTriggerHeartbeatRef.current = setInterval(() => {
+      const values = gpTriggerValuesRef.current;
+      ["left", "right"].forEach((trigger) => {
+        const value = values[trigger] || 0;
+        if (value > 0) sendAction("/gamepad/trigger", "POST", { trigger, value });
+      });
+    }, GP_HOLD_HEARTBEAT_MS);
+  };
+
+  const gpStopTriggerHeartbeatIfIdle = () => {
+    const values = gpTriggerValuesRef.current;
+    if ((values.left || 0) > 0 || (values.right || 0) > 0 || !gpTriggerHeartbeatRef.current) return;
+    clearInterval(gpTriggerHeartbeatRef.current);
+    gpTriggerHeartbeatRef.current = null;
+  };
+
   const joystickButtonDown = (button) => {
     if (joystickKeysRef.current.has(button)) return;
     joystickKeysRef.current.add(button);
     sendAction("/gamepad/button", "POST", { button, action: "down" });
+    gpStartButtonHeartbeat();
   };
   const joystickButtonUp = (button) => {
     if (!joystickKeysRef.current.has(button)) return;
     joystickKeysRef.current.delete(button);
     sendAction("/gamepad/button", "POST", { button, action: "up" });
+    gpStopButtonHeartbeatIfIdle();
   };
   const joystickButtonTap = (button) => sendAction("/gamepad/button", "POST", { button, action: "tap" });
-  const joystickTrigger = (trigger, value) => sendAction("/gamepad/trigger", "POST", { trigger, value });
+  const joystickTrigger = (trigger, value) => {
+    gpTriggerValuesRef.current = { ...gpTriggerValuesRef.current, [trigger]: value };
+    sendAction("/gamepad/trigger", "POST", { trigger, value });
+    if (value > 0) gpStartTriggerHeartbeat();
+    else gpStopTriggerHeartbeatIfIdle();
+  };
 
   const gpFlush = (side) => {
     const v = side === "left" ? gpLValueRef.current : gpRValueRef.current;
@@ -2589,9 +2633,20 @@ function AppMain() {
   const joystickReleaseAll = () => {
     gpStopFlush("left");
     gpStopFlush("right");
+    if (gpButtonHeartbeatRef.current) {
+      clearInterval(gpButtonHeartbeatRef.current);
+      gpButtonHeartbeatRef.current = null;
+    }
+    if (gpTriggerHeartbeatRef.current) {
+      clearInterval(gpTriggerHeartbeatRef.current);
+      gpTriggerHeartbeatRef.current = null;
+    }
     const btns = Array.from(joystickKeysRef.current);
     btns.forEach((b) => sendAction("/gamepad/button", "POST", { button: b, action: "up" }));
     joystickKeysRef.current.clear();
+    gpTriggerValuesRef.current = { left: 0, right: 0 };
+    sendAction("/gamepad/trigger", "POST", { trigger: "left", value: 0 });
+    sendAction("/gamepad/trigger", "POST", { trigger: "right", value: 0 });
     sendAction("/gamepad/reset", "POST");
   };
 

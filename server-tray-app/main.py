@@ -1654,7 +1654,14 @@ def mouse_up(button: str = "left"):
 # ── Virtual Gamepad (vgamepad / ViGEmBus) ──
 
 _vgamepad_instance = None
-_vgamepad_lock = threading.Lock()
+_vgamepad_lock = threading.RLock()
+_gamepad_state_lock = threading.Lock()
+_gamepad_watchdog_started = False
+
+GAMEPAD_WATCHDOG_INTERVAL = 0.05
+GAMEPAD_STICK_TTL = 0.25
+GAMEPAD_BUTTON_TTL = 0.35
+GAMEPAD_TRIGGER_TTL = 0.35
 
 GAMEPAD_BUTTON_MAP = {
     "A": 0x1000,
@@ -1674,6 +1681,100 @@ GAMEPAD_BUTTON_MAP = {
     "GUIDE": 0x0400,
 }
 
+_gamepad_stick_seen = {"left": 0.0, "right": 0.0}
+_gamepad_stick_value = {"left": (0.0, 0.0), "right": (0.0, 0.0)}
+_gamepad_button_seen = {}
+_gamepad_trigger_seen = {"left": 0.0, "right": 0.0}
+_gamepad_trigger_value = {"left": 0.0, "right": 0.0}
+
+
+def _clear_gamepad_state():
+    with _gamepad_state_lock:
+        now = time.time()
+        for stick in _gamepad_stick_seen:
+            _gamepad_stick_seen[stick] = now
+            _gamepad_stick_value[stick] = (0.0, 0.0)
+        _gamepad_button_seen.clear()
+        for trigger in _gamepad_trigger_seen:
+            _gamepad_trigger_seen[trigger] = now
+            _gamepad_trigger_value[trigger] = 0.0
+
+
+def _start_gamepad_watchdog():
+    global _gamepad_watchdog_started
+    if _gamepad_watchdog_started:
+        return
+    _gamepad_watchdog_started = True
+    threading.Thread(target=_gamepad_watchdog_loop, daemon=True).start()
+
+
+def _gamepad_watchdog_loop():
+    while True:
+        time.sleep(GAMEPAD_WATCHDOG_INTERVAL)
+        now = time.time()
+        expired_sticks = []
+        expired_buttons = []
+        expired_triggers = []
+
+        with _gamepad_state_lock:
+            for stick, value in _gamepad_stick_value.items():
+                if value != (0.0, 0.0) and now - _gamepad_stick_seen.get(stick, 0.0) > GAMEPAD_STICK_TTL:
+                    expired_sticks.append(stick)
+            for button, seen_at in list(_gamepad_button_seen.items()):
+                if now - seen_at > GAMEPAD_BUTTON_TTL:
+                    expired_buttons.append(button)
+            for trigger, value in _gamepad_trigger_value.items():
+                if value > 0.0 and now - _gamepad_trigger_seen.get(trigger, 0.0) > GAMEPAD_TRIGGER_TTL:
+                    expired_triggers.append(trigger)
+
+        if not expired_sticks and not expired_buttons and not expired_triggers:
+            continue
+
+        try:
+            with _vgamepad_lock:
+                gp = _vgamepad_instance
+                if gp is None:
+                    _clear_gamepad_state()
+                    continue
+
+                import vgamepad as vg
+
+                changed = False
+                for stick in expired_sticks:
+                    if stick == "right":
+                        gp.right_joystick_float(x_value_float=0.0, y_value_float=0.0)
+                    else:
+                        gp.left_joystick_float(x_value_float=0.0, y_value_float=0.0)
+                    changed = True
+
+                for button in expired_buttons:
+                    btn_val = GAMEPAD_BUTTON_MAP.get(button)
+                    if btn_val is not None:
+                        gp.release_button(button=vg.XUSB_BUTTON(btn_val))
+                        changed = True
+
+                for trigger in expired_triggers:
+                    if trigger == "right":
+                        gp.right_trigger_float(value_float=0.0)
+                    else:
+                        gp.left_trigger_float(value_float=0.0)
+                    changed = True
+
+                if changed:
+                    gp.update()
+
+            with _gamepad_state_lock:
+                for stick in expired_sticks:
+                    _gamepad_stick_seen[stick] = now
+                    _gamepad_stick_value[stick] = (0.0, 0.0)
+                for button in expired_buttons:
+                    _gamepad_button_seen.pop(button, None)
+                for trigger in expired_triggers:
+                    _gamepad_trigger_seen[trigger] = now
+                    _gamepad_trigger_value[trigger] = 0.0
+        except Exception:
+            pass
+
 
 def _get_gamepad():
     global _vgamepad_instance
@@ -1681,6 +1782,8 @@ def _get_gamepad():
         if _vgamepad_instance is None:
             import vgamepad as vg
             _vgamepad_instance = vg.VX360Gamepad()
+            _clear_gamepad_state()
+            _start_gamepad_watchdog()
         return _vgamepad_instance
 
 
@@ -1688,8 +1791,11 @@ def _get_gamepad():
 def gamepad_connect():
     try:
         gp = _get_gamepad()
-        gp.reset()
-        gp.update()
+        with _vgamepad_lock:
+            gp.reset()
+            gp.update()
+        _clear_gamepad_state()
+        _start_gamepad_watchdog()
         return {"status": "success", "message": "Virtual gamepad connected"}
     except Exception as e:
         return {"error": str(e)}
@@ -1704,6 +1810,7 @@ def gamepad_disconnect():
                 _vgamepad_instance.reset()
                 _vgamepad_instance.update()
                 _vgamepad_instance = None
+        _clear_gamepad_state()
         return {"status": "success", "message": "Virtual gamepad disconnected"}
     except Exception as e:
         return {"error": str(e)}
@@ -1715,11 +1822,16 @@ def gamepad_stick(req: GamepadStickRequest):
         gp = _get_gamepad()
         x = max(-1.0, min(1.0, req.x))
         y = max(-1.0, min(1.0, req.y))
-        if req.stick == "right":
-            gp.right_joystick_float(x_value_float=x, y_value_float=y)
-        else:
-            gp.left_joystick_float(x_value_float=x, y_value_float=y)
-        gp.update()
+        stick = "right" if req.stick == "right" else "left"
+        with _vgamepad_lock:
+            if stick == "right":
+                gp.right_joystick_float(x_value_float=x, y_value_float=y)
+            else:
+                gp.left_joystick_float(x_value_float=x, y_value_float=y)
+            gp.update()
+        with _gamepad_state_lock:
+            _gamepad_stick_seen[stick] = time.time()
+            _gamepad_stick_value[stick] = (x, y)
         return {"status": "success"}
     except Exception as e:
         return {"error": str(e)}
@@ -1735,16 +1847,25 @@ def gamepad_button(req: GamepadButtonRequest):
             return {"error": f"Unknown button: {req.button}"}
         btn = vg.XUSB_BUTTON(btn_val)
         action = req.action.lower().strip()
-        if action == "down":
-            gp.press_button(button=btn)
-        elif action == "up":
-            gp.release_button(button=btn)
-        else:
-            gp.press_button(button=btn)
+        button = req.button.upper()
+        with _vgamepad_lock:
+            if action == "down":
+                gp.press_button(button=btn)
+            elif action == "hold":
+                gp.press_button(button=btn)
+            elif action == "up":
+                gp.release_button(button=btn)
+            else:
+                gp.press_button(button=btn)
+                gp.update()
+                time.sleep(0.06)
+                gp.release_button(button=btn)
             gp.update()
-            time.sleep(0.06)
-            gp.release_button(button=btn)
-        gp.update()
+        with _gamepad_state_lock:
+            if action in ("down", "hold"):
+                _gamepad_button_seen[button] = time.time()
+            elif action == "up" or action not in ("down", "hold"):
+                _gamepad_button_seen.pop(button, None)
         return {"status": "success"}
     except Exception as e:
         return {"error": str(e)}
@@ -1755,11 +1876,16 @@ def gamepad_trigger(req: GamepadTriggerRequest):
     try:
         gp = _get_gamepad()
         val = max(0.0, min(1.0, req.value))
-        if req.trigger == "right":
-            gp.right_trigger_float(value_float=val)
-        else:
-            gp.left_trigger_float(value_float=val)
-        gp.update()
+        trigger = "right" if req.trigger == "right" else "left"
+        with _vgamepad_lock:
+            if trigger == "right":
+                gp.right_trigger_float(value_float=val)
+            else:
+                gp.left_trigger_float(value_float=val)
+            gp.update()
+        with _gamepad_state_lock:
+            _gamepad_trigger_seen[trigger] = time.time()
+            _gamepad_trigger_value[trigger] = val
         return {"status": "success"}
     except Exception as e:
         return {"error": str(e)}
@@ -1769,8 +1895,10 @@ def gamepad_trigger(req: GamepadTriggerRequest):
 def gamepad_reset():
     try:
         gp = _get_gamepad()
-        gp.reset()
-        gp.update()
+        with _vgamepad_lock:
+            gp.reset()
+            gp.update()
+        _clear_gamepad_state()
         return {"status": "success"}
     except Exception as e:
         return {"error": str(e)}
