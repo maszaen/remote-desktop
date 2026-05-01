@@ -12,3 +12,4 @@ qrcode
 winrt-Windows.Devices.Radios
 winrt-Windows.Foundation.Collections
 winrt-Windows.Media.Control
+vgamepad
