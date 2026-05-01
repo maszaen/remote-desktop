@@ -2361,8 +2361,7 @@ function AppMain() {
   const gpRCenter = useRef({ x: 0, y: 0 });
   const gpLActiveTouchId = useRef(null);
   const gpRActiveTouchId = useRef(null);
-  const gpLPanRef = useRef();
-  const gpRPanRef = useRef();
+  const gpDualAreaWidthRef = useRef(0);
 
   // ── Stable gesture cb refs (so useMemo gestures never go stale) ──
   const gpGestureCbRef = useRef({});
@@ -2372,43 +2371,28 @@ function AppMain() {
   const _gpStartFlush  = useCallback((side) => gpGestureCbRef.current.gpStartFlush(side), []);
   const _gpHandleStick = useCallback((side, x, y, isStart) => gpGestureCbRef.current.gpHandleStick(side, x, y, isStart), []);
   const _gpStopFlush   = useCallback((side) => gpGestureCbRef.current.gpStopFlush(side), []);
+  const _gpDualTouchDown = useCallback((evt) => gpGestureCbRef.current.gpDualTouchDown(evt), []);
+  const _gpDualTouchMove = useCallback((evt) => gpGestureCbRef.current.gpDualTouchMove(evt), []);
+  const _gpDualTouchUp   = useCallback((evt) => gpGestureCbRef.current.gpDualTouchUp(evt), []);
 
   // Memoized gestures — created once, refs stay valid forever.
   // simultaneousWithExternalGesture(ref) reads .current at activation time,
   // so even though both gestures are defined here the cross-link works correctly.
-  const gpLGesture = useMemo(() =>
-    Gesture.Pan()
-  .maxPointers(1)
-  .minDistance(0)
-      .withRef(gpLPanRef)
-      .simultaneousWithExternalGesture(gpRPanRef)
-      .onBegin((evt) => {
-        runOnJS(_gpStartFlush)("left");
-        runOnJS(_gpHandleStick)("left", evt.absoluteX, evt.absoluteY, true);
+  const gpDualGesture = useMemo(() =>
+    Gesture.Manual()
+      .shouldCancelWhenOutside(false)
+      .onTouchesDown((evt) => {
+        runOnJS(_gpDualTouchDown)(evt);
       })
-      .onUpdate((evt) => {
-        runOnJS(_gpHandleStick)("left", evt.absoluteX, evt.absoluteY, false);
+      .onTouchesMove((evt) => {
+        runOnJS(_gpDualTouchMove)(evt);
       })
-      .onEnd(() => { runOnJS(_gpStopFlush)("left"); })
-      .onFinalize(() => { runOnJS(_gpStopFlush)("left"); }),
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  []);
-
-  const gpRGesture = useMemo(() =>
-    Gesture.Pan()
-  .maxPointers(1)
-  .minDistance(0)
-      .withRef(gpRPanRef)
-      .simultaneousWithExternalGesture(gpLPanRef)
-      .onBegin((evt) => {
-        runOnJS(_gpStartFlush)("right");
-        runOnJS(_gpHandleStick)("right", evt.absoluteX, evt.absoluteY, true);
+      .onTouchesUp((evt) => {
+        runOnJS(_gpDualTouchUp)(evt);
       })
-      .onUpdate((evt) => {
-        runOnJS(_gpHandleStick)("right", evt.absoluteX, evt.absoluteY, false);
-      })
-      .onEnd(() => { runOnJS(_gpStopFlush)("right"); })
-      .onFinalize(() => { runOnJS(_gpStopFlush)("right"); }),
+      .onTouchesCancelled((evt) => {
+        runOnJS(_gpDualTouchUp)(evt);
+      }),
   // eslint-disable-next-line react-hooks/exhaustive-deps
   []);
 
@@ -2442,10 +2426,12 @@ function AppMain() {
     const knobAnim = side === "left" ? gpLKnobAnim : gpRKnobAnim;
     const activeRef = side === "left" ? gpLActiveRef : gpRActiveRef;
     const touchIdRef = side === "left" ? gpLActiveTouchId : gpRActiveTouchId;
+    const idRef = side === "left" ? gpLActiveTouchId : gpRActiveTouchId;
     if (ref.current) { clearInterval(ref.current); ref.current = null; }
     valRef.current = { x: 0, y: 0 };
     activeRef.current = false;
     touchIdRef.current = null;
+    idRef.current = null;
     Animated.spring(knobAnim, { toValue: { x: 0, y: 0 }, useNativeDriver: false, tension: 80, friction: 8 }).start();
     sendAction("/gamepad/stick", "POST", { stick: side, x: 0, y: 0 });
   };
@@ -2464,26 +2450,86 @@ function AppMain() {
     // Map global portrait changes to local rotated coordinates (90deg clockwise)
     const localDx = pageY - cy;
     const localDy = -(pageX - cx);
-
     const dist = Math.sqrt(localDx * localDx + localDy * localDy);
     const maxPx = GP_STICK_MAX;
     const clamp = Math.min(dist, maxPx);
-    
     const nx = dist > 0 ? (localDx / dist) * (clamp / maxPx) : 0;
     const ny = dist > 0 ? (localDy / dist) * (clamp / maxPx) : 0;
-    
     const mag = Math.sqrt(nx * nx + ny * ny);
     valRef.current = mag < GP_DEADZONE ? { x: 0, y: 0 } : { x: nx, y: -ny };
-    
     const knobPx = dist > 0 ? clamp : 0;
     const knobX = dist > 0 ? (localDx / dist) * knobPx : 0;
     const knobY = dist > 0 ? (localDy / dist) * knobPx : 0;
-    
     knobAnim.setValue({ x: knobX, y: knobY });
   };
 
+  const gpHandleStickDelta = (side, dx, dy) => {
+    const valRef = side === "left" ? gpLValueRef : gpRValueRef;
+    const knobAnim = side === "left" ? gpLKnobAnim : gpRKnobAnim;
+    const localDx = dy;
+    const localDy = -dx;
+    const dist = Math.sqrt(localDx * localDx + localDy * localDy);
+    const maxPx = GP_STICK_MAX;
+    const clamp = Math.min(dist, maxPx);
+    const nx = dist > 0 ? (localDx / dist) * (clamp / maxPx) : 0;
+    const ny = dist > 0 ? (localDy / dist) * (clamp / maxPx) : 0;
+    const mag = Math.sqrt(nx * nx + ny * ny);
+    valRef.current = mag < GP_DEADZONE ? { x: 0, y: 0 } : { x: nx, y: -ny };
+    const knobPx = dist > 0 ? clamp : 0;
+    const knobX = dist > 0 ? (localDx / dist) * knobPx : 0;
+    const knobY = dist > 0 ? (localDy / dist) * knobPx : 0;
+    knobAnim.setValue({ x: knobX, y: knobY });
+  };
+
+  const gpDualTouchDown = (evt) => {
+    const changed = Array.isArray(evt?.changedTouches) ? evt.changedTouches : [];
+    const splitX = gpDualAreaWidthRef.current > 0 ? gpDualAreaWidthRef.current / 2 : Number.MAX_SAFE_INTEGER;
+    changed.forEach((t) => {
+      const preferLeft = t.x <= splitX;
+      const leftBusy = gpLActiveTouchId.current != null;
+      const rightBusy = gpRActiveTouchId.current != null;
+      let side = null;
+      if (preferLeft && !leftBusy) side = "left";
+      else if (!preferLeft && !rightBusy) side = "right";
+      else if (!leftBusy) side = "left";
+      else if (!rightBusy) side = "right";
+      if (!side) return;
+      if (side === "left") gpLActiveTouchId.current = t.id;
+      else gpRActiveTouchId.current = t.id;
+      gpStartFlush(side);
+      gpHandleStick(side, t.absoluteX, t.absoluteY, true);
+    });
+  };
+
+  const gpDualTouchMove = (evt) => {
+    const changed = Array.isArray(evt?.changedTouches) ? evt.changedTouches : [];
+    changed.forEach((t) => {
+      if (gpLActiveTouchId.current === t.id) {
+        gpHandleStick("left", t.absoluteX, t.absoluteY, false);
+      }
+      if (gpRActiveTouchId.current === t.id) {
+        gpHandleStick("right", t.absoluteX, t.absoluteY, false);
+      }
+    });
+  };
+
+  const gpDualTouchUp = (evt) => {
+    const changed = Array.isArray(evt?.changedTouches) ? evt.changedTouches : [];
+    changed.forEach((t) => {
+      if (gpLActiveTouchId.current === t.id) gpStopFlush("left");
+      if (gpRActiveTouchId.current === t.id) gpStopFlush("right");
+    });
+  };
+
   // Keep the cbRef fresh every render so the memoized gestures call the latest fns
-  gpGestureCbRef.current = { gpStartFlush, gpHandleStick, gpStopFlush };
+  gpGestureCbRef.current = {
+    gpStartFlush,
+    gpHandleStick,
+    gpStopFlush,
+    gpDualTouchDown,
+    gpDualTouchMove,
+    gpDualTouchUp,
+  };
 
   const joystickReleaseAll = () => {
     gpStopFlush("left");
@@ -6394,11 +6440,16 @@ function AppMain() {
             </View>
 
             {/* ── Main area ── */}
-            <View style={{ flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+            <GestureDetector gesture={gpDualGesture}>
+            <View
+              onLayout={(e) => {
+                gpDualAreaWidthRef.current = e.nativeEvent.layout.width;
+              }}
+              style={{ flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}
+            >
               {/* ▸ LEFT COLUMN: L-Stick + D-Pad */}
               <View style={{ alignItems: "center", gap: 14, width: 160 }}>
                 {/* L-Stick (Mobile Legends style — knob follows finger) */}
-                <GestureDetector gesture={gpLGesture}>
                   <View
                     style={{
                       width: GP_TOUCH_ZONE,
@@ -6453,7 +6504,6 @@ function AppMain() {
                       }} />
                     </Animated.View>
                   </View>
-                </GestureDetector>
 
                 {/* D-Pad */}
                 <View style={{ width: 100, height: 100, alignItems: "center", justifyContent: "center" }}>
@@ -6750,7 +6800,6 @@ function AppMain() {
                 </View>
 
                 {/* R-Stick (Mobile Legends style — knob follows finger) */}
-                <GestureDetector gesture={gpRGesture}>
                   <View
                     style={{
                       width: GP_TOUCH_ZONE,
@@ -6805,9 +6854,9 @@ function AppMain() {
                       }} />
                     </Animated.View>
                   </View>
-                </GestureDetector>
               </View>
             </View>
+            </GestureDetector>
           </View>
         </View>
       </SlideLeftModal>
