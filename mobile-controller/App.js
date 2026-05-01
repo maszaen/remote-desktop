@@ -2362,6 +2362,10 @@ function AppMain() {
   const gpLActiveTouchId = useRef(null);
   const gpRActiveTouchId = useRef(null);
   const gpDualAreaWidthRef = useRef(0);
+  const gpLMoveLatestRef = useRef(null);
+  const gpRMoveLatestRef = useRef(null);
+  const gpLMoveRafRef = useRef(null);
+  const gpRMoveRafRef = useRef(null);
 
   // ── Stable gesture cb refs (so useMemo gestures never go stale) ──
   const gpGestureCbRef = useRef({});
@@ -2421,6 +2425,8 @@ function AppMain() {
     if (!ref.current) ref.current = setInterval(() => gpFlush(side), GP_FLUSH_MS);
   };
   const gpStopFlush = (side) => {
+    const rafRef = side === "left" ? gpLMoveRafRef : gpRMoveRafRef;
+    const latestRef = side === "left" ? gpLMoveLatestRef : gpRMoveLatestRef;
     const ref = side === "left" ? gpLFlushRef : gpRFlushRef;
     const valRef = side === "left" ? gpLValueRef : gpRValueRef;
     const knobAnim = side === "left" ? gpLKnobAnim : gpRKnobAnim;
@@ -2428,6 +2434,11 @@ function AppMain() {
     const touchIdRef = side === "left" ? gpLActiveTouchId : gpRActiveTouchId;
     const idRef = side === "left" ? gpLActiveTouchId : gpRActiveTouchId;
     if (ref.current) { clearInterval(ref.current); ref.current = null; }
+    if (rafRef.current != null) {
+      cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
+    }
+    latestRef.current = null;
     valRef.current = { x: 0, y: 0 };
     activeRef.current = false;
     touchIdRef.current = null;
@@ -2461,6 +2472,19 @@ function AppMain() {
     const knobX = dist > 0 ? (localDx / dist) * knobPx : 0;
     const knobY = dist > 0 ? (localDy / dist) * knobPx : 0;
     knobAnim.setValue({ x: knobX, y: knobY });
+  };
+
+  const gpScheduleStickMove = (side, pageX, pageY) => {
+    const rafRef = side === "left" ? gpLMoveRafRef : gpRMoveRafRef;
+    const latestRef = side === "left" ? gpLMoveLatestRef : gpRMoveLatestRef;
+    latestRef.current = { x: pageX, y: pageY };
+    if (rafRef.current != null) return;
+    rafRef.current = requestAnimationFrame(() => {
+      rafRef.current = null;
+      const p = latestRef.current;
+      if (!p) return;
+      gpHandleStick(side, p.x, p.y, false);
+    });
   };
 
   const gpHandleStickDelta = (side, dx, dy) => {
@@ -2505,10 +2529,10 @@ function AppMain() {
     const changed = Array.isArray(evt?.changedTouches) ? evt.changedTouches : [];
     changed.forEach((t) => {
       if (gpLActiveTouchId.current === t.id) {
-        gpHandleStick("left", t.absoluteX, t.absoluteY, false);
+        gpScheduleStickMove("left", t.absoluteX, t.absoluteY);
       }
       if (gpRActiveTouchId.current === t.id) {
-        gpHandleStick("right", t.absoluteX, t.absoluteY, false);
+        gpScheduleStickMove("right", t.absoluteX, t.absoluteY);
       }
     });
   };
@@ -2539,6 +2563,70 @@ function AppMain() {
     joystickKeysRef.current.clear();
     sendAction("/gamepad/reset", "POST");
   };
+
+  const renderGpStick = (knobAnim) => (
+    <View style={s.gpStickTouchZone}>
+      <LinearGradient
+        colors={["#3b3b3f", "#111113", "#060607"]}
+        style={s.gpStickBezel}
+      >
+        <View style={s.gpStickSocket}>
+          <Animated.View style={[s.gpStickKnob, { transform: knobAnim.getTranslateTransform() }]}>
+            <LinearGradient
+              colors={["#4c4c50", "#171719", "#09090a"]}
+              style={s.gpStickKnobFace}
+            />
+          </Animated.View>
+        </View>
+      </LinearGradient>
+    </View>
+  );
+
+  const renderGpShoulder = (label, onPressIn, onPressOut, side = "left", trigger = false) => (
+    <GpBtn
+      onPressIn={onPressIn}
+      onPressOut={onPressOut}
+      style={({ pressed }) => [
+        s.gpShoulderBtn,
+        trigger && s.gpTriggerBtn,
+        side === "left" ? s.gpShoulderLeft : s.gpShoulderRight,
+        pressed && s.gpShoulderBtnPressed,
+      ]}
+    >
+      <Text style={s.gpShoulderText}>{label}</Text>
+    </GpBtn>
+  );
+
+  const renderGpCenterButton = (icon, onPress) => (
+    <GpBtn
+      onPress={onPress}
+      style={({ pressed }) => [s.gpCenterButton, pressed && s.gpCenterButtonPressed]}
+    >
+      <Ionicons name={icon} size={14} color="#9a9a9d" />
+    </GpBtn>
+  );
+
+  const renderGpFaceButton = (label, color, positionStyle, onPressIn, onPressOut) => (
+    <GpBtn
+      onPressIn={onPressIn}
+      onPressOut={onPressOut}
+      style={({ pressed }) => [
+        s.gpFaceButton,
+        positionStyle,
+        {
+          borderColor: pressed ? color : "#222326",
+          shadowColor: pressed ? color : "#000",
+          backgroundColor: pressed ? `${color}38` : "#121315",
+        },
+      ]}
+    >
+      <LinearGradient
+        colors={["rgba(255,255,255,0.18)", "rgba(255,255,255,0.02)", "rgba(0,0,0,0.22)"]}
+        style={s.gpFaceButtonGloss}
+      />
+      <Text style={[s.gpFaceButtonText, { color }]}>{label}</Text>
+    </GpBtn>
+  );
 
   // ── Panic Button ──
   const handlePanic = async () => {
@@ -6317,8 +6405,9 @@ function AppMain() {
               transform: [{ rotate: "90deg" }],
               width: Dimensions.get("window").height - keyboardModalTopInset,
               height: Dimensions.get("window").width,
-              paddingHorizontal: 28,
-              paddingVertical: 14,
+              paddingHorizontal: 25,
+              paddingRight: 75,
+              paddingVertical: 20,
             }}
           >
               {/* ── Top row: LB/LT ... RT/RB ── */}
@@ -6341,7 +6430,7 @@ function AppMain() {
                     borderBottomColor: pressed ? "#4a4a6a" : "#16162a",
                     paddingHorizontal: 18,
                     paddingVertical: 10,
-                    minWidth: 60,
+                    minWidth: 90,
                     alignItems: "center",
                     shadowColor: "#000",
                     shadowOffset: { width: 0, height: 2 },
@@ -6425,7 +6514,7 @@ function AppMain() {
                     borderBottomColor: pressed ? "#4a4a6a" : "#16162a",
                     paddingHorizontal: 18,
                     paddingVertical: 10,
-                    minWidth: 60,
+                    minWidth: 90,
                     alignItems: "center",
                     shadowColor: "#000",
                     shadowOffset: { width: 0, height: 2 },
@@ -6456,6 +6545,7 @@ function AppMain() {
                       height: GP_TOUCH_ZONE,
                       alignItems: "center",
                       justifyContent: "center",
+                      marginBottom: -30,
                     }}
                   >
                     {/* Stick well (background circle) */}
@@ -6506,7 +6596,7 @@ function AppMain() {
                   </View>
 
                 {/* D-Pad */}
-                <View style={{ width: 100, height: 100, alignItems: "center", justifyContent: "center" }}>
+                <View style={{ width: 140, height: 140, alignItems: "center", justifyContent: "center", marginLeft: 200,  }}>
                   {/* Up */}
                   <GpBtn
                     onPressIn={() => joystickButtonDown("DPAD_UP")}
@@ -6514,11 +6604,11 @@ function AppMain() {
                     style={({ pressed }) => ({
                       position: "absolute",
                       top: 0,
-                      width: 34,
-                      height: 34,
+                      width: 45,
+                      height: 45,
                       borderRadius: 6,
-                      borderTopLeftRadius: 10,
-                      borderTopRightRadius: 10,
+                      borderBottomLeftRadius: 15,
+                      borderBottomRightRadius: 15,
                       backgroundColor: pressed ? "#3a3a4a" : "#1e1e2a",
                       borderWidth: 1.5,
                       borderColor: pressed ? "#5a5a7a" : "#2a2a3e",
@@ -6538,11 +6628,11 @@ function AppMain() {
                     style={({ pressed }) => ({
                       position: "absolute",
                       bottom: 0,
-                      width: 34,
-                      height: 34,
+                      width: 45,
+                      height: 45,
                       borderRadius: 6,
-                      borderBottomLeftRadius: 10,
-                      borderBottomRightRadius: 10,
+                      borderTopLeftRadius: 15,
+                      borderTopRightRadius: 15,
                       backgroundColor: pressed ? "#3a3a4a" : "#1e1e2a",
                       borderWidth: 1.5,
                       borderColor: pressed ? "#5a5a7a" : "#2a2a3e",
@@ -6562,11 +6652,11 @@ function AppMain() {
                     style={({ pressed }) => ({
                       position: "absolute",
                       left: 0,
-                      width: 34,
-                      height: 34,
+                      width: 45,
+                      height: 45,
                       borderRadius: 6,
-                      borderTopLeftRadius: 10,
-                      borderBottomLeftRadius: 10,
+                      borderTopRightRadius: 15,
+                      borderBottomRightRadius: 15,
                       backgroundColor: pressed ? "#3a3a4a" : "#1e1e2a",
                       borderWidth: 1.5,
                       borderColor: pressed ? "#5a5a7a" : "#2a2a3e",
@@ -6586,11 +6676,11 @@ function AppMain() {
                     style={({ pressed }) => ({
                       position: "absolute",
                       right: 0,
-                      width: 34,
-                      height: 34,
+                      width: 45,
+                      height: 45,
                       borderRadius: 6,
-                      borderTopRightRadius: 10,
-                      borderBottomRightRadius: 10,
+                      borderTopLeftRadius: 15,
+                      borderBottomLeftRadius: 15,
                       backgroundColor: pressed ? "#3a3a4a" : "#1e1e2a",
                       borderWidth: 1.5,
                       borderColor: pressed ? "#5a5a7a" : "#2a2a3e",
@@ -6603,40 +6693,20 @@ function AppMain() {
                   >
                     <Ionicons name="caret-forward" size={16} color="#8888a0" />
                   </GpBtn>
-                  {/* Center */}
-                  <View style={{
-                    width: 28, height: 28, borderRadius: 4,
-                    backgroundColor: "#1e1e2a", borderWidth: 1, borderColor: "#2a2a3e",
-                  }} />
+                  
                 </View>
               </View>
 
               {/* ▸ CENTER: Back / Guide / Start */}
-              <View style={{ alignItems: "center", gap: 14, paddingTop: 10 }}>
-                <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
-                  <GpBtn
-                    onPress={() => joystickButtonTap("BACK")}
-                    style={({ pressed }) => ({
-                      backgroundColor: pressed ? "#3a3a4a" : "#1a1a28",
-                      borderRadius: 12,
-                      borderWidth: 1.5,
-                      borderColor: pressed ? "#5a5a7a" : "#2a2a3e",
-                      borderBottomWidth: 2,
-                      borderBottomColor: "#14142a",
-                      paddingHorizontal: 14,
-                      paddingVertical: 8,
-                      elevation: 3,
-                    })}
-                  >
-                    <Text style={{ color: "#7a7a90", fontSize: 9, fontWeight: "700", letterSpacing: 1 }}>BACK</Text>
-                  </GpBtn>
+              <View style={{ alignItems: "center", gap: 14, marginBottom: 100 }}>
+                <View style={{ flexDirection: "column", alignItems: "center", gap: 12 }}>
                   {/* Xbox Guide button */}
                   <GpBtn
                     onPress={() => joystickButtonTap("GUIDE")}
                     style={({ pressed }) => ({
-                      width: 40,
-                      height: 40,
-                      borderRadius: 20,
+                      width: 90,
+                      height: 90,
+                      borderRadius: 90,
                       backgroundColor: pressed ? "#2a4a2a" : "#1a1a28",
                       borderWidth: 2,
                       borderColor: pressed ? "#4a8a4a" : "#2a2a3e",
@@ -6652,7 +6722,23 @@ function AppMain() {
                       elevation: 5,
                     })}
                   >
-                    <Ionicons name="logo-xbox" size={18} color="#5a8a5a" />
+                    <Ionicons name="logo-xbox" size={80} color="#5a8a5a" />
+                  </GpBtn>
+                  <GpBtn
+                    onPress={() => joystickButtonTap("BACK")}
+                    style={({ pressed }) => ({
+                      backgroundColor: pressed ? "#3a3a4a" : "#1a1a28",
+                      borderRadius: 12,
+                      borderWidth: 1.5,
+                      borderColor: pressed ? "#5a5a7a" : "#2a2a3e",
+                      borderBottomWidth: 2,
+                      borderBottomColor: "#14142a",
+                      paddingHorizontal: 14,
+                      paddingVertical: 8,
+                      elevation: 3,
+                    })}
+                  >
+                    <Text style={{ color: "#7a7a90", fontSize: 9, fontWeight: "700", letterSpacing: 1 }}>BACK</Text>
                   </GpBtn>
                   <GpBtn
                     onPress={() => joystickButtonTap("START")}
@@ -6674,9 +6760,9 @@ function AppMain() {
               </View>
 
               {/* ▸ RIGHT COLUMN: A/B/X/Y + R-Stick */}
-              <View style={{ alignItems: "center", gap: 14, width: 160 }}>
+              <View style={{ alignItems: "center", gap: 0, marginTop: 44, width: 160 }}>
                 {/* A/B/X/Y face buttons (diamond, glass texture) */}
-                <View style={{ width: 154, height: 154, alignItems: "center", justifyContent: "center" }}>
+                <View style={{ marginBottom: -30, width: 154, height: 154, alignItems: "center", justifyContent: "center" }}>
                   {/* Y - top (yellow) */}
                   <GpBtn
                     onPressIn={() => joystickButtonDown("Y")}
@@ -6806,6 +6892,7 @@ function AppMain() {
                       height: GP_TOUCH_ZONE,
                       alignItems: "center",
                       justifyContent: "center",
+                      marginRight: 200,
                     }}
                   >
                     {/* Stick well (background circle) */}
