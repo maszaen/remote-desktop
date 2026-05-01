@@ -1761,7 +1761,7 @@ function AppMain() {
       }
       if (joystickOpen) {
         joystickReleaseAll();
-        joystickDisconnect();
+        // joystickDisconnect();
         setJoystickOpen(false);
         return true;
       }
@@ -3678,7 +3678,7 @@ function AppMain() {
               }
               else if (joystickOpen) {
                 joystickReleaseAll();
-                joystickDisconnect();
+                // joystickDisconnect();
                 setJoystickOpen(false);
               }
             }}
@@ -6483,7 +6483,7 @@ function AppMain() {
         visible={joystickOpen}
         onClose={() => {
           joystickReleaseAll();
-          joystickDisconnect();
+          // joystickDisconnect();
           setJoystickOpen(false);
         }}
         contentInsetTop={keyboardModalTopInset}

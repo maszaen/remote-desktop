@@ -1707,6 +1707,29 @@ def _start_gamepad_watchdog():
     _gamepad_watchdog_started = True
     threading.Thread(target=_gamepad_watchdog_loop, daemon=True).start()
 
+def is_gamepad_connected():
+        global _vgamepad_instance
+        return _vgamepad_instance is not None
+
+def toggle_gamepad(icon, item):
+    global _vgamepad_instance
+    if is_gamepad_connected():
+        # Disconnect
+        try:
+            with _vgamepad_lock:
+                if _vgamepad_instance is not None:
+                    _vgamepad_instance.reset()
+                    _vgamepad_instance.update()
+                    _vgamepad_instance = None
+            _clear_gamepad_state()
+        except Exception as e:
+            print(f"Error disconnecting gamepad: {e}")
+    else:
+        # Connect
+        try:
+            _get_gamepad()
+        except Exception as e:
+            print(f"Error connecting gamepad: {e}")
 
 def _gamepad_watchdog_loop():
     while True:
@@ -2835,6 +2858,11 @@ def setup_tray_icon():
             enabled=False,
         ),
         Menu.SEPARATOR,
+        MenuItem(
+            "Virtual Gamepad",
+            toggle_gamepad,
+            checked=lambda item: is_gamepad_connected()
+        ),
         MenuItem("Pair New Device (QR)", show_qr_code),
         MenuItem("Show Pairing OTP Code", show_pin_code),
         Menu.SEPARATOR,
