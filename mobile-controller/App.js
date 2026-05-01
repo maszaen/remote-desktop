@@ -2307,79 +2307,60 @@ function AppMain() {
   };
 
   // ── Joystick / Gamepad (native via vgamepad) ──
-  const JOYSTICK_SIZE = 160;
-  const JOYSTICK_KNOB = 64;
-  const JOYSTICK_MAX = (JOYSTICK_SIZE - JOYSTICK_KNOB) / 2;
-  const JOYSTICK_DEADZONE = 0.15;
-  const joystickStickFlushRef = useRef(null);
-  const joystickStickValueRef = useRef({ x: 0, y: 0 });
-  const JOYSTICK_STICK_FLUSH_MS = 25;
+  const GP_STICK = 120;
+  const GP_KNOB = 48;
+  const GP_STICK_MAX = (GP_STICK - GP_KNOB) / 2;
+  const GP_DEADZONE = 0.15;
+  const GP_FLUSH_MS = 25;
+  const gpLFlushRef = useRef(null);
+  const gpRFlushRef = useRef(null);
+  const gpLValueRef = useRef({ x: 0, y: 0 });
+  const gpRValueRef = useRef({ x: 0, y: 0 });
 
-  const joystickConnect = () => {
-    sendAction("/gamepad/connect", "POST");
-  };
-
-  const joystickDisconnect = () => {
-    sendAction("/gamepad/disconnect", "POST");
-  };
+  const joystickConnect = () => sendAction("/gamepad/connect", "POST");
+  const joystickDisconnect = () => sendAction("/gamepad/disconnect", "POST");
 
   const joystickButtonDown = (button) => {
     if (joystickKeysRef.current.has(button)) return;
     joystickKeysRef.current.add(button);
     sendAction("/gamepad/button", "POST", { button, action: "down" });
   };
-
   const joystickButtonUp = (button) => {
     if (!joystickKeysRef.current.has(button)) return;
     joystickKeysRef.current.delete(button);
     sendAction("/gamepad/button", "POST", { button, action: "up" });
   };
+  const joystickButtonTap = (button) => sendAction("/gamepad/button", "POST", { button, action: "tap" });
+  const joystickTrigger = (trigger, value) => sendAction("/gamepad/trigger", "POST", { trigger, value });
 
-  const joystickButtonTap = (button) => {
-    sendAction("/gamepad/button", "POST", { button, action: "tap" });
+  const gpFlush = (side) => {
+    const v = side === "left" ? gpLValueRef.current : gpRValueRef.current;
+    sendAction("/gamepad/stick", "POST", { stick: side, x: v.x, y: v.y });
   };
-
-  const joystickTrigger = (trigger, value) => {
-    sendAction("/gamepad/trigger", "POST", { trigger, value });
+  const gpStartFlush = (side) => {
+    const ref = side === "left" ? gpLFlushRef : gpRFlushRef;
+    if (!ref.current) ref.current = setInterval(() => gpFlush(side), GP_FLUSH_MS);
   };
-
-  const joystickStickFlush = () => {
-    const v = joystickStickValueRef.current;
-    sendAction("/gamepad/stick", "POST", { stick: "left", x: v.x, y: v.y });
+  const gpStopFlush = (side) => {
+    const ref = side === "left" ? gpLFlushRef : gpRFlushRef;
+    const valRef = side === "left" ? gpLValueRef : gpRValueRef;
+    if (ref.current) { clearInterval(ref.current); ref.current = null; }
+    valRef.current = { x: 0, y: 0 };
+    sendAction("/gamepad/stick", "POST", { stick: side, x: 0, y: 0 });
   };
-
-  const joystickStartStickFlush = () => {
-    if (!joystickStickFlushRef.current) {
-      joystickStickFlushRef.current = setInterval(joystickStickFlush, JOYSTICK_STICK_FLUSH_MS);
-    }
-  };
-
-  const joystickStopStickFlush = () => {
-    if (joystickStickFlushRef.current) {
-      clearInterval(joystickStickFlushRef.current);
-      joystickStickFlushRef.current = null;
-    }
-    joystickStickValueRef.current = { x: 0, y: 0 };
-    sendAction("/gamepad/stick", "POST", { stick: "left", x: 0, y: 0 });
+  const gpUpdateStick = (side, nx, ny) => {
+    const valRef = side === "left" ? gpLValueRef : gpRValueRef;
+    const mag = Math.sqrt(nx * nx + ny * ny);
+    valRef.current = mag < GP_DEADZONE ? { x: 0, y: 0 } : { x: nx, y: -ny };
   };
 
   const joystickReleaseAll = () => {
-    joystickStopStickFlush();
+    gpStopFlush("left");
+    gpStopFlush("right");
     const btns = Array.from(joystickKeysRef.current);
-    btns.forEach((b) => {
-      sendAction("/gamepad/button", "POST", { button: b, action: "up" });
-    });
+    btns.forEach((b) => sendAction("/gamepad/button", "POST", { button: b, action: "up" }));
     joystickKeysRef.current.clear();
     sendAction("/gamepad/reset", "POST");
-  };
-
-  const joystickUpdateFromStick = (nx, ny) => {
-    const mag = Math.sqrt(nx * nx + ny * ny);
-    if (mag < JOYSTICK_DEADZONE) {
-      joystickStickValueRef.current = { x: 0, y: 0 };
-    } else {
-      joystickStickValueRef.current = { x: nx, y: -ny };
-    }
   };
 
   // ── Panic Button ──
@@ -4047,7 +4028,7 @@ function AppMain() {
           </View>
           <View style={s.menuRowBody}>
             <Text style={s.menuRowTitle}>Joystick</Text>
-            <Text style={s.menuRowSub}>Virtual gamepad controller</Text>
+            <Text style={s.menuRowSub}>Xbox 360 virtual gamepad</Text>
           </View>
           <Ionicons
             name="arrow-forward-outline"
@@ -6151,342 +6132,581 @@ function AppMain() {
           joystickDisconnect();
           setJoystickOpen(false);
         }}
-        contentInsetTop={keyboardModalTopInset}
+        contentInsetTop={0}
       >
-        <View
-          style={{
-            flex: 1,
-            backgroundColor: C.bg,
-            paddingHorizontal: SP.sm,
-            paddingTop: SP.md,
-            paddingBottom: SP.md + (Platform.OS === "ios" ? 34 : 0),
-          }}
-        >
-          {/* Shoulder buttons row */}
-          <View
-            style={{
-              flexDirection: "row",
-              justifyContent: "space-between",
-              marginBottom: SP.sm,
-              paddingHorizontal: SP.xs,
-            }}
-          >
-            {/* Left shoulders */}
-            <View style={{ flexDirection: "row", gap: SP.sm }}>
-              <Pressable
-                onPressIn={() => joystickButtonDown("LB")}
-                onPressOut={() => joystickButtonUp("LB")}
-                style={({ pressed }) => [
-                  {
-                    backgroundColor: pressed ? C.primary + "30" : C.elevated,
-                    borderRadius: R.md,
-                    borderWidth: 1,
-                    borderColor: pressed ? C.primary + "50" : C.border,
-                    paddingHorizontal: 20,
-                    paddingVertical: 12,
-                    minWidth: 64,
-                    alignItems: "center",
-                  },
-                ]}
-              >
-                <Text style={{ color: C.sub, fontSize: F.sm, fontWeight: "700", letterSpacing: 0.5 }}>LB</Text>
-              </Pressable>
-              <Pressable
-                onPressIn={() => joystickTrigger("left", 1.0)}
-                onPressOut={() => joystickTrigger("left", 0.0)}
-                style={({ pressed }) => [
-                  {
-                    backgroundColor: pressed ? C.primary + "30" : C.elevated,
-                    borderRadius: R.md,
-                    borderWidth: 1,
-                    borderColor: pressed ? C.primary + "50" : C.border,
-                    paddingHorizontal: 20,
-                    paddingVertical: 12,
-                    minWidth: 64,
-                    alignItems: "center",
-                  },
-                ]}
-              >
-                <Text style={{ color: C.sub, fontSize: F.sm, fontWeight: "700", letterSpacing: 0.5 }}>LT</Text>
-              </Pressable>
-            </View>
-            {/* Right shoulders */}
-            <View style={{ flexDirection: "row", gap: SP.sm }}>
-              <Pressable
-                onPressIn={() => joystickTrigger("right", 1.0)}
-                onPressOut={() => joystickTrigger("right", 0.0)}
-                style={({ pressed }) => [
-                  {
-                    backgroundColor: pressed ? C.danger + "30" : C.elevated,
-                    borderRadius: R.md,
-                    borderWidth: 1,
-                    borderColor: pressed ? C.danger + "50" : C.border,
-                    paddingHorizontal: 20,
-                    paddingVertical: 12,
-                    minWidth: 64,
-                    alignItems: "center",
-                  },
-                ]}
-              >
-                <Text style={{ color: C.sub, fontSize: F.sm, fontWeight: "700", letterSpacing: 0.5 }}>RT</Text>
-              </Pressable>
-              <Pressable
-                onPressIn={() => joystickButtonDown("RB")}
-                onPressOut={() => joystickButtonUp("RB")}
-                style={({ pressed }) => [
-                  {
-                    backgroundColor: pressed ? C.primary + "30" : C.elevated,
-                    borderRadius: R.md,
-                    borderWidth: 1,
-                    borderColor: pressed ? C.primary + "50" : C.border,
-                    paddingHorizontal: 20,
-                    paddingVertical: 12,
-                    minWidth: 64,
-                    alignItems: "center",
-                  },
-                ]}
-              >
-                <Text style={{ color: C.sub, fontSize: F.sm, fontWeight: "700", letterSpacing: 0.5 }}>RB</Text>
-              </Pressable>
-            </View>
-          </View>
-
-          {/* Main gamepad area */}
+        {/* Rotated landscape container */}
+        <View style={{ flex: 1, backgroundColor: "#0d0d0d" }}>
           <View
             style={{
               flex: 1,
-              flexDirection: "row",
-              alignItems: "center",
-              justifyContent: "space-between",
-              paddingHorizontal: SP.xs,
+              transform: [{ rotate: "90deg" }],
+              width: Dimensions.get("window").height,
+              height: Dimensions.get("window").width,
+              alignSelf: "center",
+              justifyContent: "center",
+              paddingHorizontal: 12,
+              paddingVertical: 6,
             }}
           >
-            {/* Left side: Analog Stick */}
-            <View style={{ alignItems: "center", justifyContent: "center" }}>
-              <View
-                style={{
-                  width: JOYSTICK_SIZE,
-                  height: JOYSTICK_SIZE,
-                  borderRadius: JOYSTICK_SIZE / 2,
-                  backgroundColor: C.surface,
-                  borderWidth: 1,
-                  borderColor: C.borderLight,
-                  alignItems: "center",
-                  justifyContent: "center",
-                }}
-                onStartShouldSetResponder={() => true}
-                onMoveShouldSetResponder={() => true}
-                onResponderGrant={(e) => {
-                  const { locationX, locationY } = e.nativeEvent;
-                  const cx = JOYSTICK_SIZE / 2;
-                  const cy = JOYSTICK_SIZE / 2;
-                  const dx = locationX - cx;
-                  const dy = locationY - cy;
-                  const dist = Math.sqrt(dx * dx + dy * dy);
-                  const clampDist = Math.min(dist, JOYSTICK_MAX);
-                  const nx = dist > 0 ? (dx / dist) * (clampDist / JOYSTICK_MAX) : 0;
-                  const ny = dist > 0 ? (dy / dist) * (clampDist / JOYSTICK_MAX) : 0;
-                  joystickUpdateFromStick(nx, ny);
-                  joystickStartStickFlush();
-                }}
-                onResponderMove={(e) => {
-                  const { locationX, locationY } = e.nativeEvent;
-                  const cx = JOYSTICK_SIZE / 2;
-                  const cy = JOYSTICK_SIZE / 2;
-                  const dx = locationX - cx;
-                  const dy = locationY - cy;
-                  const dist = Math.sqrt(dx * dx + dy * dy);
-                  const clampDist = Math.min(dist, JOYSTICK_MAX);
-                  const nx = dist > 0 ? (dx / dist) * (clampDist / JOYSTICK_MAX) : 0;
-                  const ny = dist > 0 ? (dy / dist) * (clampDist / JOYSTICK_MAX) : 0;
-                  joystickUpdateFromStick(nx, ny);
-                }}
-                onResponderRelease={() => {
-                  joystickUpdateFromStick(0, 0);
-                  joystickStopStickFlush();
-                }}
-              >
-                {/* Direction indicators */}
-                <View style={{ position: "absolute", top: 12 }}>
-                  <Ionicons name="chevron-up" size={14} color={C.muted + "40"} />
-                </View>
-                <View style={{ position: "absolute", bottom: 12 }}>
-                  <Ionicons name="chevron-down" size={14} color={C.muted + "40"} />
-                </View>
-                <View style={{ position: "absolute", left: 12 }}>
-                  <Ionicons name="chevron-back" size={14} color={C.muted + "40"} />
-                </View>
-                <View style={{ position: "absolute", right: 12 }}>
-                  <Ionicons name="chevron-forward" size={14} color={C.muted + "40"} />
-                </View>
-                {/* Center knob */}
+            {/* ── Top row: LB/LT ... RT/RB ── */}
+            <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 8 }}>
+              {/* Left bumper/trigger */}
+              <View style={{ flexDirection: "row", gap: 8 }}>
+                <Pressable
+                  onPressIn={() => joystickButtonDown("LB")}
+                  onPressOut={() => joystickButtonUp("LB")}
+                  style={({ pressed }) => ({
+                    backgroundColor: pressed ? "#3a3a4a" : "#1e1e2a",
+                    borderRadius: 14,
+                    borderTopLeftRadius: 20,
+                    borderTopRightRadius: 6,
+                    borderBottomRightRadius: 14,
+                    borderBottomLeftRadius: 20,
+                    borderWidth: 1.5,
+                    borderColor: pressed ? "#5a5a7a" : "#2a2a3e",
+                    borderBottomWidth: 3,
+                    borderBottomColor: pressed ? "#4a4a6a" : "#16162a",
+                    paddingHorizontal: 18,
+                    paddingVertical: 10,
+                    minWidth: 60,
+                    alignItems: "center",
+                    shadowColor: "#000",
+                    shadowOffset: { width: 0, height: 2 },
+                    shadowOpacity: 0.4,
+                    shadowRadius: 3,
+                    elevation: 4,
+                  })}
+                >
+                  <Text style={{ color: "#b0b0c0", fontSize: 12, fontWeight: "800", letterSpacing: 0.5 }}>LB</Text>
+                </Pressable>
+                <Pressable
+                  onPressIn={() => joystickTrigger("left", 1.0)}
+                  onPressOut={() => joystickTrigger("left", 0.0)}
+                  style={({ pressed }) => ({
+                    backgroundColor: pressed ? "#3a3a4a" : "#1e1e2a",
+                    borderRadius: 14,
+                    borderTopLeftRadius: 6,
+                    borderTopRightRadius: 20,
+                    borderBottomRightRadius: 20,
+                    borderBottomLeftRadius: 6,
+                    borderWidth: 1.5,
+                    borderColor: pressed ? "#5a5a7a" : "#2a2a3e",
+                    borderBottomWidth: 4,
+                    borderBottomColor: pressed ? "#4a4a6a" : "#16162a",
+                    paddingHorizontal: 18,
+                    paddingVertical: 14,
+                    minWidth: 60,
+                    alignItems: "center",
+                    shadowColor: "#000",
+                    shadowOffset: { width: 0, height: 3 },
+                    shadowOpacity: 0.5,
+                    shadowRadius: 4,
+                    elevation: 5,
+                  })}
+                >
+                  <Text style={{ color: "#b0b0c0", fontSize: 12, fontWeight: "800", letterSpacing: 0.5 }}>LT</Text>
+                </Pressable>
+              </View>
+              {/* Right trigger/bumper */}
+              <View style={{ flexDirection: "row", gap: 8 }}>
+                <Pressable
+                  onPressIn={() => joystickTrigger("right", 1.0)}
+                  onPressOut={() => joystickTrigger("right", 0.0)}
+                  style={({ pressed }) => ({
+                    backgroundColor: pressed ? "#3a3a4a" : "#1e1e2a",
+                    borderRadius: 14,
+                    borderTopLeftRadius: 20,
+                    borderTopRightRadius: 6,
+                    borderBottomRightRadius: 6,
+                    borderBottomLeftRadius: 20,
+                    borderWidth: 1.5,
+                    borderColor: pressed ? "#5a5a7a" : "#2a2a3e",
+                    borderBottomWidth: 4,
+                    borderBottomColor: pressed ? "#4a4a6a" : "#16162a",
+                    paddingHorizontal: 18,
+                    paddingVertical: 14,
+                    minWidth: 60,
+                    alignItems: "center",
+                    shadowColor: "#000",
+                    shadowOffset: { width: 0, height: 3 },
+                    shadowOpacity: 0.5,
+                    shadowRadius: 4,
+                    elevation: 5,
+                  })}
+                >
+                  <Text style={{ color: "#b0b0c0", fontSize: 12, fontWeight: "800", letterSpacing: 0.5 }}>RT</Text>
+                </Pressable>
+                <Pressable
+                  onPressIn={() => joystickButtonDown("RB")}
+                  onPressOut={() => joystickButtonUp("RB")}
+                  style={({ pressed }) => ({
+                    backgroundColor: pressed ? "#3a3a4a" : "#1e1e2a",
+                    borderRadius: 14,
+                    borderTopLeftRadius: 6,
+                    borderTopRightRadius: 20,
+                    borderBottomRightRadius: 20,
+                    borderBottomLeftRadius: 6,
+                    borderWidth: 1.5,
+                    borderColor: pressed ? "#5a5a7a" : "#2a2a3e",
+                    borderBottomWidth: 3,
+                    borderBottomColor: pressed ? "#4a4a6a" : "#16162a",
+                    paddingHorizontal: 18,
+                    paddingVertical: 10,
+                    minWidth: 60,
+                    alignItems: "center",
+                    shadowColor: "#000",
+                    shadowOffset: { width: 0, height: 2 },
+                    shadowOpacity: 0.4,
+                    shadowRadius: 3,
+                    elevation: 4,
+                  })}
+                >
+                  <Text style={{ color: "#b0b0c0", fontSize: 12, fontWeight: "800", letterSpacing: 0.5 }}>RB</Text>
+                </Pressable>
+              </View>
+            </View>
+
+            {/* ── Main area ── */}
+            <View style={{ flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+              {/* ▸ LEFT COLUMN: L-Stick + D-Pad */}
+              <View style={{ alignItems: "center", gap: 14, width: 140 }}>
+                {/* L-Stick (Mobile Legends style) */}
                 <View
                   style={{
-                    width: JOYSTICK_KNOB,
-                    height: JOYSTICK_KNOB,
-                    borderRadius: JOYSTICK_KNOB / 2,
-                    backgroundColor: C.elevated,
-                    borderWidth: 1.5,
-                    borderColor: C.borderLight,
+                    width: GP_STICK,
+                    height: GP_STICK,
+                    borderRadius: GP_STICK / 2,
+                    backgroundColor: "#141420",
+                    borderWidth: 2,
+                    borderColor: "#2a2a40",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    shadowColor: "#000",
+                    shadowOffset: { width: 0, height: 4 },
+                    shadowOpacity: 0.6,
+                    shadowRadius: 6,
+                    elevation: 6,
                   }}
-                />
+                  onStartShouldSetResponder={() => true}
+                  onMoveShouldSetResponder={() => true}
+                  onResponderGrant={(e) => {
+                    const { locationX, locationY } = e.nativeEvent;
+                    const cx = GP_STICK / 2, cy = GP_STICK / 2;
+                    const dx = locationX - cx, dy = locationY - cy;
+                    const dist = Math.sqrt(dx * dx + dy * dy);
+                    const clamp = Math.min(dist, GP_STICK_MAX);
+                    const nx = dist > 0 ? (dx / dist) * (clamp / GP_STICK_MAX) : 0;
+                    const ny = dist > 0 ? (dy / dist) * (clamp / GP_STICK_MAX) : 0;
+                    gpUpdateStick("left", nx, ny);
+                    gpStartFlush("left");
+                  }}
+                  onResponderMove={(e) => {
+                    const { locationX, locationY } = e.nativeEvent;
+                    const cx = GP_STICK / 2, cy = GP_STICK / 2;
+                    const dx = locationX - cx, dy = locationY - cy;
+                    const dist = Math.sqrt(dx * dx + dy * dy);
+                    const clamp = Math.min(dist, GP_STICK_MAX);
+                    const nx = dist > 0 ? (dx / dist) * (clamp / GP_STICK_MAX) : 0;
+                    const ny = dist > 0 ? (dy / dist) * (clamp / GP_STICK_MAX) : 0;
+                    gpUpdateStick("left", nx, ny);
+                  }}
+                  onResponderRelease={() => { gpUpdateStick("left", 0, 0); gpStopFlush("left"); }}
+                  onResponderTerminate={() => { gpUpdateStick("left", 0, 0); gpStopFlush("left"); }}
+                >
+                  <View
+                    style={{
+                      width: GP_KNOB,
+                      height: GP_KNOB,
+                      borderRadius: GP_KNOB / 2,
+                      backgroundColor: "#28283e",
+                      borderWidth: 2,
+                      borderColor: "#3e3e5a",
+                      borderTopColor: "#4a4a68",
+                      borderBottomColor: "#1a1a2e",
+                      shadowColor: "#000",
+                      shadowOffset: { width: 0, height: 3 },
+                      shadowOpacity: 0.7,
+                      shadowRadius: 5,
+                      elevation: 8,
+                    }}
+                  >
+                    <View style={{
+                      flex: 1,
+                      borderRadius: GP_KNOB / 2,
+                      borderWidth: 1,
+                      borderColor: "rgba(255,255,255,0.06)",
+                      borderTopColor: "rgba(255,255,255,0.12)",
+                      borderBottomColor: "transparent",
+                    }} />
+                  </View>
+                </View>
+
+                {/* D-Pad */}
+                <View style={{ width: 100, height: 100, alignItems: "center", justifyContent: "center" }}>
+                  {/* Up */}
+                  <Pressable
+                    onPressIn={() => joystickButtonDown("DPAD_UP")}
+                    onPressOut={() => joystickButtonUp("DPAD_UP")}
+                    style={({ pressed }) => ({
+                      position: "absolute",
+                      top: 0,
+                      width: 34,
+                      height: 34,
+                      borderRadius: 6,
+                      borderTopLeftRadius: 10,
+                      borderTopRightRadius: 10,
+                      backgroundColor: pressed ? "#3a3a4a" : "#1e1e2a",
+                      borderWidth: 1.5,
+                      borderColor: pressed ? "#5a5a7a" : "#2a2a3e",
+                      borderBottomWidth: 2,
+                      borderBottomColor: "#16162a",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      elevation: 3,
+                    })}
+                  >
+                    <Ionicons name="caret-up" size={16} color="#8888a0" />
+                  </Pressable>
+                  {/* Down */}
+                  <Pressable
+                    onPressIn={() => joystickButtonDown("DPAD_DOWN")}
+                    onPressOut={() => joystickButtonUp("DPAD_DOWN")}
+                    style={({ pressed }) => ({
+                      position: "absolute",
+                      bottom: 0,
+                      width: 34,
+                      height: 34,
+                      borderRadius: 6,
+                      borderBottomLeftRadius: 10,
+                      borderBottomRightRadius: 10,
+                      backgroundColor: pressed ? "#3a3a4a" : "#1e1e2a",
+                      borderWidth: 1.5,
+                      borderColor: pressed ? "#5a5a7a" : "#2a2a3e",
+                      borderBottomWidth: 2,
+                      borderBottomColor: "#16162a",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      elevation: 3,
+                    })}
+                  >
+                    <Ionicons name="caret-down" size={16} color="#8888a0" />
+                  </Pressable>
+                  {/* Left */}
+                  <Pressable
+                    onPressIn={() => joystickButtonDown("DPAD_LEFT")}
+                    onPressOut={() => joystickButtonUp("DPAD_LEFT")}
+                    style={({ pressed }) => ({
+                      position: "absolute",
+                      left: 0,
+                      width: 34,
+                      height: 34,
+                      borderRadius: 6,
+                      borderTopLeftRadius: 10,
+                      borderBottomLeftRadius: 10,
+                      backgroundColor: pressed ? "#3a3a4a" : "#1e1e2a",
+                      borderWidth: 1.5,
+                      borderColor: pressed ? "#5a5a7a" : "#2a2a3e",
+                      borderBottomWidth: 2,
+                      borderBottomColor: "#16162a",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      elevation: 3,
+                    })}
+                  >
+                    <Ionicons name="caret-back" size={16} color="#8888a0" />
+                  </Pressable>
+                  {/* Right */}
+                  <Pressable
+                    onPressIn={() => joystickButtonDown("DPAD_RIGHT")}
+                    onPressOut={() => joystickButtonUp("DPAD_RIGHT")}
+                    style={({ pressed }) => ({
+                      position: "absolute",
+                      right: 0,
+                      width: 34,
+                      height: 34,
+                      borderRadius: 6,
+                      borderTopRightRadius: 10,
+                      borderBottomRightRadius: 10,
+                      backgroundColor: pressed ? "#3a3a4a" : "#1e1e2a",
+                      borderWidth: 1.5,
+                      borderColor: pressed ? "#5a5a7a" : "#2a2a3e",
+                      borderBottomWidth: 2,
+                      borderBottomColor: "#16162a",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      elevation: 3,
+                    })}
+                  >
+                    <Ionicons name="caret-forward" size={16} color="#8888a0" />
+                  </Pressable>
+                  {/* Center */}
+                  <View style={{
+                    width: 28, height: 28, borderRadius: 4,
+                    backgroundColor: "#1e1e2a", borderWidth: 1, borderColor: "#2a2a3e",
+                  }} />
+                </View>
               </View>
-              <Text style={{ color: C.muted, fontSize: 9, marginTop: 8, letterSpacing: 1 }}>L-STICK</Text>
-            </View>
 
-            {/* Right side: Action buttons (diamond) */}
-            <View style={{ alignItems: "center", justifyContent: "center", width: 160, height: 160 }}>
-              {/* Y - top */}
-              <Pressable
-                onPressIn={() => joystickButtonDown("Y")}
-                onPressOut={() => joystickButtonUp("Y")}
-                style={({ pressed }) => [
-                  {
-                    position: "absolute",
-                    top: 0,
-                    width: 52,
-                    height: 52,
-                    borderRadius: 26,
-                    backgroundColor: pressed ? "#FFD60A30" : C.elevated,
-                    borderWidth: 1.5,
-                    borderColor: pressed ? "#FFD60A60" : C.border,
-                    alignItems: "center",
-                    justifyContent: "center",
-                  },
-                ]}
-              >
-                <Text style={{ color: "#FFD60A", fontSize: F.md, fontWeight: "800" }}>Y</Text>
-              </Pressable>
-              {/* X - left */}
-              <Pressable
-                onPressIn={() => joystickButtonDown("X")}
-                onPressOut={() => joystickButtonUp("X")}
-                style={({ pressed }) => [
-                  {
-                    position: "absolute",
-                    left: 0,
-                    top: "50%",
-                    marginTop: -26,
-                    width: 52,
-                    height: 52,
-                    borderRadius: 26,
-                    backgroundColor: pressed ? "#0A84FF30" : C.elevated,
-                    borderWidth: 1.5,
-                    borderColor: pressed ? "#0A84FF60" : C.border,
-                    alignItems: "center",
-                    justifyContent: "center",
-                  },
-                ]}
-              >
-                <Text style={{ color: "#0A84FF", fontSize: F.md, fontWeight: "800" }}>X</Text>
-              </Pressable>
-              {/* B - right */}
-              <Pressable
-                onPressIn={() => joystickButtonDown("B")}
-                onPressOut={() => joystickButtonUp("B")}
-                style={({ pressed }) => [
-                  {
-                    position: "absolute",
-                    right: 0,
-                    top: "50%",
-                    marginTop: -26,
-                    width: 52,
-                    height: 52,
-                    borderRadius: 26,
-                    backgroundColor: pressed ? "#FF453A30" : C.elevated,
-                    borderWidth: 1.5,
-                    borderColor: pressed ? "#FF453A60" : C.border,
-                    alignItems: "center",
-                    justifyContent: "center",
-                  },
-                ]}
-              >
-                <Text style={{ color: "#FF453A", fontSize: F.md, fontWeight: "800" }}>B</Text>
-              </Pressable>
-              {/* A - bottom */}
-              <Pressable
-                onPressIn={() => joystickButtonDown("A")}
-                onPressOut={() => joystickButtonUp("A")}
-                style={({ pressed }) => [
-                  {
-                    position: "absolute",
-                    bottom: 0,
-                    width: 52,
-                    height: 52,
-                    borderRadius: 26,
-                    backgroundColor: pressed ? "#30D15830" : C.elevated,
-                    borderWidth: 1.5,
-                    borderColor: pressed ? "#30D15860" : C.border,
-                    alignItems: "center",
-                    justifyContent: "center",
-                  },
-                ]}
-              >
-                <Text style={{ color: "#30D158", fontSize: F.md, fontWeight: "800" }}>A</Text>
-              </Pressable>
-            </View>
-          </View>
+              {/* ▸ CENTER: Back / Guide / Start */}
+              <View style={{ alignItems: "center", gap: 14, paddingTop: 10 }}>
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
+                  <Pressable
+                    onPress={() => joystickButtonTap("BACK")}
+                    style={({ pressed }) => ({
+                      backgroundColor: pressed ? "#3a3a4a" : "#1a1a28",
+                      borderRadius: 12,
+                      borderWidth: 1.5,
+                      borderColor: pressed ? "#5a5a7a" : "#2a2a3e",
+                      borderBottomWidth: 2,
+                      borderBottomColor: "#14142a",
+                      paddingHorizontal: 14,
+                      paddingVertical: 8,
+                      elevation: 3,
+                    })}
+                  >
+                    <Text style={{ color: "#7a7a90", fontSize: 9, fontWeight: "700", letterSpacing: 1 }}>BACK</Text>
+                  </Pressable>
+                  {/* Xbox Guide button */}
+                  <Pressable
+                    onPress={() => joystickButtonTap("GUIDE")}
+                    style={({ pressed }) => ({
+                      width: 40,
+                      height: 40,
+                      borderRadius: 20,
+                      backgroundColor: pressed ? "#2a4a2a" : "#1a1a28",
+                      borderWidth: 2,
+                      borderColor: pressed ? "#4a8a4a" : "#2a2a3e",
+                      borderTopColor: pressed ? "#5aaa5a" : "#3a3a50",
+                      borderBottomColor: "#14142a",
+                      borderBottomWidth: 3,
+                      alignItems: "center",
+                      justifyContent: "center",
+                      shadowColor: pressed ? "#4a8a4a" : "#000",
+                      shadowOffset: { width: 0, height: 2 },
+                      shadowOpacity: 0.5,
+                      shadowRadius: 4,
+                      elevation: 5,
+                    })}
+                  >
+                    <Ionicons name="logo-xbox" size={18} color="#5a8a5a" />
+                  </Pressable>
+                  <Pressable
+                    onPress={() => joystickButtonTap("START")}
+                    style={({ pressed }) => ({
+                      backgroundColor: pressed ? "#3a3a4a" : "#1a1a28",
+                      borderRadius: 12,
+                      borderWidth: 1.5,
+                      borderColor: pressed ? "#5a5a7a" : "#2a2a3e",
+                      borderBottomWidth: 2,
+                      borderBottomColor: "#14142a",
+                      paddingHorizontal: 14,
+                      paddingVertical: 8,
+                      elevation: 3,
+                    })}
+                  >
+                    <Text style={{ color: "#7a7a90", fontSize: 9, fontWeight: "700", letterSpacing: 1 }}>START</Text>
+                  </Pressable>
+                </View>
+              </View>
 
-          {/* Bottom: Start / Select + extra actions */}
-          <View
-            style={{
-              flexDirection: "row",
-              justifyContent: "center",
-              alignItems: "center",
-              gap: SP.md,
-              marginTop: SP.sm,
-              paddingHorizontal: SP.xs,
-            }}
-          >
-            <Pressable
-              onPress={() => joystickButtonTap("BACK")}
-              style={({ pressed }) => [
-                {
-                  backgroundColor: pressed ? C.primary + "25" : C.surface,
-                  borderRadius: R.sm,
-                  borderWidth: 1,
-                  borderColor: pressed ? C.primary + "40" : C.border,
-                  paddingHorizontal: 18,
-                  paddingVertical: 10,
-                  alignItems: "center",
-                },
-              ]}
-            >
-              <Text style={{ color: C.sub, fontSize: F.xs, fontWeight: "700", letterSpacing: 1 }}>BACK</Text>
-            </Pressable>
-            <Pressable
-              onPress={() => joystickButtonTap("GUIDE")}
-              style={({ pressed }) => [
-                {
-                  backgroundColor: pressed ? C.primary + "25" : C.surface,
-                  borderRadius: 22,
-                  borderWidth: 1,
-                  borderColor: pressed ? C.primary + "40" : C.border,
-                  width: 44,
-                  height: 44,
-                  alignItems: "center",
-                  justifyContent: "center",
-                },
-              ]}
-            >
-              <Ionicons name="logo-xbox" size={18} color={C.muted} />
-            </Pressable>
-            <Pressable
-              onPress={() => joystickButtonTap("START")}
-              style={({ pressed }) => [
-                {
-                  backgroundColor: pressed ? C.primary + "25" : C.surface,
-                  borderRadius: R.sm,
-                  borderWidth: 1,
-                  borderColor: pressed ? C.primary + "40" : C.border,
-                  paddingHorizontal: 18,
-                  paddingVertical: 10,
-                  alignItems: "center",
-                },
-              ]}
-            >
-              <Text style={{ color: C.sub, fontSize: F.xs, fontWeight: "700", letterSpacing: 1 }}>START</Text>
-            </Pressable>
+              {/* ▸ RIGHT COLUMN: A/B/X/Y + R-Stick */}
+              <View style={{ alignItems: "center", gap: 14, width: 140 }}>
+                {/* A/B/X/Y face buttons (diamond, glass texture) */}
+                <View style={{ width: 130, height: 130, alignItems: "center", justifyContent: "center" }}>
+                  {/* Y - top (yellow) */}
+                  <Pressable
+                    onPressIn={() => joystickButtonDown("Y")}
+                    onPressOut={() => joystickButtonUp("Y")}
+                    style={({ pressed }) => ({
+                      position: "absolute",
+                      top: 0,
+                      width: 44,
+                      height: 44,
+                      borderRadius: 22,
+                      backgroundColor: pressed ? "#FFD60A40" : "#1e1e2a",
+                      borderWidth: 2,
+                      borderColor: pressed ? "#FFD60A80" : "#2e2e42",
+                      borderTopColor: pressed ? "#FFD60A99" : "#3a3a50",
+                      borderBottomColor: pressed ? "#FFD60A30" : "#14142a",
+                      borderBottomWidth: 3,
+                      alignItems: "center",
+                      justifyContent: "center",
+                      shadowColor: pressed ? "#FFD60A" : "#000",
+                      shadowOffset: { width: 0, height: 2 },
+                      shadowOpacity: pressed ? 0.6 : 0.4,
+                      shadowRadius: 4,
+                      elevation: 6,
+                      overflow: "hidden",
+                    })}
+                  >
+                    <View style={{ position: "absolute", top: 0, left: 0, right: 0, height: "45%", backgroundColor: "rgba(255,255,255,0.08)", borderTopLeftRadius: 22, borderTopRightRadius: 22 }} />
+                    <Text style={{ color: "#FFD60A", fontSize: 15, fontWeight: "900", textShadowColor: "#FFD60A50", textShadowOffset: { width: 0, height: 0 }, textShadowRadius: 4 }}>Y</Text>
+                  </Pressable>
+                  {/* X - left (blue) */}
+                  <Pressable
+                    onPressIn={() => joystickButtonDown("X")}
+                    onPressOut={() => joystickButtonUp("X")}
+                    style={({ pressed }) => ({
+                      position: "absolute",
+                      left: 0,
+                      top: "50%",
+                      marginTop: -22,
+                      width: 44,
+                      height: 44,
+                      borderRadius: 22,
+                      backgroundColor: pressed ? "#0A84FF40" : "#1e1e2a",
+                      borderWidth: 2,
+                      borderColor: pressed ? "#0A84FF80" : "#2e2e42",
+                      borderTopColor: pressed ? "#0A84FF99" : "#3a3a50",
+                      borderBottomColor: pressed ? "#0A84FF30" : "#14142a",
+                      borderBottomWidth: 3,
+                      alignItems: "center",
+                      justifyContent: "center",
+                      shadowColor: pressed ? "#0A84FF" : "#000",
+                      shadowOffset: { width: 0, height: 2 },
+                      shadowOpacity: pressed ? 0.6 : 0.4,
+                      shadowRadius: 4,
+                      elevation: 6,
+                      overflow: "hidden",
+                    })}
+                  >
+                    <View style={{ position: "absolute", top: 0, left: 0, right: 0, height: "45%", backgroundColor: "rgba(255,255,255,0.08)", borderTopLeftRadius: 22, borderTopRightRadius: 22 }} />
+                    <Text style={{ color: "#0A84FF", fontSize: 15, fontWeight: "900", textShadowColor: "#0A84FF50", textShadowOffset: { width: 0, height: 0 }, textShadowRadius: 4 }}>X</Text>
+                  </Pressable>
+                  {/* B - right (red) */}
+                  <Pressable
+                    onPressIn={() => joystickButtonDown("B")}
+                    onPressOut={() => joystickButtonUp("B")}
+                    style={({ pressed }) => ({
+                      position: "absolute",
+                      right: 0,
+                      top: "50%",
+                      marginTop: -22,
+                      width: 44,
+                      height: 44,
+                      borderRadius: 22,
+                      backgroundColor: pressed ? "#FF453A40" : "#1e1e2a",
+                      borderWidth: 2,
+                      borderColor: pressed ? "#FF453A80" : "#2e2e42",
+                      borderTopColor: pressed ? "#FF453A99" : "#3a3a50",
+                      borderBottomColor: pressed ? "#FF453A30" : "#14142a",
+                      borderBottomWidth: 3,
+                      alignItems: "center",
+                      justifyContent: "center",
+                      shadowColor: pressed ? "#FF453A" : "#000",
+                      shadowOffset: { width: 0, height: 2 },
+                      shadowOpacity: pressed ? 0.6 : 0.4,
+                      shadowRadius: 4,
+                      elevation: 6,
+                      overflow: "hidden",
+                    })}
+                  >
+                    <View style={{ position: "absolute", top: 0, left: 0, right: 0, height: "45%", backgroundColor: "rgba(255,255,255,0.08)", borderTopLeftRadius: 22, borderTopRightRadius: 22 }} />
+                    <Text style={{ color: "#FF453A", fontSize: 15, fontWeight: "900", textShadowColor: "#FF453A50", textShadowOffset: { width: 0, height: 0 }, textShadowRadius: 4 }}>B</Text>
+                  </Pressable>
+                  {/* A - bottom (green) */}
+                  <Pressable
+                    onPressIn={() => joystickButtonDown("A")}
+                    onPressOut={() => joystickButtonUp("A")}
+                    style={({ pressed }) => ({
+                      position: "absolute",
+                      bottom: 0,
+                      width: 44,
+                      height: 44,
+                      borderRadius: 22,
+                      backgroundColor: pressed ? "#30D15840" : "#1e1e2a",
+                      borderWidth: 2,
+                      borderColor: pressed ? "#30D15880" : "#2e2e42",
+                      borderTopColor: pressed ? "#30D15899" : "#3a3a50",
+                      borderBottomColor: pressed ? "#30D15830" : "#14142a",
+                      borderBottomWidth: 3,
+                      alignItems: "center",
+                      justifyContent: "center",
+                      shadowColor: pressed ? "#30D158" : "#000",
+                      shadowOffset: { width: 0, height: 2 },
+                      shadowOpacity: pressed ? 0.6 : 0.4,
+                      shadowRadius: 4,
+                      elevation: 6,
+                      overflow: "hidden",
+                    })}
+                  >
+                    <View style={{ position: "absolute", top: 0, left: 0, right: 0, height: "45%", backgroundColor: "rgba(255,255,255,0.08)", borderTopLeftRadius: 22, borderTopRightRadius: 22 }} />
+                    <Text style={{ color: "#30D158", fontSize: 15, fontWeight: "900", textShadowColor: "#30D15850", textShadowOffset: { width: 0, height: 0 }, textShadowRadius: 4 }}>A</Text>
+                  </Pressable>
+                </View>
+
+                {/* R-Stick */}
+                <View
+                  style={{
+                    width: GP_STICK,
+                    height: GP_STICK,
+                    borderRadius: GP_STICK / 2,
+                    backgroundColor: "#141420",
+                    borderWidth: 2,
+                    borderColor: "#2a2a40",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    shadowColor: "#000",
+                    shadowOffset: { width: 0, height: 4 },
+                    shadowOpacity: 0.6,
+                    shadowRadius: 6,
+                    elevation: 6,
+                  }}
+                  onStartShouldSetResponder={() => true}
+                  onMoveShouldSetResponder={() => true}
+                  onResponderGrant={(e) => {
+                    const { locationX, locationY } = e.nativeEvent;
+                    const cx = GP_STICK / 2, cy = GP_STICK / 2;
+                    const dx = locationX - cx, dy = locationY - cy;
+                    const dist = Math.sqrt(dx * dx + dy * dy);
+                    const clamp = Math.min(dist, GP_STICK_MAX);
+                    const nx = dist > 0 ? (dx / dist) * (clamp / GP_STICK_MAX) : 0;
+                    const ny = dist > 0 ? (dy / dist) * (clamp / GP_STICK_MAX) : 0;
+                    gpUpdateStick("right", nx, ny);
+                    gpStartFlush("right");
+                  }}
+                  onResponderMove={(e) => {
+                    const { locationX, locationY } = e.nativeEvent;
+                    const cx = GP_STICK / 2, cy = GP_STICK / 2;
+                    const dx = locationX - cx, dy = locationY - cy;
+                    const dist = Math.sqrt(dx * dx + dy * dy);
+                    const clamp = Math.min(dist, GP_STICK_MAX);
+                    const nx = dist > 0 ? (dx / dist) * (clamp / GP_STICK_MAX) : 0;
+                    const ny = dist > 0 ? (dy / dist) * (clamp / GP_STICK_MAX) : 0;
+                    gpUpdateStick("right", nx, ny);
+                  }}
+                  onResponderRelease={() => { gpUpdateStick("right", 0, 0); gpStopFlush("right"); }}
+                  onResponderTerminate={() => { gpUpdateStick("right", 0, 0); gpStopFlush("right"); }}
+                >
+                  <View
+                    style={{
+                      width: GP_KNOB,
+                      height: GP_KNOB,
+                      borderRadius: GP_KNOB / 2,
+                      backgroundColor: "#28283e",
+                      borderWidth: 2,
+                      borderColor: "#3e3e5a",
+                      borderTopColor: "#4a4a68",
+                      borderBottomColor: "#1a1a2e",
+                      shadowColor: "#000",
+                      shadowOffset: { width: 0, height: 3 },
+                      shadowOpacity: 0.7,
+                      shadowRadius: 5,
+                      elevation: 8,
+                    }}
+                  >
+                    <View style={{
+                      flex: 1,
+                      borderRadius: GP_KNOB / 2,
+                      borderWidth: 1,
+                      borderColor: "rgba(255,255,255,0.06)",
+                      borderTopColor: "rgba(255,255,255,0.12)",
+                      borderBottomColor: "transparent",
+                    }} />
+                  </View>
+                </View>
+              </View>
+            </View>
           </View>
         </View>
       </SlideLeftModal>
