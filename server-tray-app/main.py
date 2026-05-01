@@ -864,6 +864,23 @@ class KillRequest(BaseModel):
     name: str = None
 
 
+# ── Gamepad models ──
+class GamepadStickRequest(BaseModel):
+    stick: str = "left"  # left | right
+    x: float = 0.0      # -1.0 to 1.0
+    y: float = 0.0      # -1.0 to 1.0
+
+
+class GamepadButtonRequest(BaseModel):
+    button: str          # A, B, X, Y, LB, RB, START, BACK, etc.
+    action: str = "tap"  # tap | down | up
+
+
+class GamepadTriggerRequest(BaseModel):
+    trigger: str         # left | right
+    value: float = 0.0   # 0.0 to 1.0
+
+
 @app.post("/process/kill", dependencies=[Depends(verify_pin)])
 def kill_process(req: KillRequest):
     try:
@@ -1629,6 +1646,131 @@ def mouse_up(button: str = "left"):
     """Release a mouse button (for drag end)."""
     try:
         pyautogui.mouseUp(button=button, _pause=False)
+        return {"status": "success"}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+# ── Virtual Gamepad (vgamepad / ViGEmBus) ──
+
+_vgamepad_instance = None
+_vgamepad_lock = threading.Lock()
+
+GAMEPAD_BUTTON_MAP = {
+    "A": 0x1000,
+    "B": 0x2000,
+    "X": 0x4000,
+    "Y": 0x8000,
+    "LB": 0x0100,
+    "RB": 0x0200,
+    "START": 0x0010,
+    "BACK": 0x0020,
+    "DPAD_UP": 0x0001,
+    "DPAD_DOWN": 0x0002,
+    "DPAD_LEFT": 0x0004,
+    "DPAD_RIGHT": 0x0008,
+    "LEFT_THUMB": 0x0040,
+    "RIGHT_THUMB": 0x0080,
+    "GUIDE": 0x0400,
+}
+
+
+def _get_gamepad():
+    global _vgamepad_instance
+    with _vgamepad_lock:
+        if _vgamepad_instance is None:
+            import vgamepad as vg
+            _vgamepad_instance = vg.VX360Gamepad()
+        return _vgamepad_instance
+
+
+@app.post("/gamepad/connect", dependencies=[Depends(verify_pin)])
+def gamepad_connect():
+    try:
+        gp = _get_gamepad()
+        gp.reset()
+        gp.update()
+        return {"status": "success", "message": "Virtual gamepad connected"}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.post("/gamepad/disconnect", dependencies=[Depends(verify_pin)])
+def gamepad_disconnect():
+    global _vgamepad_instance
+    try:
+        with _vgamepad_lock:
+            if _vgamepad_instance is not None:
+                _vgamepad_instance.reset()
+                _vgamepad_instance.update()
+                _vgamepad_instance = None
+        return {"status": "success", "message": "Virtual gamepad disconnected"}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.post("/gamepad/stick", dependencies=[Depends(verify_pin)])
+def gamepad_stick(req: GamepadStickRequest):
+    try:
+        gp = _get_gamepad()
+        x = max(-1.0, min(1.0, req.x))
+        y = max(-1.0, min(1.0, req.y))
+        if req.stick == "right":
+            gp.right_joystick_float(x_value_float=x, y_value_float=y)
+        else:
+            gp.left_joystick_float(x_value_float=x, y_value_float=y)
+        gp.update()
+        return {"status": "success"}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.post("/gamepad/button", dependencies=[Depends(verify_pin)])
+def gamepad_button(req: GamepadButtonRequest):
+    try:
+        gp = _get_gamepad()
+        import vgamepad as vg
+        btn_val = GAMEPAD_BUTTON_MAP.get(req.button.upper())
+        if btn_val is None:
+            return {"error": f"Unknown button: {req.button}"}
+        btn = vg.XUSB_BUTTON(btn_val)
+        action = req.action.lower().strip()
+        if action == "down":
+            gp.press_button(button=btn)
+        elif action == "up":
+            gp.release_button(button=btn)
+        else:
+            gp.press_button(button=btn)
+            gp.update()
+            time.sleep(0.06)
+            gp.release_button(button=btn)
+        gp.update()
+        return {"status": "success"}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.post("/gamepad/trigger", dependencies=[Depends(verify_pin)])
+def gamepad_trigger(req: GamepadTriggerRequest):
+    try:
+        gp = _get_gamepad()
+        val = max(0.0, min(1.0, req.value))
+        if req.trigger == "right":
+            gp.right_trigger_float(value_float=val)
+        else:
+            gp.left_trigger_float(value_float=val)
+        gp.update()
+        return {"status": "success"}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.post("/gamepad/reset", dependencies=[Depends(verify_pin)])
+def gamepad_reset():
+    try:
+        gp = _get_gamepad()
+        gp.reset()
+        gp.update()
         return {"status": "success"}
     except Exception as e:
         return {"error": str(e)}
